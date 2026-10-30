@@ -9,6 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -282,15 +284,79 @@ fun FullScreenNoteEditor(
         }
     }
 
-    // Pickers
+    // Audio Recording State
+    var isRecordingAudio by remember { mutableStateOf(false) }
+    var currentRecorder by remember { mutableStateOf<android.media.MediaRecorder?>(null) }
+    var currentRecordingFile by remember { mutableStateOf<java.io.File?>(null) }
+    var recordingSeconds by remember { mutableStateOf(0) }
+
+    LaunchedEffect(isRecordingAudio) {
+        if (isRecordingAudio) {
+            recordingSeconds = 0
+            while (isRecordingAudio) {
+                kotlinx.coroutines.delay(1000)
+                recordingSeconds++
+            }
+        }
+    }
+
+    fun startRecording() {
+        try {
+            val outputFile = com.example.util.MediaStorageHelper.createRecordingFile(context)
+            val recorder = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                android.media.MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                android.media.MediaRecorder()
+            }
+            recorder.apply {
+                setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                setOutputFile(outputFile.absolutePath)
+                prepare()
+                start()
+            }
+            currentRecorder = recorder
+            currentRecordingFile = outputFile
+            isRecordingAudio = true
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Erro ao iniciar gravação: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun stopRecording() {
+        try {
+            currentRecorder?.stop()
+            currentRecorder?.release()
+        } catch (_: Exception) {}
+        currentRecorder = null
+        isRecordingAudio = false
+        val file = currentRecordingFile
+        if (file != null && file.exists()) {
+            val dateStr = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+            insertBlock(AudioBlock(url = file.absolutePath, title = "Gravado $dateStr", volume = 1f, isLoop = false))
+            android.widget.Toast.makeText(context, "Áudio gravado salvo em CitraRecord!", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            startRecording()
+        } else {
+            android.widget.Toast.makeText(context, "Permissão de microfone necessária para gravar áudio", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Pickers with permanent internal storage persistence
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (_: Exception) {}
-            bgUri = uri.toString()
+            val localPath = com.example.util.MediaStorageHelper.saveNoteImage(context, uri) ?: uri.toString()
+            bgUri = localPath
         }
     }
 
@@ -298,7 +364,8 @@ fun FullScreenNoteEditor(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            insertBlock(ImageBlock(url = uri.toString(), alt = "Imagem", widthPercent = 100, alignment = "center"))
+            val localPath = com.example.util.MediaStorageHelper.saveNoteImage(context, uri) ?: uri.toString()
+            insertBlock(ImageBlock(url = localPath, alt = "Imagem", widthPercent = 100, alignment = "center"))
         }
     }
 
@@ -306,7 +373,8 @@ fun FullScreenNoteEditor(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            insertBlock(AudioBlock(url = uri.toString(), title = "Áudio importado", volume = 1f, isLoop = false))
+            val localPath = com.example.util.MediaStorageHelper.saveNoteAudio(context, uri) ?: uri.toString()
+            insertBlock(AudioBlock(url = localPath, title = "Áudio importado", volume = 1f, isLoop = false))
         }
     }
 
@@ -702,8 +770,15 @@ fun FullScreenNoteEditor(
                             },
                             onBackspaceOnEmpty = {
                                 pushHistory()
+                                val targetIdx = (index - 1).coerceAtLeast(0)
                                 blocks = blocks.toMutableList().apply { removeAt(index) }
-                                focusedBlockIndex = (index - 1).coerceAtLeast(0)
+                                if (blocks.isNotEmpty()) {
+                                    val prevBlock = blocks.getOrNull(targetIdx)
+                                    if (prevBlock != null) {
+                                        focusedBlockIndex = targetIdx
+                                        focusBlock(prevBlock.id)
+                                    }
+                                }
                             },
                             onToggleFullscreen = {
                                 fullScreenBlockIndex = index
@@ -720,6 +795,28 @@ fun FullScreenNoteEditor(
                                 pushHistory()
                                 blocks = blocks.toMutableList().apply { removeAt(index) }
                             }
+                        )
+                    }
+
+                    // Empty Area at bottom: Double click creates paragraph, Backspace on empty deletes it
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 280.dp)
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onDoubleTap = {
+                                            pushHistory()
+                                            val newBlock = TextBlock(text = "")
+                                            val newBlockId = newBlock.id
+                                            blockFocusRequesters[newBlockId] = FocusRequester()
+                                            blocks = blocks + newBlock
+                                            focusedBlockIndex = blocks.size - 1
+                                            focusBlock(newBlockId)
+                                        }
+                                    )
+                                }
                         )
                     }
                 }
@@ -859,6 +956,17 @@ fun FullScreenNoteEditor(
                                     audioPickerLauncher.launch("audio/*")
                                 }
 
+                                ToolbarToolButton(
+                                    label = if (isRecordingAudio) "Parar" else "Gravar",
+                                    icon = if (isRecordingAudio) Icons.Default.Stop else Icons.Default.Mic
+                                ) {
+                                    if (isRecordingAudio) {
+                                        stopRecording()
+                                    } else {
+                                        recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
+                                }
+
                                 VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
                                 // 4. ADVANCED TOGGLE BUTTON
@@ -935,6 +1043,51 @@ fun FullScreenNoteEditor(
                                         showLinkToEntityDialog = true
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                if (isRecordingAudio) {
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 24.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(Color.Red, CircleShape)
+                            )
+                            val minutes = recordingSeconds / 60
+                            val seconds = recordingSeconds % 60
+                            Text(
+                                text = String.format("%02d:%02d", minutes, seconds),
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                text = "Gravando em CitraRecord...",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Button(
+                                onClick = { stopRecording() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Concluir", fontSize = 12.sp)
                             }
                         }
                     }

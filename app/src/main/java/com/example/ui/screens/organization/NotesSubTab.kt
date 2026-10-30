@@ -359,18 +359,35 @@ fun SquareNoteCard(
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt))
     }
 
-    // Strip raw markdown symbols for a clean excerpt without exposing image or audio links
+    val hasAudio = remember(note.content) {
+        note.content.contains("![audio:") || note.content.contains("audio:")
+    }
+    val hasImage = remember(note.content, note.backgroundImageUri) {
+        note.backgroundImageUri != null || Regex("!\\[(.*?)\\]\\(.*?\\)").containsMatchIn(note.content)
+    }
+
+    // Strip raw markdown symbols for a clean excerpt without exposing distorted image or audio raw markdown
     val cleanExcerpt = remember(note.content) {
         note.content
             .lines()
             .map { it.trim() }
-            .filter { it.isNotBlank() && !it.startsWith("---") && !it.startsWith("|") }
+            .filter { line ->
+                line.isNotBlank() &&
+                !line.startsWith("---") &&
+                !line.startsWith("|") &&
+                !line.startsWith("```") &&
+                !line.startsWith("$$") &&
+                !line.startsWith("![audio:") &&
+                !line.startsWith("![")
+            }
             .joinToString(" ") { line ->
-                line.replace(Regex("!\\[audio:(.*?)\\]\\(.*?\\)"), "[Áudio: $1]")
-                    .replace(Regex("!\\[(.*?)\\]\\(.*?\\)"), "")
-                    .replace(Regex("^[#*\\-+\\s>]+"), "")
+                line.replace(Regex("!\\[audio:.*?\\]\\(.*?\\)"), "")
+                    .replace(Regex("!\\[.*?\\]\\(.*?\\)"), "")
+                    .replace(Regex("<.*?>"), "")
+                    .replace(Regex("[#*`~=_]+"), "")
                     .replace(Regex("\\[(x| )\\]"), "")
             }
+            .replace(Regex("\\s+"), " ")
             .trim()
             .take(120)
     }
@@ -490,7 +507,7 @@ fun SquareNoteCard(
                 }
             }
 
-            // Bottom row: Minimalist Date & Indicator
+            // Bottom row: Date & Media Badges (Image / Audio)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -511,13 +528,26 @@ fun SquareNoteCard(
                     )
                 }
 
-                if (note.backgroundImageUri != null) {
-                    Icon(
-                        imageVector = Icons.Default.Image,
-                        contentDescription = "Com imagem de fundo",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(13.dp)
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (hasImage) {
+                        Icon(
+                            imageVector = Icons.Default.Image,
+                            contentDescription = "Contém Imagem",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    if (hasAudio) {
+                        Icon(
+                            imageVector = Icons.Default.Audiotrack,
+                            contentDescription = "Contém Áudio",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
         }

@@ -15,6 +15,19 @@ object InlineMarkdownHelper {
     val HighlightBlue = Color(0xFFBFDBFE)
     val HighlightOrange = Color(0xFFFED7AA)
 
+    fun toggleOrWrap(
+        text: String,
+        prefix: String,
+        suffix: String
+    ): String {
+        val trimmed = text.trim()
+        return if (trimmed.startsWith(prefix) && trimmed.endsWith(suffix) && trimmed.length >= prefix.length + suffix.length) {
+            trimmed.removePrefix(prefix).removeSuffix(suffix)
+        } else {
+            "$prefix$text$suffix"
+        }
+    }
+
     fun wrapSelection(
         text: String,
         selectionStart: Int,
@@ -33,9 +46,17 @@ object InlineMarkdownHelper {
             Pair(newText, newCursor)
         } else {
             val selected = text.substring(minPos, maxPos)
-            val newText = text.substring(0, minPos) + prefix + selected + suffix + text.substring(maxPos)
-            val newCursor = minPos + prefix.length + selected.length + suffix.length
-            Pair(newText, newCursor)
+            if (selected.startsWith(prefix) && selected.endsWith(suffix) && selected.length >= prefix.length + suffix.length) {
+                // Toggle off
+                val unwrapped = selected.removePrefix(prefix).removeSuffix(suffix)
+                val newText = text.substring(0, minPos) + unwrapped + text.substring(maxPos)
+                val newCursor = minPos + unwrapped.length
+                Pair(newText, newCursor)
+            } else {
+                val newText = text.substring(0, minPos) + prefix + selected + suffix + text.substring(maxPos)
+                val newCursor = minPos + prefix.length + selected.length + suffix.length
+                Pair(newText, newCursor)
+            }
         }
     }
 
@@ -156,7 +177,29 @@ object InlineMarkdownHelper {
                     }
                 }
 
-                // 6. Inline code: `text`
+                // 6. Inline code: `text` or <>text</> or <code>text</code>
+                if (rawText.startsWith("<>", cursor)) {
+                    val end = rawText.indexOf("</>", cursor + 2)
+                    if (end != -1) {
+                        val inner = rawText.substring(cursor + 2, end)
+                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBgColor, color = if (isDark) Color(0xFF38BDF8) else Color(0xFF0F172A))) {
+                            append(" $inner ")
+                        }
+                        cursor = end + 3
+                        continue
+                    }
+                }
+                if (rawText.startsWith("<code>", cursor)) {
+                    val end = rawText.indexOf("</code>", cursor + 6)
+                    if (end != -1) {
+                        val inner = rawText.substring(cursor + 6, end)
+                        withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBgColor, color = if (isDark) Color(0xFF38BDF8) else Color(0xFF0F172A))) {
+                            append(" $inner ")
+                        }
+                        cursor = end + 7
+                        continue
+                    }
+                }
                 if (rawText.startsWith("`", cursor) && !rawText.startsWith("```", cursor)) {
                     val end = rawText.indexOf("`", cursor + 1)
                     if (end != -1) {

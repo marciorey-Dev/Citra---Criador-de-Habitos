@@ -182,13 +182,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _openCreateNoteTrigger.value = false
     }
 
-    // What's New dialog for v0.5.0
+    // What's New dialog for v0.7.4
     private val _whatsNewVisible = MutableStateFlow(false)
     val whatsNewVisible: StateFlow<Boolean> = _whatsNewVisible.asStateFlow()
 
     fun dismissWhatsNew() {
-        preferencesManager.setLastSeenWhatsNewVersion("0.5.0")
+        preferencesManager.setLastSeenWhatsNewVersion("0.7.4")
         _whatsNewVisible.value = false
+    }
+
+    // Sync Frequency and Timestamp
+    val syncFrequency: StateFlow<String> = preferencesManager.syncFrequency
+    fun setSyncFrequency(frequency: String) = preferencesManager.setSyncFrequency(frequency)
+    private val _lastSyncTimestamp = MutableStateFlow(preferencesManager.getLastSyncTimestamp())
+    val lastSyncTimestamp: StateFlow<Long> = _lastSyncTimestamp.asStateFlow()
+
+    fun updateLastSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
+        preferencesManager.setLastSyncTimestamp(timestamp)
+        _lastSyncTimestamp.value = timestamp
     }
 
     // Flag indicating whether note full screen editor is currently visible
@@ -202,7 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         NotificationHelper.initNotificationChannels(application)
         restoreTimerSnapshotOnStartup()
-        if (preferencesManager.getLastSeenWhatsNewVersion() != "0.5.0") {
+        if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.4") {
             _whatsNewVisible.value = true
         }
         viewModelScope.launch {

@@ -108,6 +108,9 @@ class AuthRepository(private val context: Context) {
     private val _suggestedUsers = MutableStateFlow<List<UserProfile>>(emptyList())
     val suggestedUsers: StateFlow<List<UserProfile>> = _suggestedUsers.asStateFlow()
 
+    private val _isAuthReady = MutableStateFlow(false)
+    val isAuthReady: StateFlow<Boolean> = _isAuthReady.asStateFlow()
+
     init {
         // Load initial state safely
         auth?.addAuthStateListener { firebaseAuth ->
@@ -120,10 +123,15 @@ class AuthRepository(private val context: Context) {
                 loadGuestProfile()
             } else {
                 _currentUser.value = null
+                _isAuthReady.value = true
             }
         }
-        if (auth == null && _isGuestMode.value) {
-            loadGuestProfile()
+        if (auth == null) {
+            if (_isGuestMode.value) {
+                loadGuestProfile()
+            } else {
+                _isAuthReady.value = true
+            }
         }
     }
 
@@ -145,7 +153,8 @@ class AuthRepository(private val context: Context) {
     private fun loadGuestProfile() {
         val savedName = prefs.getString("guest_name", "Viajante Citra") ?: "Viajante Citra"
         val savedUsername = prefs.getString("guest_username", "@viajante") ?: "@viajante"
-        val savedPhoto = prefs.getString("guest_photo", null)
+        val localAvatar = java.io.File(context.filesDir, "profile/profile_avatar.jpg")
+        val savedPhoto = if (localAvatar.exists()) localAvatar.absolutePath else prefs.getString("guest_photo", null)
         val savedId = prefs.getString("guest_friend_id", null) ?: generateFriendId().also {
             prefs.edit().putString("guest_friend_id", it).apply()
         }
@@ -160,10 +169,13 @@ class AuthRepository(private val context: Context) {
             isPrivate = isPrivate,
             isGuest = true
         )
+        _isAuthReady.value = true
     }
 
     private fun loadUserProfile(uid: String, authDisplayName: String?, authPhotoUrl: String?) {
         scope.launch {
+            val localAvatar = java.io.File(context.filesDir, "profile/profile_avatar.jpg")
+            val defaultPhoto = if (localAvatar.exists()) localAvatar.absolutePath else authPhotoUrl
             try {
                 val currentFirestore = firestore
                 if (currentFirestore == null) {
@@ -171,21 +183,24 @@ class AuthRepository(private val context: Context) {
                         uid = uid,
                         displayName = authDisplayName ?: "Usuário Citra",
                         username = "@" + uid.take(6),
-                        photoUrl = authPhotoUrl,
+                        photoUrl = defaultPhoto,
                         friendId = generateFriendId(),
                         isPrivate = false,
                         isGuest = false
                     )
+                    _isAuthReady.value = true
                     return@launch
                 }
 
                 val doc = currentFirestore.collection("users").document(uid).get().await()
                 if (doc.exists()) {
+                    val firestorePhoto = doc.getString("photoUrl")
+                    val effectivePhoto = if (localAvatar.exists()) localAvatar.absolutePath else (firestorePhoto ?: authPhotoUrl)
                     val profile = UserProfile(
                         uid = uid,
                         displayName = doc.getString("displayName") ?: authDisplayName ?: "Usuário Citra",
                         username = doc.getString("username") ?: ("@" + uid.take(6)),
-                        photoUrl = doc.getString("photoUrl") ?: authPhotoUrl,
+                        photoUrl = effectivePhoto,
                         friendId = doc.getString("friendId") ?: generateFriendId(),
                         isPrivate = doc.getBoolean("isPrivate") ?: false,
                         isGuest = false,
@@ -203,7 +218,7 @@ class AuthRepository(private val context: Context) {
                         uid = uid,
                         displayName = authDisplayName ?: "Usuário Citra",
                         username = autoUsername,
-                        photoUrl = authPhotoUrl,
+                        photoUrl = defaultPhoto,
                         friendId = initialFriendId,
                         isPrivate = false,
                         isGuest = false
@@ -230,11 +245,13 @@ class AuthRepository(private val context: Context) {
                     uid = uid,
                     displayName = authDisplayName ?: "Usuário Citra",
                     username = "@" + uid.take(6),
-                    photoUrl = authPhotoUrl,
+                    photoUrl = defaultPhoto,
                     friendId = generateFriendId(),
                     isPrivate = false,
                     isGuest = false
                 )
+            } finally {
+                _isAuthReady.value = true
             }
         }
     }
@@ -242,7 +259,8 @@ class AuthRepository(private val context: Context) {
     suspend fun signInWithGoogle(): Result<UserProfile> {
         val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
         return try {
-            val serverClientId = context.getString(R.string.default_web_client_id)
+            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            val serverClientId = if (resId != 0) context.getString(resId) else ""
             if (serverClientId.isBlank() || serverClientId == "default_web_client_id") {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))
             }
@@ -609,6 +627,26 @@ class AuthRepository(private val context: Context) {
                 currentFirestore.collection("friendRequests").document(reqId).delete().await()
             }
             _pendingRequests.value = _pendingRequests.value.filter { it.friendUserId != request.friendUserId }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun removeFriend(friendUserId: String): Result<Unit> {
+        val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
+        val currentFirestore = firestore
+        _friends.value = _friends.value.filter { it.friendUserId != friendUserId }
+        if (currentFirestore == null || myUser.isGuest) {
+            return Result.success(Unit)
+        }
+        return try {
+            currentFirestore.collection("users").document(myUser.uid)
+                .collection("friends").document(friendUserId).delete().await()
+            try {
+                currentFirestore.collection("users").document(friendUserId)
+                    .collection("friends").document(myUser.uid).delete().await()
+            } catch (_: Exception) {}
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

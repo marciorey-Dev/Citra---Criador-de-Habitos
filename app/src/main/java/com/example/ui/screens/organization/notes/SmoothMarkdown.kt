@@ -59,7 +59,8 @@ data class ImageBlock(
     val alt: String = "",
     val url: String = "",
     val widthPercent: Int = 100, // 25, 50, 75, 100
-    val alignment: String = "center" // "left", "center", "right"
+    val alignment: String = "center", // "left", "center", "right"
+    val sideText: String = "" // text next to image when 25%, 50%, or 75%
 ) : VisualBlock
 
 data class AudioBlock(
@@ -278,8 +279,8 @@ object SmoothMarkdownConverter {
                 else -> {
                     if (trimmed.isNotBlank()) {
                         blocks.add(TextBlock(text = line))
-                    } else if (blocks.isNotEmpty() && blocks.last() is TextBlock) {
-                        // Empty line between paragraphs
+                    } else if (i > 0 && lines[i - 1].trim().isBlank() && blocks.isNotEmpty() && blocks.last() !is TextBlock) {
+                        // Only add explicit blank block if multiple empty lines exist intentionally
                         blocks.add(TextBlock(text = ""))
                     }
                     i++
@@ -287,11 +288,22 @@ object SmoothMarkdownConverter {
             }
         }
 
-        if (blocks.isEmpty()) {
-            blocks.add(TextBlock(text = ""))
+        // Clean up redundant consecutive empty text blocks to guarantee no compounding spaces
+        val cleanBlocks = mutableListOf<VisualBlock>()
+        for (b in blocks) {
+            if (b is TextBlock && b.text.isBlank()) {
+                if (cleanBlocks.isNotEmpty() && cleanBlocks.last() is TextBlock && (cleanBlocks.last() as TextBlock).text.isBlank()) {
+                    continue // Skip consecutive empty blocks
+                }
+            }
+            cleanBlocks.add(b)
         }
 
-        return blocks
+        if (cleanBlocks.isEmpty()) {
+            cleanBlocks.add(TextBlock(text = ""))
+        }
+
+        return cleanBlocks
     }
 
     /**

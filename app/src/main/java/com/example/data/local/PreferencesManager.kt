@@ -47,6 +47,23 @@ class PreferencesManager(context: Context) {
     private val _hasSeenTutorial = MutableStateFlow(prefs.getBoolean("has_seen_tutorial", true))
     val hasSeenTutorial: StateFlow<Boolean> = _hasSeenTutorial.asStateFlow()
 
+    // Sync Frequency: "1_HOUR", "DAILY", "WEEKLY", "ON_APP_OPEN"
+    private val _syncFrequency = MutableStateFlow(prefs.getString("sync_frequency", "DAILY") ?: "DAILY")
+    val syncFrequency: StateFlow<String> = _syncFrequency.asStateFlow()
+
+    fun setSyncFrequency(frequency: String) {
+        prefs.edit().putString("sync_frequency", frequency).apply()
+        _syncFrequency.value = frequency
+    }
+
+    fun getLastSyncTimestamp(): Long {
+        return prefs.getLong("last_sync_timestamp", 0L)
+    }
+
+    fun setLastSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
+        prefs.edit().putLong("last_sync_timestamp", timestamp).apply()
+    }
+
     private fun loadThemeAccent(): ThemeAccent {
         val name = prefs.getString("theme_accent", ThemeAccent.TANGERINA.name) ?: ThemeAccent.TANGERINA.name
         return try {

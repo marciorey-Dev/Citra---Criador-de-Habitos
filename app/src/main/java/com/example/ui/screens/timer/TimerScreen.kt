@@ -2,6 +2,13 @@ package com.example.ui.screens.timer
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -54,8 +61,14 @@ fun TimerScreen(
     var showSelectCategoryBeforeStartDialog by remember { mutableStateOf(false) }
     var isCategoryTrashVisible by remember { mutableStateOf(false) }
     var categoryToDelete by remember { mutableStateOf<com.example.data.model.Category?>(null) }
+    var isEditingTimeInline by remember { mutableStateOf(false) }
+    var inlineMinutesText by remember { mutableStateOf(pomodoroState.focusMinutes.toString()) }
 
-    var showManualTimeInputDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(pomodoroState.focusMinutes) {
+        if (!isEditingTimeInline) {
+            inlineMinutesText = pomodoroState.focusMinutes.toString()
+        }
+    }
 
     // Presets for quick selection
     val focusPresets = remember { listOf(10, 15, 20, 25, 30, 45, 60, 90, 120) }
@@ -241,31 +254,90 @@ fun TimerScreen(
                 )
             }
 
-            // Digital Time Display at center with translucent edit pencil
+            // Digital Time Display at center: touch directly to adjust dynamically (no pencil icon, no modal window)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable(enabled = !isRunning) {
-                            showManualTimeInputDialog = true
+                if (isEditingTimeInline && !isRunning) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        IconButton(
+                            onClick = {
+                                val currentM = inlineMinutesText.toIntOrNull() ?: pomodoroState.focusMinutes
+                                val newM = (currentM - 5).coerceAtLeast(1)
+                                inlineMinutesText = newM.toString()
+                                viewModel.setFocusDuration(newM)
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Remove, contentDescription = "Diminuir 5 min", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         }
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
+
+                        BasicTextField(
+                            value = inlineMinutesText,
+                            onValueChange = { newVal ->
+                                val digits = newVal.filter { it.isDigit() }.take(3)
+                                inlineMinutesText = digits
+                                val m = digits.toIntOrNull()
+                                if (m != null && m in 1..240) {
+                                    viewModel.setFocusDuration(m)
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = {
+                                isEditingTimeInline = false
+                            }),
+                            textStyle = MaterialTheme.typography.headlineLarge.copy(
+                                fontSize = 42.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.widthIn(min = 55.dp, max = 95.dp)
+                        )
+
+                        IconButton(
+                            onClick = {
+                                val currentM = inlineMinutesText.toIntOrNull() ?: pomodoroState.focusMinutes
+                                val newM = (currentM + 5).coerceAtMost(240)
+                                inlineMinutesText = newM.toString()
+                                viewModel.setFocusDuration(newM)
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Aumentar 5 min", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
                     Text(
-                        text = formattedTime,
-                        fontSize = 42.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        letterSpacing = 1.sp
+                        text = "min • Toque para confirmar ✓",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clickable { isEditingTimeInline = false }
+                            .padding(vertical = 1.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Editar tempo",
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                        modifier = Modifier.size(20.dp)
-                    )
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = !isRunning) {
+                                inlineMinutesText = (pomodoroState.remainingSeconds / 60).coerceAtLeast(1).toString()
+                                isEditingTimeInline = true
+                            }
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = formattedTime,
+                            fontSize = 42.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            letterSpacing = 1.sp
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
@@ -662,86 +734,6 @@ fun TimerScreen(
             onConfirm = { name, emoji ->
                 viewModel.addCustomCategory(name, emoji)
                 showAddCategoryDialog = false
-            }
-        )
-    }
-
-    if (showManualTimeInputDialog) {
-        var tempMinutesText by remember { mutableStateOf(pomodoroState.focusMinutes.toString()) }
-        var errorMessage by remember { mutableStateOf<String?>(null) }
-
-        AlertDialog(
-            onDismissRequest = { showManualTimeInputDialog = false },
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
-            },
-            title = {
-                Text(
-                    text = "Ajustar Tempo do Timer",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            },
-            text = {
-                Column {
-                    Text(
-                        text = "Digite a minutagem desejada para o foco (valor de 1 a 120 minutos):",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    OutlinedTextField(
-                        value = tempMinutesText,
-                        onValueChange = { input ->
-                            val digitsOnly = input.filter { it.isDigit() }.take(3)
-                            tempMinutesText = digitsOnly
-                            val num = digitsOnly.toIntOrNull()
-                            errorMessage = when {
-                                digitsOnly.isEmpty() -> "Informe os minutos"
-                                num == null || num <= 0 -> "O valor deve ser maior que 0"
-                                num > 120 -> "O tempo máximo é de 120 minutos"
-                                else -> null
-                            }
-                        },
-                        label = { Text("Tempo de Foco (min)") },
-                        singleLine = true,
-                        isError = errorMessage != null,
-                        supportingText = {
-                            if (errorMessage != null) {
-                                Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
-                            } else {
-                                Text("Máximo: 120 min")
-                            }
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val num = tempMinutesText.toIntOrNull()
-                        if (num != null && num in 1..120) {
-                            viewModel.setFocusDuration(num)
-                            showManualTimeInputDialog = false
-                        }
-                    },
-                    enabled = errorMessage == null && tempMinutesText.isNotBlank(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Definir")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showManualTimeInputDialog = false }) {
-                    Text("Cancelar")
-                }
             }
         )
     }

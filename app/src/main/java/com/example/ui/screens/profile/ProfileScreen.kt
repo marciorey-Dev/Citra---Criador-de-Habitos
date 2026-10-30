@@ -43,11 +43,15 @@ import com.example.R
 import com.example.data.auth.AuthRepository
 import com.example.data.auth.FriendItem
 import com.example.data.auth.UserProfile
+import com.example.data.model.Note
 import com.example.ui.MainViewModel
 import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
 import com.example.ui.components.AppTutorialDialog
+import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
+import com.example.util.MediaStorageHelper
+import com.example.util.NoteExportHelper
 import com.example.util.QrCodeGenerator
 import kotlinx.coroutines.launch
 import java.io.File
@@ -85,6 +89,12 @@ fun ProfileScreen(
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
 
+    // Friend Share / Delete state
+    var friendToRemove by remember { mutableStateOf<FriendItem?>(null) }
+    var friendToShareNoteWith by remember { mutableStateOf<FriendItem?>(null) }
+    var selectedNoteToShare by remember { mutableStateOf<Note?>(null) }
+    var selectedShareFormat by remember { mutableStateOf("md") } // "md", "pdf", "txt", "html"
+
     // Friend Search
     var friendSearchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
@@ -97,12 +107,13 @@ fun ProfileScreen(
         }
     }
 
-    // Photo pickers (Gallery + Camera)
+    // Photo pickers with permanent internal storage persistence
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            authRepository.updateProfile(photoUrl = uri.toString())
+            val localPath = MediaStorageHelper.saveProfileImage(context, uri) ?: uri.toString()
+            authRepository.updateProfile(photoUrl = localPath)
         }
     }
 
@@ -110,13 +121,8 @@ fun ProfileScreen(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            try {
-                val file = File(context.cacheDir, "profile_avatar_${System.currentTimeMillis()}.png")
-                file.outputStream().use { out ->
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out)
-                }
-                authRepository.updateProfile(photoUrl = Uri.fromFile(file).toString())
-            } catch (_: Exception) {}
+            val localPath = MediaStorageHelper.saveProfileBitmap(context, bitmap)
+            authRepository.updateProfile(photoUrl = localPath)
         }
     }
 
@@ -720,7 +726,37 @@ fun ProfileScreen(
                                         Text(friend.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         Text("${friend.username} • ${friend.friendId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    Text("🟢 Amigo", fontSize = 11.sp, color = GreenAccent, fontWeight = FontWeight.SemiBold)
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        // Partilhar nota com amigo
+                                        IconButton(
+                                            onClick = {
+                                                friendToShareNoteWith = friend
+                                                selectedNoteToShare = notes.firstOrNull()
+                                            },
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Share,
+                                                contentDescription = "Partilhar Nota",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+
+                                        // Eliminar amigo
+                                        IconButton(
+                                            onClick = { friendToRemove = friend },
+                                            modifier = Modifier.size(34.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.PersonRemove,
+                                                contentDescription = "Eliminar Amigo",
+                                                tint = RedAction,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -897,6 +933,59 @@ fun ProfileScreen(
                                                 Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text("Restaurar", fontSize = 11.sp)
+                                            }
+                                        }
+
+                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                        Text(
+                                            text = "Frequência de Sincronização Automática",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
+                                        val currentSyncFreq by viewModel.syncFrequency.collectAsState()
+                                        val freqOptions = listOf(
+                                            "1_HOUR" to "A cada 1 hora",
+                                            "DAILY" to "Uma vez por dia (Padrão)",
+                                            "WEEKLY" to "Uma vez por semana",
+                                            "ON_APP_OPEN" to "Sempre ao abrir o app"
+                                        )
+
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            freqOptions.forEach { (key, label) ->
+                                                val isSelected = currentSyncFreq == key
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { viewModel.setSyncFrequency(key) }
+                                                        .border(
+                                                            width = if (isSelected) 1.5.dp else 0.dp,
+                                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                                            shape = RoundedCornerShape(10.dp)
+                                                        )
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        RadioButton(
+                                                            selected = isSelected,
+                                                            onClick = { viewModel.setSyncFrequency(key) },
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text(
+                                                            text = label,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1165,5 +1254,211 @@ fun ProfileScreen(
 
     if (showTutorialDialog) {
         AppTutorialDialog(onDismiss = { showTutorialDialog = false })
+    }
+
+    // Remover Amigo Dialog
+    if (friendToRemove != null) {
+        val f = friendToRemove!!
+        AlertDialog(
+            onDismissRequest = { friendToRemove = null },
+            title = { Text("Eliminar Amigo", fontWeight = FontWeight.Bold) },
+            text = { Text("Tem a certeza que deseja eliminar ${f.displayName} da sua lista de amigos?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            authRepository.removeFriend(f.friendUserId)
+                            friendToRemove = null
+                            Toast.makeText(context, "${f.displayName} foi removido dos seus amigos.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RedAction)
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { friendToRemove = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    // Partilhar Nota com Amigo Dialog
+    if (friendToShareNoteWith != null) {
+        val friend = friendToShareNoteWith!!
+        var noteSelectionExpanded by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { friendToShareNoteWith = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Partilhar Nota", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Escolha a nota e o formato para enviar para ${friend.displayName}:",
+                        fontSize = 13.sp
+                    )
+
+                    // Note picker
+                    if (notes.isEmpty()) {
+                        Text(
+                            "Você ainda não possui notas criadas.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        Text("Nota selecionada:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { noteSelectionExpanded = true }
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = selectedNoteToShare?.title ?: "Escolha uma nota...",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = noteSelectionExpanded,
+                            onDismissRequest = { noteSelectionExpanded = false }
+                        ) {
+                            notes.forEach { n ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(n.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text(n.category, fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedNoteToShare = n
+                                        noteSelectionExpanded = false
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text("Formato de exportação:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+
+                        val formatOptions = listOf(
+                            "md" to "Markdown (.md) - O amigo pode importar",
+                            "pdf" to "PDF (.pdf) - Salvo em Downloads/Citra",
+                            "txt" to "Texto (.txt) - Salvo em Downloads/Citra",
+                            "html" to "Web (.html) - Salvo em Downloads/Citra"
+                        )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            formatOptions.forEach { (fmt, label) ->
+                                val isFmtSelected = selectedShareFormat == fmt
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isFmtSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { selectedShareFormat = fmt }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = isFmtSelected,
+                                            onClick = { selectedShareFormat = fmt },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(label, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val note = selectedNoteToShare
+                        if (note != null) {
+                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                            when (selectedShareFormat) {
+                                "md" -> {
+                                    val uri = NoteExportHelper.exportToMdFile(context, note.title, blocks)
+                                    NoteExportHelper.shareUri(context, uri, "text/markdown", "Enviar nota para ${friend.displayName}")
+                                    Toast.makeText(context, "Nota (.md) exportada e pronta para partilhar!", Toast.LENGTH_SHORT).show()
+                                }
+                                "pdf" -> {
+                                    val uri = NoteExportHelper.exportToPdf(context, note.title, note.category, blocks)
+                                    try {
+                                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                        if (bytes != null) {
+                                            MediaStorageHelper.saveExportToDownloads(context, "${note.title}.pdf", "application/pdf", bytes)
+                                        }
+                                    } catch (_: Exception) {}
+                                    NoteExportHelper.shareUri(context, uri, "application/pdf", "Enviar PDF para ${friend.displayName}")
+                                    Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
+                                }
+                                "txt" -> {
+                                    val uri = NoteExportHelper.exportToTxtFile(context, note.title, note.category, blocks)
+                                    try {
+                                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                        if (bytes != null) {
+                                            MediaStorageHelper.saveExportToDownloads(context, "${note.title}.txt", "text/plain", bytes)
+                                        }
+                                    } catch (_: Exception) {}
+                                    NoteExportHelper.shareUri(context, uri, "text/plain", "Enviar Texto para ${friend.displayName}")
+                                    Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
+                                }
+                                "html" -> {
+                                    val uri = NoteExportHelper.exportToHtmlFile(context, note.title, note.category, blocks)
+                                    try {
+                                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                        if (bytes != null) {
+                                            MediaStorageHelper.saveExportToDownloads(context, "${note.title}.html", "text/html", bytes)
+                                        }
+                                    } catch (_: Exception) {}
+                                    NoteExportHelper.shareUri(context, uri, "text/html", "Enviar HTML para ${friend.displayName}")
+                                    Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            friendToShareNoteWith = null
+                        } else {
+                            Toast.makeText(context, "Por favor selecione uma nota.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    enabled = selectedNoteToShare != null
+                ) {
+                    Text("Partilhar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { friendToShareNoteWith = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 }

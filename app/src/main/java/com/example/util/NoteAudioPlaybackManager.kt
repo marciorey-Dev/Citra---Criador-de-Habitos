@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
 import android.util.Log
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,16 +16,20 @@ data class NoteAudioState(
     val isPlaying: Boolean = false,
     val isLooping: Boolean = false,
     val volume: Float = 1.0f,
-    val currentUrl: String = ""
+    val currentUrl: String = "",
+    val currentPositionMs: Int = 0,
+    val durationMs: Int = 0
 )
 
 /**
- * Persistent audio playback manager for notes.
+ * Persistent audio playback manager for notes with progress tracking and seek support.
  * Keeps audio playing continuously even when note items scroll out of view in LazyColumn.
  */
 object NoteAudioPlaybackManager {
     private const val TAG = "NoteAudioPlayback"
     private var mediaPlayer: MediaPlayer? = null
+    private var progressJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _playbackState = MutableStateFlow(NoteAudioState())
     val playbackState: StateFlow<NoteAudioState> = _playbackState.asStateFlow()
@@ -43,6 +48,7 @@ object NoteAudioPlaybackManager {
             try {
                 mediaPlayer?.start()
                 _playbackState.update { it.copy(isPlaying = true) }
+                startProgressTracker()
                 return
             } catch (e: Exception) {
                 Log.e(TAG, "Error resuming audio", e)
@@ -69,22 +75,61 @@ object NoteAudioPlaybackManager {
                 prepare()
                 setOnCompletionListener {
                     if (!isLoop) {
-                        _playbackState.update { it.copy(isPlaying = false) }
+                        _playbackState.update { it.copy(isPlaying = false, currentPositionMs = 0) }
+                        stopProgressTracker()
                     }
                 }
                 start()
             }
             mediaPlayer = mp
+            val dur = try { mp.duration.coerceAtLeast(0) } catch (_: Exception) { 0 }
             _playbackState.value = NoteAudioState(
                 playingBlockId = blockId,
                 isPlaying = true,
                 isLooping = isLoop,
                 volume = volume,
-                currentUrl = url
+                currentUrl = url,
+                currentPositionMs = 0,
+                durationMs = dur
             )
+            startProgressTracker()
         } catch (e: Exception) {
             Log.e(TAG, "Error playing audio block: $url", e)
             stop()
+        }
+    }
+
+    private fun startProgressTracker() {
+        progressJob?.cancel()
+        progressJob = scope.launch {
+            while (isActive) {
+                val mp = mediaPlayer
+                if (mp != null && _playbackState.value.isPlaying) {
+                    try {
+                        val currentPos = mp.currentPosition
+                        val dur = mp.duration.coerceAtLeast(0)
+                        _playbackState.update {
+                            it.copy(currentPositionMs = currentPos, durationMs = dur)
+                        }
+                    } catch (_: Exception) {}
+                }
+                delay(100)
+            }
+        }
+    }
+
+    private fun stopProgressTracker() {
+        progressJob?.cancel()
+        progressJob = null
+    }
+
+    fun seekTo(positionMs: Int) {
+        try {
+            val safePos = positionMs.coerceAtLeast(0)
+            mediaPlayer?.seekTo(safePos)
+            _playbackState.update { it.copy(currentPositionMs = safePos) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error seeking audio", e)
         }
     }
 
@@ -94,6 +139,7 @@ object NoteAudioPlaybackManager {
         } catch (e: Exception) {
             Log.e(TAG, "Error pausing audio", e)
         }
+        stopProgressTracker()
         _playbackState.update { it.copy(isPlaying = false) }
     }
 
@@ -113,6 +159,7 @@ object NoteAudioPlaybackManager {
     }
 
     fun stop() {
+        stopProgressTracker()
         try {
             mediaPlayer?.stop()
             mediaPlayer?.release()

@@ -12,6 +12,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -83,6 +86,9 @@ class MainActivity : ComponentActivity() {
             val notificationSettings by viewModel.notificationSettings.collectAsState()
             val currentUser by authRepository.currentUser.collectAsState()
             val isGuestMode by authRepository.isGuestMode.collectAsState()
+            val isAuthReady by authRepository.isAuthReady.collectAsState()
+            val syncFrequency by viewModel.syncFrequency.collectAsState()
+            val lastSyncTimestamp by viewModel.lastSyncTimestamp.collectAsState()
 
             val systemDark = isSystemInDarkTheme()
             val effectiveDark = isDarkThemeSetting ?: systemDark
@@ -114,6 +120,12 @@ class MainActivity : ComponentActivity() {
             }
 
             CitraTheme(darkTheme = effectiveDark, accent = themeAccent) {
+                // Organic Loading Screen: Wait until auth state is resolved to prevent flashing the login screen
+                if (!isAuthReady) {
+                    CitraLoadingScreen()
+                    return@CitraTheme
+                }
+
                 // If user is not logged in and hasn't chosen guest mode yet, show first-launch AuthScreen
                 if (currentUser == null && !isGuestMode) {
                     AuthScreen(
@@ -184,35 +196,43 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Auto-sync or restore from Firebase Cloud when user logs in
-                LaunchedEffect(currentUser?.uid) {
+                // Auto-sync according to configured frequency (Default daily, or 1h, weekly, on app open)
+                LaunchedEffect(currentUser?.uid, syncFrequency) {
                     val user = currentUser
                     if (user != null && !user.isGuest) {
-                        try {
-                            val cloudData = authRepository.fetchCloudUserData()
-                            if (cloudData != null) {
-                                if (viewModel.tasks.value.isEmpty() && viewModel.habits.value.isEmpty()) {
+                        val now = System.currentTimeMillis()
+                        val shouldSync = when (syncFrequency) {
+                            "ON_APP_OPEN" -> true
+                            "1_HOUR" -> (now - lastSyncTimestamp) >= 60 * 60 * 1000L
+                            "WEEKLY" -> (now - lastSyncTimestamp) >= 7 * 24 * 60 * 60 * 1000L
+                            else -> (now - lastSyncTimestamp) >= 24 * 60 * 60 * 1000L // "DAILY"
+                        }
+                        if (shouldSync) {
+                            viewModel.updateLastSyncTimestamp(now)
+                            try {
+                                val cloudData = authRepository.fetchCloudUserData()
+                                if (cloudData != null && viewModel.tasks.value.isEmpty() && viewModel.habits.value.isEmpty()) {
                                     cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
                                     cloudData.notesJson?.let { viewModel.importNotesJson(it) }
+                                } else {
+                                    val settingsMap = mapOf<String, Any>(
+                                        "themeAccent" to viewModel.themeAccent.value.name,
+                                        "keepScreenOn" to viewModel.keepScreenOn.value,
+                                        "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
+                                        "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
+                                    )
+                                    authRepository.syncAllUserDataToCloud(
+                                        tasks = viewModel.tasks.value,
+                                        habits = viewModel.habits.value,
+                                        notes = viewModel.notes.value,
+                                        categories = viewModel.categories.value,
+                                        focusSessions = viewModel.focusSessions.value,
+                                        achievements = viewModel.achievements.value,
+                                        settingsMap = settingsMap
+                                    )
                                 }
-                            } else {
-                                val settingsMap = mapOf<String, Any>(
-                                    "themeAccent" to viewModel.themeAccent.value.name,
-                                    "keepScreenOn" to viewModel.keepScreenOn.value,
-                                    "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
-                                    "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
-                                )
-                                authRepository.syncAllUserDataToCloud(
-                                    tasks = viewModel.tasks.value,
-                                    habits = viewModel.habits.value,
-                                    notes = viewModel.notes.value,
-                                    categories = viewModel.categories.value,
-                                    focusSessions = viewModel.focusSessions.value,
-                                    achievements = viewModel.achievements.value,
-                                    settingsMap = settingsMap
-                                )
-                            }
-                        } catch (_: Exception) {}
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
 
@@ -661,6 +681,86 @@ class MainActivity : ComponentActivity() {
                 remainingSeconds = state.remainingSeconds,
                 phaseLabel = state.currentPhase.label,
                 isPaused = state.isPaused
+            )
+        }
+    }
+}
+
+@Composable
+fun CitraLoadingScreen() {
+    val infiniteTransition = rememberInfiniteTransition(label = "citra_loading_pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .size(96.dp)
+                    .graphicsLayer(scaleX = scale, scaleY = scale),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shadowElevation = 8.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Image(
+                        painter = painterResource(id = R.drawable.app_icon_fg),
+                        contentDescription = "Citra Logo",
+                        modifier = Modifier.size(68.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "CITRA",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 4.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 3.dp
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "Carregando...",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
             )
         }
     }

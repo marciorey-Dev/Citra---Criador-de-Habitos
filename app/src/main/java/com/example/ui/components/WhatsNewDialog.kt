@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -63,14 +64,14 @@ fun WhatsNewDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Citra Versão 0.7.1",
+                    text = "Citra Versão 0.7.4",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 Text(
-                    text = "Principais novidades e melhorias desta versão",
+                    text = "Principais novidades e melhorias da Versão 0.7.4",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -85,44 +86,49 @@ fun WhatsNewDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeatureHighlightItem(
-                        icon = "☁️",
-                        title = "Sincronização em Nuvem Firebase",
-                        description = "Seus hábitos, tarefas, notas, timer e configurações agora sincronizam automaticamente com a nuvem."
+                        icon = "✨",
+                        title = "Carregamento Inicial Orgânico",
+                        description = "Nova tela de inicialização suave com ícone do Citra. Os dados e a sessão são carregados antes da entrada, eliminando o piscar do login."
                     )
                     FeatureHighlightItem(
-                        icon = "👤",
-                        title = "Nova Aba 'Eu' & Comunidade",
-                        description = "Gerencie seu perfil, compartilhe seu ID único de 9 dígitos via QR Code, busque amigos e dispute no ranking global."
+                        icon = "💾",
+                        title = "Mídias e Perfil 100% Persistentes",
+                        description = "Sua foto de perfil, fotos de notas e áudios importados agora ficam salvos no armazenamento interno do app e nunca se perdem ao reiniciar."
                     )
                     FeatureHighlightItem(
-                        icon = "⏱️",
-                        title = "Ajuste Manual e Seletor do Timer",
-                        description = "Toque no lápis translúcido para digitar qualquer minutagem até 120min, ou selecione rapidamente pelos novos botões de tempo."
+                        icon = "🎙️",
+                        title = "Gravação de Áudio Direto na Nota",
+                        description = "Grave notas de voz diretamente no editor de notas e salve automaticamente os arquivos na pasta 'CitraRecord' em Músicas."
                     )
                     FeatureHighlightItem(
                         icon = "🎵",
-                        title = "Música Ambiente de Pausa e Fundo",
-                        description = "Trilha sonora ambiente relaxante durante pausas ou tocando continuamente enquanto usa o aplicativo, com ajuste fino de volume."
-                    )
-                    FeatureHighlightItem(
-                        icon = "🔒",
-                        title = "Controle de Privacidade",
-                        description = "Escolha entre perfil público para competir no ranking ou perfil privado para compartilhar dados apenas com amigos autorizados."
+                        title = "Player de Áudio Estilo WhatsApp",
+                        description = "Progresso dinâmico de áudio com scrubbing manual, ondas visuais e título discreto editável direto no cabeçalho."
                     )
                     FeatureHighlightItem(
                         icon = "📝",
-                        title = "Modo Imersivo para Notas",
-                        description = "Espaço máximo de tela sem barras superiores nem inferiores ao editar notas. Menus e barras ocultos automaticamente."
+                        title = "Markdown Suave sem Símbolos Visíveis",
+                        description = "Negrito, itálico, tachado, sublinhado, destaque e links abrem direto sem expor códigos como ** ou ~~. Parágrafos não se multiplicam ao reabrir."
                     )
                     FeatureHighlightItem(
-                        icon = "📊",
-                        title = "Estatísticas & Painel de Dados",
-                        description = "Acompanhe seus gráficos de foco e veja dados técnicos de armazenamento ocupado pelo Citra no seu Android."
+                        icon = "⏱️",
+                        title = "Ajuste Dinâmico do Timer sem Lápis",
+                        description = "Toque direto nos números do cronômetro para mudar os minutos imediatamente, sem caixas de diálogo adicionais."
+                    )
+                    FeatureHighlightItem(
+                        icon = "👥",
+                        title = "Gerenciamento e Partilha com Amigos",
+                        description = "Exclua amigos indesejados e envie notas completas escolhendo formatos (.md, .pdf, .txt, .html), salvando direto em Downloads."
+                    )
+                    FeatureHighlightItem(
+                        icon = "🔄",
+                        title = "Frequência de Sincronização Customizável",
+                        description = "Escolha a cadência de sincronização: a cada 1 hora, diária, semanal ou sempre ao abrir o aplicativo."
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // WhatsApp Beta Tester contact card
+                    // GitHub developer contact card
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
@@ -135,14 +141,14 @@ fun WhatsNewDialog(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = Icons.Default.Phone,
+                                    imageVector = Icons.Default.Share,
                                     contentDescription = null,
-                                    tint = GreenAccent,
+                                    tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Canal de Beta Testers",
+                                    text = "Repositório & Feedback no GitHub",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -150,23 +156,23 @@ fun WhatsNewDialog(
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Envie sugestões, feedback ou reporte erros diretamente ao desenvolvedor Márcio Rey no WhatsApp (+244 932 918 030).",
+                                text = "Acompanhe o desenvolvimento do Citra, consulte novidades ou envie sugestões no perfil do criador Márcio Rey.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(
                                 onClick = {
-                                    val url = "https://wa.me/244932918030?text=Ol%C3%A1%20M%C3%A1rcio%2C%20estou%20testando%20o%20Citra%20v0.7.1!"
+                                    val url = "https://github.com/marciorey-dev"
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                     try { context.startActivity(intent) } catch (_: Exception) {}
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = GreenAccent),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                                 shape = RoundedCornerShape(10.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Entrar em Contato no WhatsApp", fontSize = 12.sp, color = Color.White)
+                                Text("Visitar GitHub: marciorey-dev", fontSize = 12.sp, color = Color.White)
                             }
                         }
                     }

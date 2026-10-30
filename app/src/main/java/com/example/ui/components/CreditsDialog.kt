@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -60,7 +61,7 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
-                    text = "Versão 0.7.1 • Foco, Hábitos e Produtividade com Backup na Nuvem",
+                    text = "Versão 0.7.4 • Foco, Hábitos e Produtividade com Backup na Nuvem",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -90,7 +91,7 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
-                        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
                         // Email button
                         Row(
@@ -122,13 +123,13 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                             }
                         }
 
-                        // WhatsApp button
+                        // GitHub button
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Phone,
+                                imageVector = Icons.Default.Share,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
@@ -136,14 +137,14 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                             Spacer(modifier = Modifier.width(8.dp))
                             TextButton(
                                 onClick = {
-                                    val url = "https://wa.me/244932918030"
+                                    val url = "https://github.com/marciorey-dev"
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                     try { context.startActivity(intent) } catch (_: Exception) {}
                                 },
                                 contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text(
-                                    text = "+244 932 918 030",
+                                    text = "github.com/marciorey-dev",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.primary

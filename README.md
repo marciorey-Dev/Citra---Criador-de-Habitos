@@ -61,6 +61,7 @@
 
 * **Developer:** Márcio Rey
 * **Email:** marcioreyakm@gmail.com
+* **WhatsApp:** +244 932 918 030
 
 ---
 
