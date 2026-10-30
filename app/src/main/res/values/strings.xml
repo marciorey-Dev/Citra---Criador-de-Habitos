@@ -1,4 +1,3 @@
 <resources>
     <string name="app_name">Citra</string>
-    <string name="default_web_client_id" translatable="false">default_web_client_id</string>
 </resources>

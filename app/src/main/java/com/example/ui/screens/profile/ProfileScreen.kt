@@ -67,9 +67,12 @@ fun ProfileScreen(
     val user by authRepository.currentUser.collectAsState()
     val friends by authRepository.friends.collectAsState()
     val pendingRequests by authRepository.pendingRequests.collectAsState()
+    val suggestedUsers by authRepository.suggestedUsers.collectAsState()
     val notes by viewModel.notes.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
     val habits by viewModel.habits.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val achievements by viewModel.achievements.collectAsState()
     val focusSessions by viewModel.focusSessions.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState()
     val notificationSettings by viewModel.notificationSettings.collectAsState()
@@ -86,6 +89,13 @@ fun ProfileScreen(
     var friendSearchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
+    var hasSearched by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedSubTab) {
+        if (selectedSubTab == 1) {
+            authRepository.loadPublicSuggestions()
+        }
+    }
 
     // Photo pickers (Gallery + Camera)
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -356,7 +366,7 @@ fun ProfileScreen(
                 }
 
                 1 -> {
-                    // AMIGOS (Friend list, search, privacy notice, global ranking)
+                    // AMIGOS (Friend list, search, public suggestions, accept/reject requests)
                     item {
                         Card(
                             shape = RoundedCornerShape(16.dp),
@@ -364,23 +374,38 @@ fun ProfileScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Encontrar Pessoas:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
                                 // Search bar for friends
                                 OutlinedTextField(
                                     value = friendSearchQuery,
                                     onValueChange = { query ->
                                         friendSearchQuery = query
-                                        if (query.length >= 2) {
+                                        if (query.trim().length >= 2) {
                                             isSearching = true
+                                            hasSearched = true
                                             coroutineScope.launch {
                                                 searchResults = authRepository.searchUsers(query)
                                                 isSearching = false
                                             }
                                         } else {
                                             searchResults = emptyList()
+                                            hasSearched = query.trim().isNotEmpty()
                                         }
                                     },
                                     placeholder = { Text("Buscar por nome, @usuario ou ID (9 dígitos)...", fontSize = 12.sp) },
                                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    trailingIcon = {
+                                        if (friendSearchQuery.isNotEmpty()) {
+                                            IconButton(onClick = {
+                                                friendSearchQuery = ""
+                                                searchResults = emptyList()
+                                                hasSearched = false
+                                            }) {
+                                                Icon(Icons.Default.Close, contentDescription = "Limpar", modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    },
                                     shape = RoundedCornerShape(14.dp),
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth()
@@ -390,10 +415,48 @@ fun ProfileScreen(
                                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                 }
 
+                                // Search empty state: User does not exist
+                                if (hasSearched && !isSearching && searchResults.isEmpty() && friendSearchQuery.trim().length >= 2) {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PersonOff,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(26.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column {
+                                                Text(
+                                                    text = "Este usuário não existe",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                                )
+                                                Text(
+                                                    text = "Nenhum perfil encontrado para '${friendSearchQuery.trim()}'. Verifique se o @usuario ou o ID de 9 dígitos está correto.",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Search Results
                                 if (searchResults.isNotEmpty()) {
                                     Text("Usuários Encontrados:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     searchResults.forEach { foundUser ->
+                                        val isAlreadyFriend = friends.any { it.friendUserId == foundUser.uid }
+                                        val isPendingRequest = pendingRequests.any { it.friendUserId == foundUser.uid }
+
                                         Surface(
                                             shape = RoundedCornerShape(12.dp),
                                             color = MaterialTheme.colorScheme.surface,
@@ -403,13 +466,22 @@ fun ProfileScreen(
                                                 modifier = Modifier.padding(10.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                                    modifier = Modifier.size(36.dp)
-                                                ) {
-                                                    Box(contentAlignment = Alignment.Center) {
-                                                        Text(foundUser.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold)
+                                                if (!foundUser.photoUrl.isNullOrBlank()) {
+                                                    AsyncImage(
+                                                        model = foundUser.photoUrl,
+                                                        contentDescription = foundUser.displayName,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.size(40.dp).clip(CircleShape)
+                                                    )
+                                                } else {
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        modifier = Modifier.size(40.dp)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Text(foundUser.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold)
+                                                        }
                                                     }
                                                 }
                                                 Spacer(modifier = Modifier.width(10.dp))
@@ -417,17 +489,36 @@ fun ProfileScreen(
                                                     Text(foundUser.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                                     Text("${foundUser.username} • ID: ${foundUser.friendId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                 }
-                                                Button(
-                                                    onClick = {
-                                                        coroutineScope.launch {
-                                                            authRepository.sendFriendRequest(foundUser)
-                                                            Toast.makeText(context, "Pedido de amizade enviado!", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    },
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text("Adicionar", fontSize = 11.sp)
+
+                                                if (isAlreadyFriend) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = GreenAccent.copy(alpha = 0.15f)
+                                                    ) {
+                                                        Text("🟢 Amigo", color = GreenAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                                    }
+                                                } else if (isPendingRequest) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                                    ) {
+                                                        Text("📩 Pedido Recebido", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                                                    }
+                                                } else {
+                                                    Button(
+                                                        onClick = {
+                                                            coroutineScope.launch {
+                                                                authRepository.sendFriendRequest(foundUser)
+                                                                Toast.makeText(context, "Pedido de amizade enviado!", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        },
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text("Fazer Pedido", fontSize = 11.sp)
+                                                    }
                                                 }
                                             }
                                         }
@@ -437,7 +528,83 @@ fun ProfileScreen(
                         }
                     }
 
-                    // Pending friend requests
+                    // Sugestões de Amizade (Perfis Públicos)
+                    if (suggestedUsers.isNotEmpty()) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Sugestões de Amizade (Perfis Públicos):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                TextButton(
+                                    onClick = { coroutineScope.launch { authRepository.loadPublicSuggestions() } },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Atualizar", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Atualizar", fontSize = 10.sp)
+                                }
+                            }
+                        }
+
+                        items(suggestedUsers) { suggestion ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (!suggestion.photoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = suggestion.photoUrl,
+                                            contentDescription = suggestion.displayName,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.size(36.dp).clip(CircleShape)
+                                        )
+                                    } else {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(suggestion.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(suggestion.displayName, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text(
+                                            text = "${suggestion.username} • 🌐 Público",
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Button(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                authRepository.sendFriendRequest(suggestion)
+                                                Toast.makeText(context, "Pedido enviado para ${suggestion.displayName}!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Adicionar", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pending friend requests (Recebidos) with Aceitar e Negar/Recusar
                     if (pendingRequests.isNotEmpty()) {
                         item {
                             Text("Pedidos de Amizade Recebidos (${pendingRequests.size}):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -445,23 +612,63 @@ fun ProfileScreen(
                         items(pendingRequests) { req ->
                             Card(
                                 shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    if (!req.photoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = req.photoUrl,
+                                            contentDescription = req.displayName,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.size(38.dp).clip(CircleShape)
+                                        )
+                                    } else {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(38.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(req.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold, color = Color.White)
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(req.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         Text(req.username, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        // Negar / Recusar
+                                        OutlinedButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    authRepository.rejectFriendRequest(req)
+                                                    Toast.makeText(context, "Pedido recusado.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Recusar", fontSize = 11.sp)
+                                        }
+
+                                        // Aceitar
                                         Button(
-                                            onClick = { coroutineScope.launch { authRepository.acceptFriendRequest(req) } },
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    authRepository.acceptFriendRequest(req)
+                                                    Toast.makeText(context, "Pedido aceito! Agora são amigos.", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
                                             colors = ButtonDefaults.buttonColors(containerColor = GreenAccent),
                                             shape = RoundedCornerShape(10.dp),
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                         ) {
                                             Text("Aceitar", fontSize = 11.sp)
                                         }
@@ -573,6 +780,125 @@ fun ProfileScreen(
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("Tarefas / Hábitos Ativos:", fontSize = 12.sp)
                                         Text("${tasks.size} tarefas • ${habits.size} hábitos", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            // Firebase Cloud Sync Card
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.CloudSync,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                "Firebase Firestore",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (user?.isGuest == false) GreenAccent.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant
+                                        ) {
+                                            Text(
+                                                text = if (user?.isGuest == false) "Sincronizado" else "Modo Convidado",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (user?.isGuest == false) GreenAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = if (user?.isGuest == false)
+                                            "Tarefas, hábitos, notas, conquistas e sessões são sincronizados em tempo real no seu Firestore."
+                                        else
+                                            "Conecte sua conta para fazer backup contínuo na nuvem e compartilhar com amigos.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        lineHeight = 15.sp
+                                    )
+
+                                    if (user?.isGuest == false) {
+                                        var isSyncingNow by remember { mutableStateOf(false) }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Button(
+                                                onClick = {
+                                                    isSyncingNow = true
+                                                    coroutineScope.launch {
+                                                        val settingsMap = mapOf<String, Any>(
+                                                            "themeAccent" to viewModel.themeAccent.value.name,
+                                                            "keepScreenOn" to viewModel.keepScreenOn.value,
+                                                            "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
+                                                            "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
+                                                        )
+                                                        authRepository.syncAllUserDataToCloud(
+                                                            tasks = tasks,
+                                                            habits = habits,
+                                                            notes = notes,
+                                                            categories = categories,
+                                                            focusSessions = focusSessions,
+                                                            achievements = achievements,
+                                                            settingsMap = settingsMap
+                                                        )
+                                                        isSyncingNow = false
+                                                        Toast.makeText(context, "Dados sincronizados com o Firestore!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                enabled = !isSyncingNow,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Sincronizar", fontSize = 11.sp)
+                                            }
+
+                                            OutlinedButton(
+                                                onClick = {
+                                                    isSyncingNow = true
+                                                    coroutineScope.launch {
+                                                        val cloudData = authRepository.fetchCloudUserData()
+                                                        isSyncingNow = false
+                                                        if (cloudData != null) {
+                                                            cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
+                                                            cloudData.notesJson?.let { viewModel.importNotesJson(it) }
+                                                            Toast.makeText(context, "Dados restaurados da nuvem!", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            Toast.makeText(context, "Nenhum backup em nuvem encontrado.", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                enabled = !isSyncingNow,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Restaurar", fontSize = 11.sp)
+                                            }
+                                        }
                                     }
                                 }
                             }

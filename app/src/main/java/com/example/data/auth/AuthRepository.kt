@@ -4,11 +4,14 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
 import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
@@ -57,15 +60,36 @@ data class FriendItem(
 class AuthRepository(private val context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("citra_prefs", Context.MODE_PRIVATE)
-    private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
-    private val firestore: FirebaseFirestore by lazy {
-        val dbId = context.getString(R.string.firestore_database_id)
-        if (dbId.isNotBlank()) {
-            FirebaseFirestore.getInstance(FirebaseFirestore.getInstance().app, dbId)
-        } else {
-            FirebaseFirestore.getInstance()
+
+    private val auth: FirebaseAuth? by lazy {
+        try {
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
+            }
+            FirebaseAuth.getInstance()
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Firebase Auth could not be initialized", e)
+            null
         }
     }
+
+    private val firestore: FirebaseFirestore? by lazy {
+        try {
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
+            }
+            val dbId = context.getString(R.string.firestore_database_id)
+            if (dbId.isNotBlank()) {
+                FirebaseFirestore.getInstance(FirebaseFirestore.getInstance().app, dbId)
+            } else {
+                FirebaseFirestore.getInstance()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Firebase Firestore could not be initialized", e)
+            null
+        }
+    }
+
     private val credentialManager = CredentialManager.create(context)
     private val scope = CoroutineScope(Dispatchers.IO)
 
@@ -81,9 +105,12 @@ class AuthRepository(private val context: Context) {
     private val _pendingRequests = MutableStateFlow<List<FriendItem>>(emptyList())
     val pendingRequests: StateFlow<List<FriendItem>> = _pendingRequests.asStateFlow()
 
+    private val _suggestedUsers = MutableStateFlow<List<UserProfile>>(emptyList())
+    val suggestedUsers: StateFlow<List<UserProfile>> = _suggestedUsers.asStateFlow()
+
     init {
-        // Load initial state
-        auth.addAuthStateListener { firebaseAuth ->
+        // Load initial state safely
+        auth?.addAuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
                 _isGuestMode.value = false
@@ -94,6 +121,9 @@ class AuthRepository(private val context: Context) {
             } else {
                 _currentUser.value = null
             }
+        }
+        if (auth == null && _isGuestMode.value) {
+            loadGuestProfile()
         }
     }
 
@@ -135,7 +165,21 @@ class AuthRepository(private val context: Context) {
     private fun loadUserProfile(uid: String, authDisplayName: String?, authPhotoUrl: String?) {
         scope.launch {
             try {
-                val doc = firestore.collection("users").document(uid).get().await()
+                val currentFirestore = firestore
+                if (currentFirestore == null) {
+                    _currentUser.value = UserProfile(
+                        uid = uid,
+                        displayName = authDisplayName ?: "Usuário Citra",
+                        username = "@" + uid.take(6),
+                        photoUrl = authPhotoUrl,
+                        friendId = generateFriendId(),
+                        isPrivate = false,
+                        isGuest = false
+                    )
+                    return@launch
+                }
+
+                val doc = currentFirestore.collection("users").document(uid).get().await()
                 if (doc.exists()) {
                     val profile = UserProfile(
                         uid = uid,
@@ -164,7 +208,7 @@ class AuthRepository(private val context: Context) {
                         isPrivate = false,
                         isGuest = false
                     )
-                    firestore.collection("users").document(uid).set(
+                    currentFirestore.collection("users").document(uid).set(
                         mapOf(
                             "displayName" to newProfile.displayName,
                             "username" to newProfile.username,
@@ -196,6 +240,7 @@ class AuthRepository(private val context: Context) {
     }
 
     suspend fun signInWithGoogle(): Result<UserProfile> {
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
         return try {
             val serverClientId = context.getString(R.string.default_web_client_id)
             if (serverClientId.isBlank() || serverClientId == "default_web_client_id") {
@@ -210,29 +255,59 @@ class AuthRepository(private val context: Context) {
             val result = credentialManager.getCredential(context, request)
             val credential = result.credential
 
-            if (credential is GoogleIdTokenCredential) {
-                val firebaseCredential = GoogleAuthProvider.getCredential(credential.idToken, null)
-                val authResult = auth.signInWithCredential(firebaseCredential).await()
-                val user = authResult.user ?: throw IllegalStateException("Firebase user was null")
-
-                _isGuestMode.value = false
-                prefs.edit().putBoolean("is_guest_mode", false).apply()
-
-                loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
-                Result.success(
-                    _currentUser.value ?: UserProfile(
-                        uid = user.uid,
-                        displayName = user.displayName ?: "Usuário Citra",
-                        username = "@" + user.uid.take(6),
-                        photoUrl = user.photoUrl?.toString(),
-                        friendId = generateFriendId(),
-                        isPrivate = false,
-                        isGuest = false
-                    )
-                )
-            } else {
-                Result.failure(IllegalArgumentException("Unexpected credential type: ${credential.type}"))
+            // Extract Google ID Token handling both direct GoogleIdTokenCredential and CustomCredential types
+            val idToken: String = when {
+                credential is GoogleIdTokenCredential -> {
+                    credential.idToken
+                }
+                credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL -> {
+                    try {
+                        GoogleIdTokenCredential.createFrom(credential.data).idToken
+                    } catch (e: GoogleIdTokenParsingException) {
+                        return Result.failure(IllegalArgumentException("Falha ao processar credencial do Google: ${e.message}", e))
+                    } catch (e: Exception) {
+                        return Result.failure(IllegalArgumentException("Falha ao analisar credencial do Google: ${e.message}", e))
+                    }
+                }
+                credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL -> {
+                    if (credential is CustomCredential) {
+                        try {
+                            GoogleIdTokenCredential.createFrom(credential.data).idToken
+                        } catch (e: Exception) {
+                            return Result.failure(IllegalArgumentException("Falha ao analisar Google ID Token: ${e.message}", e))
+                        }
+                    } else {
+                        return Result.failure(IllegalArgumentException("Tipo de credencial incompatível: ${credential.type}"))
+                    }
+                }
+                else -> {
+                    return Result.failure(IllegalArgumentException("Unexpected credential type: ${credential.type}"))
+                }
             }
+
+            if (idToken.isBlank()) {
+                return Result.failure(IllegalStateException("ID Token retornado pelo Google está vazio."))
+            }
+
+            val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = currentAuth.signInWithCredential(firebaseCredential).await()
+            val user = authResult.user ?: throw IllegalStateException("Firebase user was null")
+
+            _isGuestMode.value = false
+            prefs.edit().putBoolean("is_guest_mode", false).apply()
+
+            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
+            Result.success(
+                _currentUser.value ?: UserProfile(
+                    uid = user.uid,
+                    displayName = user.displayName ?: "Usuário Citra",
+                    username = "@" + user.uid.take(6),
+                    photoUrl = user.photoUrl?.toString(),
+                    friendId = generateFriendId(),
+                    isPrivate = false,
+                    isGuest = false
+                )
+            )
         } catch (e: GetCredentialCancellationException) {
             Result.failure(e)
         } catch (e: Exception) {
@@ -241,13 +316,14 @@ class AuthRepository(private val context: Context) {
     }
 
     suspend fun signInWithEmailOrUsername(identifier: String, pass: String): Result<UserProfile> {
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
         return try {
             val email = if (identifier.contains("@") && identifier.contains(".")) {
                 identifier.trim()
             } else {
                 "${identifier.trim().removePrefix("@").lowercase()}@citra.app"
             }
-            val authResult = auth.signInWithEmailAndPassword(email, pass).await()
+            val authResult = currentAuth.signInWithEmailAndPassword(email, pass).await()
             val user = authResult.user ?: throw IllegalStateException("User null")
             _isGuestMode.value = false
             prefs.edit().putBoolean("is_guest_mode", false).apply()
@@ -264,10 +340,12 @@ class AuthRepository(private val context: Context) {
         pass: String,
         isPrivate: Boolean
     ): Result<UserProfile> {
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firebase Firestore não está inicializado."))
         return try {
             val cleanUsername = if (username.startsWith("@")) username.trim() else "@${username.trim()}"
             val email = "${cleanUsername.removePrefix("@").lowercase()}@citra.app"
-            val authResult = auth.createUserWithEmailAndPassword(email, pass).await()
+            val authResult = currentAuth.createUserWithEmailAndPassword(email, pass).await()
             val user = authResult.user ?: throw IllegalStateException("User null")
 
             user.updateProfile(
@@ -287,7 +365,7 @@ class AuthRepository(private val context: Context) {
                 isGuest = false
             )
 
-            firestore.collection("users").document(user.uid).set(
+            currentFirestore.collection("users").document(user.uid).set(
                 mapOf(
                     "displayName" to name,
                     "username" to cleanUsername,
@@ -326,20 +404,21 @@ class AuthRepository(private val context: Context) {
                 if (isPrivate != null) putBoolean("guest_is_private", isPrivate)
             }.apply()
         } else {
+            val currentFirestore = firestore ?: return
             scope.launch {
                 try {
                     val map = mutableMapOf<String, Any>()
                     if (displayName != null) map["displayName"] = displayName
                     if (photoUrl != null) map["photoUrl"] = photoUrl
                     if (isPrivate != null) map["isPrivate"] = isPrivate
-                    firestore.collection("users").document(cur.uid).set(map, SetOptions.merge())
+                    currentFirestore.collection("users").document(cur.uid).set(map, SetOptions.merge())
                 } catch (_: Exception) {}
             }
         }
     }
 
     fun signOut() {
-        auth.signOut()
+        auth?.signOut()
         _isGuestMode.value = false
         prefs.edit().putBoolean("is_guest_mode", false).apply()
         _currentUser.value = null
@@ -350,15 +429,20 @@ class AuthRepository(private val context: Context) {
     suspend fun searchUsers(query: String): List<UserProfile> {
         val q = query.trim()
         if (q.isBlank()) return emptyList()
+        val currentFirestore = firestore ?: return emptyList()
+        val myUid = _currentUser.value?.uid ?: ""
 
         return try {
-            val snapshot = firestore.collection("users")
-                .limit(20)
+            val cleanQuery = q.removePrefix("@").trim()
+            val snapshot = currentFirestore.collection("users")
+                .limit(50)
                 .get()
                 .await()
 
             snapshot.documents.mapNotNull { doc ->
                 val uid = doc.id
+                if (uid == myUid) return@mapNotNull null
+
                 val name = doc.getString("displayName") ?: ""
                 val username = doc.getString("username") ?: ""
                 val fId = doc.getString("friendId") ?: ""
@@ -378,13 +462,20 @@ class AuthRepository(private val context: Context) {
 
                 if (priv) {
                     // Private profiles can ONLY be found by entering exact 9-character friendId
-                    if (fId.equals(q, ignoreCase = true)) profile else null
+                    if (fId.equals(q, ignoreCase = true) || fId.equals(cleanQuery, ignoreCase = true)) {
+                        profile
+                    } else null
                 } else {
                     // Public profiles can be found by name, username, or friendId
+                    val cleanUsername = username.removePrefix("@")
                     if (name.contains(q, ignoreCase = true) ||
+                        cleanUsername.equals(cleanQuery, ignoreCase = true) ||
                         username.contains(q, ignoreCase = true) ||
-                        fId.equals(q, ignoreCase = true)
-                    ) profile else null
+                        fId.equals(q, ignoreCase = true) ||
+                        fId.equals(cleanQuery, ignoreCase = true)
+                    ) {
+                        profile
+                    } else null
                 }
             }
         } catch (_: Exception) {
@@ -392,11 +483,49 @@ class AuthRepository(private val context: Context) {
         }
     }
 
+    suspend fun loadPublicSuggestions(): List<UserProfile> {
+        val currentFirestore = firestore ?: return emptyList()
+        val myUid = _currentUser.value?.uid ?: ""
+        val friendUids = _friends.value.map { it.friendUserId }.toSet()
+
+        return try {
+            val snapshot = currentFirestore.collection("users")
+                .limit(40)
+                .get()
+                .await()
+
+            val list = snapshot.documents.mapNotNull { doc ->
+                val uid = doc.id
+                if (uid == myUid || uid in friendUids) return@mapNotNull null
+
+                val priv = doc.getBoolean("isPrivate") ?: false
+                if (priv) return@mapNotNull null // Only show public profiles
+
+                UserProfile(
+                    uid = uid,
+                    displayName = doc.getString("displayName") ?: "Usuário Citra",
+                    username = doc.getString("username") ?: "@citra",
+                    photoUrl = doc.getString("photoUrl"),
+                    friendId = doc.getString("friendId") ?: "",
+                    isPrivate = false,
+                    isGuest = false,
+                    totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
+                    achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt()
+                )
+            }
+            _suggestedUsers.value = list
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun sendFriendRequest(target: UserProfile): Result<Unit> {
         val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está inicializado"))
         return try {
             val reqId = "${myUser.uid}_${target.uid}"
-            firestore.collection("friendRequests").document(reqId).set(
+            currentFirestore.collection("friendRequests").document(reqId).set(
                 mapOf(
                     "fromUserId" to myUser.uid,
                     "fromDisplayName" to myUser.displayName,
@@ -419,6 +548,8 @@ class AuthRepository(private val context: Context) {
                 friendId = target.friendId,
                 status = "pending"
             )
+            // Remove from suggested users list
+            _suggestedUsers.value = _suggestedUsers.value.filter { it.uid != target.uid }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -427,8 +558,9 @@ class AuthRepository(private val context: Context) {
 
     suspend fun acceptFriendRequest(request: FriendItem): Result<Unit> {
         val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está inicializado"))
         return try {
-            firestore.collection("users").document(myUser.uid)
+            currentFirestore.collection("users").document(myUser.uid)
                 .collection("friends").document(request.friendUserId).set(
                     mapOf(
                         "friendUserId" to request.friendUserId,
@@ -440,7 +572,7 @@ class AuthRepository(private val context: Context) {
                     )
                 ).await()
 
-            firestore.collection("users").document(request.friendUserId)
+            currentFirestore.collection("users").document(request.friendUserId)
                 .collection("friends").document(myUser.uid).set(
                     mapOf(
                         "friendUserId" to myUser.uid,
@@ -452,8 +584,31 @@ class AuthRepository(private val context: Context) {
                     )
                 ).await()
 
+            val reqId = "${request.friendUserId}_${myUser.uid}"
+            try {
+                currentFirestore.collection("friendRequests").document(reqId).update("status", "accepted").await()
+            } catch (_: Exception) {}
+
             _pendingRequests.value = _pendingRequests.value.filter { it.friendUserId != request.friendUserId }
-            _friends.value = _friends.value + request.copy(status = "accepted")
+            _friends.value = _friends.value.filter { it.friendUserId != request.friendUserId } + request.copy(status = "accepted")
+            _suggestedUsers.value = _suggestedUsers.value.filter { it.uid != request.friendUserId }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rejectFriendRequest(request: FriendItem): Result<Unit> {
+        val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está inicializado"))
+        return try {
+            val reqId = "${request.friendUserId}_${myUser.uid}"
+            try {
+                currentFirestore.collection("friendRequests").document(reqId).update("status", "rejected").await()
+            } catch (_: Exception) {
+                currentFirestore.collection("friendRequests").document(reqId).delete().await()
+            }
+            _pendingRequests.value = _pendingRequests.value.filter { it.friendUserId != request.friendUserId }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -461,9 +616,10 @@ class AuthRepository(private val context: Context) {
     }
 
     private fun loadFriends(uid: String) {
+        val currentFirestore = firestore ?: return
         scope.launch {
             try {
-                val friendsSnap = firestore.collection("users").document(uid).collection("friends").get().await()
+                val friendsSnap = currentFirestore.collection("users").document(uid).collection("friends").get().await()
                 _friends.value = friendsSnap.documents.mapNotNull { doc ->
                     FriendItem(
                         friendUserId = doc.getString("friendUserId") ?: doc.id,
@@ -476,7 +632,7 @@ class AuthRepository(private val context: Context) {
                 }
 
                 // Check pending requests to me
-                val requestsSnap = firestore.collection("friendRequests")
+                val requestsSnap = currentFirestore.collection("friendRequests")
                     .whereEqualTo("toUserId", uid)
                     .whereEqualTo("status", "pending")
                     .get()
@@ -491,6 +647,9 @@ class AuthRepository(private val context: Context) {
                         status = "pending"
                     )
                 }
+
+                // Also load public suggestions
+                loadPublicSuggestions()
             } catch (_: Exception) {}
         }
     }
@@ -498,8 +657,9 @@ class AuthRepository(private val context: Context) {
     suspend fun syncLocalStats(totalMinutes: Int, tasksCount: Int, habitsCount: Int, achievementsCount: Int) {
         val user = _currentUser.value ?: return
         if (user.isGuest) return
+        val currentFirestore = firestore ?: return
         try {
-            firestore.collection("users").document(user.uid).set(
+            currentFirestore.collection("users").document(user.uid).set(
                 mapOf(
                     "totalFocusMinutes" to totalMinutes,
                     "completedTasksCount" to tasksCount,
@@ -522,13 +682,14 @@ class AuthRepository(private val context: Context) {
     ) {
         val user = _currentUser.value ?: return
         if (user.isGuest) return
+        val currentFirestore = firestore ?: return
         try {
             val totalFocusMins = focusSessions.sumOf { it.durationMinutes }
             val completedTasks = tasks.count { it.isCompleted }
             val completedHabits = habits.sumOf { it.currentStreak }
             val unlockedAch = achievements.count { it.isUnlocked }
 
-            val userRef = firestore.collection("users").document(user.uid)
+            val userRef = currentFirestore.collection("users").document(user.uid)
             userRef.set(
                 mapOf(
                     "totalFocusMinutes" to totalFocusMins,
@@ -562,8 +723,9 @@ class AuthRepository(private val context: Context) {
     suspend fun fetchCloudUserData(): CloudUserData? {
         val user = _currentUser.value ?: return null
         if (user.isGuest) return null
+        val currentFirestore = firestore ?: return null
         return try {
-            val doc = firestore.collection("users").document(user.uid)
+            val doc = currentFirestore.collection("users").document(user.uid)
                 .collection("cloudSync").document("current").get().await()
             if (doc.exists()) {
                 val backupJson = doc.getString("backupJson")

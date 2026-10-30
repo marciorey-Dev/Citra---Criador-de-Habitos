@@ -56,7 +56,7 @@ object AmbientBreakMusicManager {
         if (mediaPlayer?.isPlaying == true) return
         try {
             mediaPlayer?.release()
-            mediaPlayer = MediaPlayer.create(context, R.raw.sound_analog_warm_1)?.apply {
+            mediaPlayer = MediaPlayer.create(context, R.raw.sound_fundo_dyven_clade)?.apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)

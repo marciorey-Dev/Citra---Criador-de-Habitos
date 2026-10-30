@@ -359,16 +359,19 @@ fun SquareNoteCard(
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt))
     }
 
-    // Strip raw markdown symbols for a clean excerpt
+    // Strip raw markdown symbols for a clean excerpt without exposing image or audio links
     val cleanExcerpt = remember(note.content) {
         note.content
             .lines()
             .map { it.trim() }
             .filter { it.isNotBlank() && !it.startsWith("---") && !it.startsWith("|") }
             .joinToString(" ") { line ->
-                line.replace(Regex("^[#*\\-+\\s>]+"), "")
+                line.replace(Regex("!\\[audio:(.*?)\\]\\(.*?\\)"), "[Áudio: $1]")
+                    .replace(Regex("!\\[(.*?)\\]\\(.*?\\)"), "")
+                    .replace(Regex("^[#*\\-+\\s>]+"), "")
                     .replace(Regex("\\[(x| )\\]"), "")
             }
+            .trim()
             .take(120)
     }
 

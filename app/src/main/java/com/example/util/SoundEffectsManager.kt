@@ -30,6 +30,7 @@ object SoundEffectsManager {
         SoundItem("sound_deep_warm_1", "Ressonante Profundo 1 (Padrão Pomodoro)", R.raw.sound_deep_warm_1, "pomodoro"),
         SoundItem("sound_light_chime_1", "Sino Leve e Arejado 1 (Padrão Alertas)", R.raw.sound_light_chime_1, "alerta"),
 
+        SoundItem("sound_fundo_dyven_clade", "Música de Fundo Citra (Dyven Clade)", R.raw.sound_fundo_dyven_clade, "fundo"),
         SoundItem("sound_analog_warm_1", "Analógico Suave 1", R.raw.sound_analog_warm_1),
         SoundItem("sound_analog_warm_2", "Analógico Suave 2", R.raw.sound_analog_warm_2),
         SoundItem("sound_analog_warm_3", "Analógico Suave 3", R.raw.sound_analog_warm_3),

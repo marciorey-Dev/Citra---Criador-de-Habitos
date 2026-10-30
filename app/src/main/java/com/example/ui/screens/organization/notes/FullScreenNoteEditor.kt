@@ -139,6 +139,12 @@ fun FullScreenNoteEditor(
         redoStack.clear()
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            com.example.util.NoteAudioPlaybackManager.stop()
+        }
+    }
+
     fun undo() {
         if (undoStack.isNotEmpty()) {
             val prev = undoStack.removeAt(undoStack.size - 1)

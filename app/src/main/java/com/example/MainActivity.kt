@@ -184,6 +184,38 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Auto-sync or restore from Firebase Cloud when user logs in
+                LaunchedEffect(currentUser?.uid) {
+                    val user = currentUser
+                    if (user != null && !user.isGuest) {
+                        try {
+                            val cloudData = authRepository.fetchCloudUserData()
+                            if (cloudData != null) {
+                                if (viewModel.tasks.value.isEmpty() && viewModel.habits.value.isEmpty()) {
+                                    cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
+                                    cloudData.notesJson?.let { viewModel.importNotesJson(it) }
+                                }
+                            } else {
+                                val settingsMap = mapOf<String, Any>(
+                                    "themeAccent" to viewModel.themeAccent.value.name,
+                                    "keepScreenOn" to viewModel.keepScreenOn.value,
+                                    "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
+                                    "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
+                                )
+                                authRepository.syncAllUserDataToCloud(
+                                    tasks = viewModel.tasks.value,
+                                    habits = viewModel.habits.value,
+                                    notes = viewModel.notes.value,
+                                    categories = viewModel.categories.value,
+                                    focusSessions = viewModel.focusSessions.value,
+                                    achievements = viewModel.achievements.value,
+                                    settingsMap = settingsMap
+                                )
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+
                 // Handle back press to return to Home or Timer
                 BackHandler(enabled = pagerState.currentPage != 0) {
                     coroutineScope.launch {

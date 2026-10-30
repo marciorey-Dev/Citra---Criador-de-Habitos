@@ -289,16 +289,14 @@ fun StatsScreen(
         completedCount to missedCount
     }
 
-    LazyColumn(
+    Column(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(bottom = 24.dp)
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Header & Period Selector
-        item {
-            Column(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "Estatísticas & Histórico",
                     style = MaterialTheme.typography.headlineSmall,
@@ -338,11 +336,9 @@ fun StatsScreen(
                     }
                 }
             }
-        }
 
         // 1. DADOS DE INÍCIO: TEMPO DIÁRIO, SEMANAL & COMPARAÇÃO DE PERÍODOS
-        item {
-            Card(
+        Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier
@@ -439,11 +435,9 @@ fun StatsScreen(
                     }
                 }
             }
-        }
 
         // 2. HISTÓRICO DE HÁBITOS CUMPRIDOS E FALHADOS (Sem tom de culpa)
-        item {
-            Card(
+        Card(
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier
@@ -497,12 +491,10 @@ fun StatsScreen(
                     )
                 }
             }
-        }
 
         // 3. PROGRESSO POR CATEGORIA NO INÍCIO
         if (totalPeriodMinutes > 0) {
-            item {
-                Card(
+            Card(
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     modifier = Modifier
@@ -550,8 +542,7 @@ fun StatsScreen(
         }
 
         // 4 Summary Metric Cards (with readable Orange numbers in Dark Mode)
-        item {
-            Row(
+        Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -570,10 +561,8 @@ fun StatsScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
-        }
 
-        item {
-            Row(
+        Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -592,11 +581,9 @@ fun StatsScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
-        }
 
         // Focus Bar Chart with Period Navigation
-        item {
-            Card(
+        Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -682,11 +669,9 @@ fun StatsScreen(
                     }
                 }
             }
-        }
 
         // Category Pie Chart with Historical Comparison for the Selected Period
-        item {
-            Card(
+        Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -830,11 +815,9 @@ fun StatsScreen(
                     }
                 }
             }
-        }
 
         // Habit History & Performance Section
-        item {
-            Card(
+        Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -915,8 +898,6 @@ fun StatsScreen(
                 }
             }
         }
-    }
-}
 
 private data class PeriodComputation(
     val startMs: Long,

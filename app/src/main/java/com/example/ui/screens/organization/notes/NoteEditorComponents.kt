@@ -740,18 +740,20 @@ fun VisualBlockItem(
                         Spacer(modifier = Modifier.height(6.dp))
                     }
 
-                    OutlinedTextField(
-                        value = block.url,
-                        onValueChange = { onUpdate(block.copy(url = it)) },
-                        placeholder = { Text("URL ou caminho da imagem...") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    if (block.url.isBlank()) {
+                        OutlinedTextField(
+                            value = block.url,
+                            onValueChange = { onUpdate(block.copy(url = it)) },
+                            placeholder = { Text("URL ou caminho da imagem...") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
                     OutlinedTextField(
                         value = block.alt,
                         onValueChange = { onUpdate(block.copy(alt = it)) },
-                        placeholder = { Text("Legenda descritiva...") },
+                        placeholder = { Text("Legenda descritiva (opcional)...") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -891,15 +893,9 @@ private fun AudioBlockPlayer(
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
-    var isPlaying by remember { mutableStateOf(false) }
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
-
-    DisposableEffect(block.url) {
-        onDispose {
-            mediaPlayer?.release()
-            mediaPlayer = null
-        }
-    }
+    val playbackState by com.example.util.NoteAudioPlaybackManager.playbackState.collectAsState()
+    val isPlayingThis = playbackState.playingBlockId == block.id && playbackState.isPlaying
+    val isCurrentAudio = playbackState.playingBlockId == block.id
 
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -913,17 +909,39 @@ private fun AudioBlockPlayer(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Audiotrack, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Default.Audiotrack,
+                        contentDescription = null,
+                        tint = if (isPlayingThis) GreenAccent else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = if (block.title.isNotBlank()) block.title else "Áudio",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (isPlayingThis) GreenAccent else MaterialTheme.colorScheme.primary
                     )
+                    if (isPlayingThis) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "• Reproduzindo...",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = GreenAccent
+                        )
+                    }
                 }
 
-                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                IconButton(
+                    onClick = {
+                        if (isCurrentAudio) {
+                            com.example.util.NoteAudioPlaybackManager.stop()
+                        }
+                        onDelete()
+                    },
+                    modifier = Modifier.size(24.dp)
+                ) {
                     Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.Gray, modifier = Modifier.size(14.dp))
                 }
             }
@@ -938,41 +956,24 @@ private fun AudioBlockPlayer(
             ) {
                 IconButton(
                     onClick = {
-                        if (isPlaying) {
-                            mediaPlayer?.pause()
-                            isPlaying = false
-                        } else {
-                            if (mediaPlayer == null && block.url.isNotBlank()) {
-                                try {
-                                    val mp = MediaPlayer().apply {
-                                        setAudioAttributes(
-                                            AudioAttributes.Builder()
-                                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                                                .setUsage(AudioAttributes.USAGE_MEDIA)
-                                                .build()
-                                        )
-                                        setDataSource(context, Uri.parse(block.url))
-                                        isLooping = block.isLoop
-                                        setVolume(block.volume, block.volume)
-                                        prepare()
-                                        setOnCompletionListener {
-                                            if (!block.isLoop) isPlaying = false
-                                        }
-                                    }
-                                    mediaPlayer = mp
-                                } catch (_: Exception) {}
-                            }
-                            mediaPlayer?.start()
-                            isPlaying = true
-                        }
+                        com.example.util.NoteAudioPlaybackManager.playOrPause(
+                            context = context,
+                            blockId = block.id,
+                            url = block.url,
+                            volume = block.volume,
+                            isLoop = block.isLoop
+                        )
                     },
                     modifier = Modifier
                         .size(36.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .background(
+                            if (isPlayingThis) GreenAccent else MaterialTheme.colorScheme.primary,
+                            CircleShape
+                        )
                 ) {
                     Icon(
-                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pausar" else "Reproduzir",
+                        imageVector = if (isPlayingThis) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlayingThis) "Pausar" else "Reproduzir",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )
@@ -991,7 +992,9 @@ private fun AudioBlockPlayer(
                         value = block.volume,
                         onValueChange = { vol ->
                             onUpdate(block.copy(volume = vol))
-                            mediaPlayer?.setVolume(vol, vol)
+                            if (isCurrentAudio) {
+                                com.example.util.NoteAudioPlaybackManager.setVolume(vol)
+                            }
                         },
                         valueRange = 0f..1f,
                         modifier = Modifier.height(20.dp)
@@ -1003,7 +1006,9 @@ private fun AudioBlockPlayer(
                     onClick = {
                         val newLoop = !block.isLoop
                         onUpdate(block.copy(isLoop = newLoop))
-                        mediaPlayer?.isLooping = newLoop
+                        if (isCurrentAudio) {
+                            com.example.util.NoteAudioPlaybackManager.setLoop(newLoop)
+                        }
                     },
                     modifier = Modifier
                         .size(32.dp)
