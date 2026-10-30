@@ -1,5 +1,5 @@
 [citra_project_readme.md](https://github.com/user-attachments/files/34177243/citra_project_readme.md)
-# 🍊 Citra (formerly HabitCraft)
+# 🍊 Citra (HabitCraft)
 
 ![Citra Banner](https://via.placeholder.com/1200x400/FF6F00/FFFFFF?text=Citra+%E2%80%94+Gamified+Productivity+%26+Focus)
 
