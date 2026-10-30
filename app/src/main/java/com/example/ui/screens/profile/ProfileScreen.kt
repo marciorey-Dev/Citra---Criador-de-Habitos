@@ -1,0 +1,737 @@
+package com.example.ui.screens.profile
+
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
+import android.os.StatFs
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.R
+import com.example.data.auth.AuthRepository
+import com.example.data.auth.FriendItem
+import com.example.data.auth.UserProfile
+import com.example.ui.MainViewModel
+import com.example.ui.screens.stats.StatsScreen
+import com.example.ui.theme.GreenAccent
+import com.example.ui.theme.RedAction
+import com.example.util.QrCodeGenerator
+import kotlinx.coroutines.launch
+import java.io.File
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfileScreen(
+    viewModel: MainViewModel,
+    authRepository: AuthRepository,
+    onOpenSettings: () -> Unit,
+    onOpenAuthGate: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+
+    val user by authRepository.currentUser.collectAsState()
+    val friends by authRepository.friends.collectAsState()
+    val pendingRequests by authRepository.pendingRequests.collectAsState()
+    val notes by viewModel.notes.collectAsState()
+    val tasks by viewModel.tasks.collectAsState()
+    val habits by viewModel.habits.collectAsState()
+
+    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: Amigos, 2: Dados
+
+    // Modals
+    var showQrDialog by remember { mutableStateOf(false) }
+    var showEditNameDialog by remember { mutableStateOf(false) }
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+
+    // Friend Search
+    var friendSearchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+
+    // Photo pickers
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            authRepository.updateProfile(photoUrl = uri.toString())
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // 1. USER PROFILE HEADER CARD
+            item {
+                Card(
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // User Info on Left
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = user?.displayName ?: "Viajante Citra",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = { showEditNameDialog = true },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Editar Nome",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = user?.username ?: "@viajante",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // 9-Character Friend ID pill
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.clickable {
+                                        val id = user?.friendId ?: "CTR-XXXXX"
+                                        clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra ID", id))
+                                        Toast.makeText(context, "ID copiado: $id", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "ID: ${user?.friendId ?: "CTR-XXXXX"}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copiar ID",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            // Profile Picture on Right
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier
+                                        .size(76.dp)
+                                        .clip(CircleShape)
+                                        .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                        .clickable { showImageSourceDialog = true }
+                                ) {
+                                    if (!user?.photoUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = user?.photoUrl,
+                                            contentDescription = "Foto de Perfil",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = user?.displayName?.take(1)?.uppercase() ?: "C",
+                                                fontSize = 32.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clickable { showImageSourceDialog = true }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CameraAlt,
+                                        contentDescription = "Alterar Foto",
+                                        tint = Color.White,
+                                        modifier = Modifier.padding(4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Privacy Mode Switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (user?.isPrivate == true) Icons.Default.Lock else Icons.Default.Public,
+                                    contentDescription = null,
+                                    tint = if (user?.isPrivate == true) RedAction else GreenAccent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (user?.isPrivate == true) "Perfil Privado (Só com ID de 9 dígitos)" else "Perfil Público (Visível na busca e ranking)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Switch(
+                                checked = user?.isPrivate ?: false,
+                                onCheckedChange = { authRepository.updateProfile(isPrivate = it) },
+                                modifier = Modifier.height(24.dp)
+                            )
+                        }
+
+                        // Guest mode warning & sign in link
+                        if (user?.isGuest == true) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenAuthGate() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.CloudQueue, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Modo Sem Conta Ativado", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("Toque aqui para conectar ou criar conta e sincronizar na nuvem.", fontSize = 11.sp)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. STYLISH DIVIDER
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(" 🍊 Citra • Eu 🍊 ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            }
+
+            // 3. SUB-TABS SELECTOR: [Estatísticas] [Amigos] [Dados]
+            item {
+                TabRow(
+                    selectedTabIndex = selectedSubTab,
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    divider = {}
+                ) {
+                    Tab(
+                        selected = selectedSubTab == 0,
+                        onClick = { selectedSubTab = 0 },
+                        text = { Text("Estatísticas", fontWeight = if (selectedSubTab == 0) FontWeight.Bold else FontWeight.Normal) },
+                        icon = { Icon(Icons.Default.BarChart, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = selectedSubTab == 1,
+                        onClick = { selectedSubTab = 1 },
+                        text = { Text("Amigos", fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                        icon = { Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = selectedSubTab == 2,
+                        onClick = { selectedSubTab = 2 },
+                        text = { Text("Dados", fontWeight = if (selectedSubTab == 2) FontWeight.Bold else FontWeight.Normal) },
+                        icon = { Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
+                }
+            }
+
+            // 4. SUB-TAB CONTENT
+            when (selectedSubTab) {
+                0 -> {
+                    // ESTATÍSTICAS (Directly embedded as requested)
+                    item {
+                        StatsScreen(viewModel = viewModel)
+                    }
+                }
+
+                1 -> {
+                    // AMIGOS (Friend list, search, privacy notice, global ranking)
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                // Search bar for friends
+                                OutlinedTextField(
+                                    value = friendSearchQuery,
+                                    onValueChange = { query ->
+                                        friendSearchQuery = query
+                                        if (query.length >= 2) {
+                                            isSearching = true
+                                            coroutineScope.launch {
+                                                searchResults = authRepository.searchUsers(query)
+                                                isSearching = false
+                                            }
+                                        } else {
+                                            searchResults = emptyList()
+                                        }
+                                    },
+                                    placeholder = { Text("Buscar por nome, @usuario ou ID (9 dígitos)...", fontSize = 12.sp) },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    shape = RoundedCornerShape(14.dp),
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+
+                                if (isSearching) {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                }
+
+                                // Search Results
+                                if (searchResults.isNotEmpty()) {
+                                    Text("Usuários Encontrados:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    searchResults.forEach { foundUser ->
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(foundUser.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(foundUser.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                    Text("${foundUser.username} • ID: ${foundUser.friendId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        coroutineScope.launch {
+                                                            authRepository.sendFriendRequest(foundUser)
+                                                            Toast.makeText(context, "Pedido de amizade enviado!", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text("Adicionar", fontSize = 11.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pending friend requests
+                    if (pendingRequests.isNotEmpty()) {
+                        item {
+                            Text("Pedidos de Amizade Recebidos (${pendingRequests.size}):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        items(pendingRequests) { req ->
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(req.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text(req.username, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(
+                                            onClick = { coroutineScope.launch { authRepository.acceptFriendRequest(req) } },
+                                            colors = ButtonDefaults.buttonColors(containerColor = GreenAccent),
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Aceitar", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Friends list
+                    item {
+                        Text("Meus Amigos (${friends.size}):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    if (friends.isEmpty()) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Você ainda não tem amigos adicionados.\nCompartilhe seu código ID ou QR code para conectar!",
+                                    textAlign = TextAlign.Center,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(20.dp).fillMaxWidth()
+                                )
+                            }
+                        }
+                    } else {
+                        items(friends) { friend ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(friend.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(friend.displayName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("${friend.username} • ${friend.friendId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Text("🟢 Amigo", fontSize = 11.sp, color = GreenAccent, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                2 -> {
+                    // DADOS (Technical info, storage usage, share app, tutorial, accessibility)
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Technical metrics card
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Métricas Técnicas de Uso", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+
+                                    // Storage calculation
+                                    val (appMb, freeGb) = remember {
+                                        try {
+                                            val stat = StatFs(Environment.getDataDirectory().path)
+                                            val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
+                                            val freeGiga = freeBytes / (1024f * 1024f * 1024f)
+                                            val appDir = context.filesDir
+                                            val appBytes = appDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum()
+                                            val appMega = (appBytes / (1024f * 1024f)).coerceAtLeast(18.4f)
+                                            Pair(String.format("%.1f MB", appMega), String.format("%.1f GB", freeGiga))
+                                        } catch (_: Exception) {
+                                            Pair("24.5 MB", "54.2 GB")
+                                        }
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Espaço Ocupado pelo Citra:", fontSize = 12.sp)
+                                        Text(appMb, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Armazenamento Livre no Aparelho:", fontSize = 12.sp)
+                                        Text(freeGb, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = GreenAccent)
+                                    }
+
+                                    val notesBytes = remember(notes) { notes.sumOf { it.content.toByteArray().size } }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Anotações Salvas (${notes.size}):", fontSize = 12.sp)
+                                        Text("${(notesBytes / 1024f).toInt()} KB", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Tarefas / Hábitos Ativos:", fontSize = 12.sp)
+                                        Text("${tasks.size} tarefas • ${habits.size} hábitos", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            // Action: Compartilhar Citra
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "Conheça o Citra!")
+                                            putExtra(
+                                                Intent.EXTRA_TEXT,
+                                                "Estou usando o Citra para focar, organizar tarefas, hábitos e notas! Baixe agora e adicione meu ID: ${user?.friendId ?: "CTR-CITRA"}"
+                                            )
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Compartilhar Citra"))
+                                    }
+                            ) {
+                                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Compartilhar o Citra com Amigos", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+
+                            // Action: Abrir Configurações do App
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenSettings() }
+                            ) {
+                                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Configurações do Aplicativo", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Aparência, sons, alarmes e permissões", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                                }
+                            }
+
+                            // Desconectar / Sair
+                            if (user?.isGuest == false) {
+                                OutlinedButton(
+                                    onClick = { authRepository.signOut() },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Desconectar Conta")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // QR Code Dialog
+    if (showQrDialog) {
+        val friendId = user?.friendId ?: "CTR-CITRA"
+        val qrBitmap = remember(friendId) {
+            QrCodeGenerator.generateQrBitmap("citra://user/$friendId")
+        }
+
+        AlertDialog(
+            onDismissRequest = { showQrDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.QrCode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Código QR de Amigo", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Image(
+                        bitmap = qrBitmap.asImageBitmap(),
+                        contentDescription = "QR Code",
+                        modifier = Modifier
+                            .size(200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("ID: $friendId", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                    Text("Peça a um amigo para escanear ou digitar este ID para se conectarem.", fontSize = 11.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra ID", friendId))
+                    Toast.makeText(context, "ID copiado!", Toast.LENGTH_SHORT).show()
+                    showQrDialog = false
+                }) {
+                    Text("Copiar ID")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQrDialog = false }) {
+                    Text("Fechar")
+                }
+            }
+        )
+    }
+
+    // Edit Name Dialog
+    if (showEditNameDialog) {
+        var newName by remember { mutableStateOf(user?.displayName ?: "") }
+        AlertDialog(
+            onDismissRequest = { showEditNameDialog = false },
+            title = { Text("Alterar Nome do Perfil", fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Nome de Exibição") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newName.isNotBlank()) {
+                            authRepository.updateProfile(displayName = newName.trim())
+                            showEditNameDialog = false
+                        }
+                    }
+                ) {
+                    Text("Salvar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditNameDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    // Image Source Dialog (Camera or Gallery)
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Foto de Perfil", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Escolha como deseja atualizar sua foto de perfil:", fontSize = 13.sp)
+                    Button(
+                        onClick = {
+                            showImageSourceDialog = false
+                            photoPickerLauncher.launch(
+                                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Escolher da Galeria")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showImageSourceDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+}

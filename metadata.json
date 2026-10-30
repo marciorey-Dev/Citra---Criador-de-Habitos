@@ -1,0 +1,6 @@
+{
+  "name": "Citra",
+  "description": "Gamified productivity app with Pomodoro focus timer, ambient sounds, daily habit streaks, markdown notes, and social cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,50 @@
+{
+  "entities": [
+    {
+      "name": "User",
+      "collection": "users",
+      "fields": {
+        "displayName": { "type": "string" },
+        "username": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "friendId": { "type": "string" },
+        "isPrivate": { "type": "boolean" },
+        "totalFocusMinutes": { "type": "number" },
+        "completedTasksCount": { "type": "number" },
+        "completedHabitsCount": { "type": "number" },
+        "achievementsCount": { "type": "number" }
+      }
+    },
+    {
+      "name": "Task",
+      "collection": "users/{userId}/tasks",
+      "fields": {
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string" },
+        "dueDateText": { "type": "string" },
+        "isCompleted": { "type": "boolean" }
+      }
+    },
+    {
+      "name": "Habit",
+      "collection": "users/{userId}/habits",
+      "fields": {
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "currentStreak": { "type": "number" },
+        "completedDatesCsv": { "type": "string" }
+      }
+    },
+    {
+      "name": "Note",
+      "collection": "users/{userId}/notes",
+      "fields": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "category": { "type": "string" },
+        "isPinned": { "type": "boolean" }
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Public or private profile read
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        resource.data.isPrivate == false ||
+        request.auth.uid == userId ||
+        exists(/databases/$(database)/documents/users/$(userId)/friends/$(request.auth.uid))
+      );
+      allow create, update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+
+      // User subcollections: private to owner
+      match /tasks/{taskId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /habits/{habitId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /notes/{noteId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /friends/{friendId} {
+        allow read: if isAuthenticated() && (request.auth.uid == userId || request.auth.uid == friendId);
+        allow write: if isAuthenticated() && (request.auth.uid == userId || request.auth.uid == friendId);
+      }
+
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Friend requests collection
+    match /friendRequests/{requestId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.fromUserId ||
+        request.auth.uid == resource.data.toUserId
+      );
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.fromUserId;
+      allow update, delete: if isAuthenticated() && (
+        request.auth.uid == resource.data.fromUserId ||
+        request.auth.uid == resource.data.toUserId
+      );
+    }
+  }
+}
