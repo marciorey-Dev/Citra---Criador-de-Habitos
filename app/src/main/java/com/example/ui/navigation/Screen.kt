@@ -11,6 +11,8 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class Screen(
@@ -47,14 +49,14 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.CalendarMonth
     )
 
-    object Stats : Screen(
-        route = "stats",
-        title = "Estatísticas",
-        selectedIcon = Icons.Filled.BarChart,
-        unselectedIcon = Icons.Outlined.BarChart
+    object Profile : Screen(
+        route = "profile",
+        title = "Eu",
+        selectedIcon = Icons.Filled.Person,
+        unselectedIcon = Icons.Outlined.Person
     )
 
     companion object {
-        val allScreens = listOf(Home, Timer, Organization, Calendar, Stats)
+        val allScreens = listOf(Home, Timer, Organization, Calendar, Profile)
     }
 }

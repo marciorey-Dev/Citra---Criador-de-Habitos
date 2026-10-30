@@ -11,17 +11,27 @@ import java.io.File
 
 /**
  * Manages persistent auto-backup to device storage in Android's app-specific external files dir:
- * /storage/emulated/0/Android/data/<package>/files/habitcraft_persistent_backup.json
+ * /storage/emulated/0/Android/data/<package>/files/citra_persistent_backup.json
  * 
  * Complies 100% with Google Play policies (zero dangerous storage permissions required).
  * Ensures user tasks, habits, notes, sessions, categories, and achievements survive APK updates or clean installs.
  */
 object AutoDeviceStorageManager {
-    private const val BACKUP_FILENAME = "habitcraft_persistent_backup.json"
+    private const val BACKUP_FILENAME = "citra_persistent_backup.json"
+    private const val LEGACY_FILENAME = "backup_legacy_data.json"
 
     private fun getBackupFile(context: Context): File {
         val dir = context.getExternalFilesDir(null) ?: context.filesDir
-        return File(dir, BACKUP_FILENAME)
+        val primary = File(dir, BACKUP_FILENAME)
+        if (!primary.exists()) {
+            val legacy = File(dir, LEGACY_FILENAME)
+            if (legacy.exists()) {
+                try {
+                    legacy.copyTo(primary, overwrite = true)
+                } catch (_: Exception) {}
+            }
+        }
+        return primary
     }
 
     suspend fun saveFullAppSnapshot(

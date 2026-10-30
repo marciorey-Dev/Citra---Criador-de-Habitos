@@ -5,15 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
 
-class HabitCraftNotificationReceiver : BroadcastReceiver() {
+class CitraNotificationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "habitcraft:alarm_wakelock")
+        val wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "citra:alarm_wakelock")
         wakeLock?.acquire(15_000L) // Hold wake lock for up to 15 seconds to ensure notification/sound finishes
 
         try {
             val type = intent.getStringExtra(NotificationHelper.EXTRA_TYPE) ?: NotificationHelper.TYPE_TASK
-            val title = intent.getStringExtra(NotificationHelper.EXTRA_TITLE) ?: "HabitCraft"
+            val title = intent.getStringExtra(NotificationHelper.EXTRA_TITLE) ?: "Citra"
             val message = intent.getStringExtra(NotificationHelper.EXTRA_MESSAGE) ?: "Você tem um lembrete pendente."
             val id = intent.getIntExtra(NotificationHelper.EXTRA_ID, (System.currentTimeMillis() % 10000).toInt())
             val soundUri = intent.getStringExtra(NotificationHelper.EXTRA_SOUND_URI) ?: ""

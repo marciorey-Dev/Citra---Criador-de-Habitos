@@ -32,25 +32,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.notifications.NotificationHelper
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.text.style.TextAlign
+import com.example.data.auth.AuthRepository
 import com.example.ui.MainViewModel
+import com.example.ui.PomodoroPhase
 import com.example.ui.components.AchievementsDialog
 import com.example.ui.components.BackupDialog
 import com.example.ui.components.CreditsDialog
 import com.example.ui.components.WhatsNewDialog
 import com.example.ui.navigation.Screen
+import com.example.ui.screens.auth.AuthScreen
 import com.example.ui.screens.calendar.CalendarScreen
 import com.example.ui.screens.home.HomeScreen
 import com.example.ui.screens.organization.OrganizationScreen
 import com.example.ui.screens.organization.QuickAddTaskDialog
+import com.example.ui.screens.profile.ProfileScreen
 import com.example.ui.screens.settings.SettingsDialog
-import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.screens.timer.TimerScreen
-import com.example.ui.theme.HabitCraftTheme
+import com.example.ui.theme.CitraTheme
+import com.example.util.AmbientBreakMusicManager
+import com.example.util.QrCodeGenerator
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    private val authRepository by lazy { AuthRepository(this) }
 
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,6 +80,10 @@ class MainActivity : ComponentActivity() {
             val isNoteEditorOpen by viewModel.isNoteEditorOpen.collectAsState()
             val whatsNewVisible by viewModel.whatsNewVisible.collectAsState()
 
+            val notificationSettings by viewModel.notificationSettings.collectAsState()
+            val currentUser by authRepository.currentUser.collectAsState()
+            val isGuestMode by authRepository.isGuestMode.collectAsState()
+
             val systemDark = isSystemInDarkTheme()
             val effectiveDark = isDarkThemeSetting ?: systemDark
 
@@ -82,7 +99,31 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            HabitCraftTheme(darkTheme = effectiveDark, accent = themeAccent) {
+            // Sync Ambient Break Music with notificationSettings and Timer Break phase
+            LaunchedEffect(notificationSettings.ambientBreakMusicInApp, notificationSettings.ambientMusicVolume) {
+                AmbientBreakMusicManager.init(
+                    this@MainActivity,
+                    alwaysPlaying = notificationSettings.ambientBreakMusicInApp,
+                    volume = notificationSettings.ambientMusicVolume
+                )
+            }
+
+            LaunchedEffect(pomodoroState.currentPhase, pomodoroState.isRunning) {
+                val isBreak = pomodoroState.isRunning && (pomodoroState.currentPhase == PomodoroPhase.BREAK)
+                AmbientBreakMusicManager.onBreakStateChanged(this@MainActivity, isBreak)
+            }
+
+            CitraTheme(darkTheme = effectiveDark, accent = themeAccent) {
+                // If user is not logged in and hasn't chosen guest mode yet, show first-launch AuthScreen
+                if (currentUser == null && !isGuestMode) {
+                    AuthScreen(
+                        authRepository = authRepository,
+                        onAuthSuccess = { /* currentUser will update via StateFlow */ },
+                        onContinueAsGuest = { /* isGuestMode will update via StateFlow */ }
+                    )
+                    return@CitraTheme
+                }
+
                 val snackbarHostState = remember { SnackbarHostState() }
                 val coroutineScope = rememberCoroutineScope()
 
@@ -94,7 +135,7 @@ class MainActivity : ComponentActivity() {
                         "TIMER" -> 1
                         "ORGANIZATION", "NOTES" -> 2
                         "CALENDAR" -> 3
-                        "STATS" -> 4
+                        "STATS", "PROFILE" -> 4
                         else -> 0 // "HOME"
                     }
                 }
@@ -117,6 +158,8 @@ class MainActivity : ComponentActivity() {
                 var showCreditsDialog by remember { mutableStateOf(false) }
                 var showSettingsDialog by remember { mutableStateOf(false) }
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
+                var showAuthDialog by remember { mutableStateOf(false) }
+                var showQrCodeDialog by remember { mutableStateOf(false) }
 
                 val achievements by viewModel.achievements.collectAsState()
 
@@ -160,7 +203,7 @@ class MainActivity : ComponentActivity() {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    // Screen Title (Persistent "HabitCraft" title removed per request)
+                                    // Screen Title (Clean current screen label)
                                     Text(
                                         text = currentScreen.title,
                                         fontWeight = FontWeight.Bold,
@@ -209,16 +252,29 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             actions = {
-                                // Direct Settings Gear Button
-                                IconButton(
-                                    onClick = { showSettingsDialog = true },
-                                    modifier = Modifier.testTag("top_settings_gear_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Settings,
-                                        contentDescription = "Configurações",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                // Settings and QR buttons ONLY on "Eu" screen (page 4) per request
+                                if (pagerState.currentPage == 4) {
+                                    IconButton(
+                                        onClick = { showQrCodeDialog = true },
+                                        modifier = Modifier.testTag("top_qr_code_btn")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.QrCode,
+                                            contentDescription = "Código QR",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { showSettingsDialog = true },
+                                        modifier = Modifier.testTag("top_settings_gear_btn")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Settings,
+                                            contentDescription = "Configurações",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
 
                                 // 3-Dots Menu Button
@@ -418,11 +474,78 @@ class MainActivity : ComponentActivity() {
                                     coroutineScope.launch { pagerState.animateScrollToPage(1) }
                                 }
                             )
-                            Screen.Stats -> StatsScreen(
-                                viewModel = viewModel
+                            Screen.Profile -> ProfileScreen(
+                                viewModel = viewModel,
+                                authRepository = authRepository,
+                                onOpenSettings = { showSettingsDialog = true },
+                                onOpenAuthGate = { showAuthDialog = true }
                             )
                         }
                     }
+                }
+
+                if (showAuthDialog) {
+                    Dialog(
+                        onDismissRequest = { showAuthDialog = false },
+                        properties = DialogProperties(usePlatformDefaultWidth = false)
+                    ) {
+                        AuthScreen(
+                            authRepository = authRepository,
+                            onAuthSuccess = { showAuthDialog = false },
+                            onContinueAsGuest = { showAuthDialog = false }
+                        )
+                    }
+                }
+
+                if (showQrCodeDialog) {
+                    val friendId = currentUser?.friendId ?: "CTR-CITRA"
+                    val qrBitmap = remember(friendId) {
+                        QrCodeGenerator.generateQrBitmap("citra://user/$friendId")
+                    }
+
+                    AlertDialog(
+                        onDismissRequest = { showQrCodeDialog = false },
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.QrCode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Código QR Citra", fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        text = {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Image(
+                                    bitmap = qrBitmap.asImageBitmap(),
+                                    contentDescription = "QR Code",
+                                    modifier = Modifier
+                                        .size(200.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("ID: $friendId", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+                                Text("Apresente aos seus amigos para adicionarem você no Citra.", fontSize = 11.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Citra ID", friendId))
+                                android.widget.Toast.makeText(this@MainActivity, "ID copiado!", android.widget.Toast.LENGTH_SHORT).show()
+                                showQrCodeDialog = false
+                            }) {
+                                Text("Copiar ID")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showQrCodeDialog = false }) {
+                                Text("Fechar")
+                            }
+                        }
+                    )
                 }
 
                 if (showSettingsDialog) {
@@ -475,6 +598,29 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         viewModel.triggerAutoBackup()
+
+        // Sync all user data to Firebase Firestore if logged in
+        val user = authRepository.currentUser.value
+        if (user != null && !user.isGuest) {
+            val settingsMap = mapOf<String, Any>(
+                "themeAccent" to viewModel.themeAccent.value.name,
+                "keepScreenOn" to viewModel.keepScreenOn.value,
+                "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
+                "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
+            )
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                authRepository.syncAllUserDataToCloud(
+                    tasks = viewModel.tasks.value,
+                    habits = viewModel.habits.value,
+                    notes = viewModel.notes.value,
+                    categories = viewModel.categories.value,
+                    focusSessions = viewModel.focusSessions.value,
+                    achievements = viewModel.achievements.value,
+                    settingsMap = settingsMap
+                )
+            }
+        }
+
         // Ongoing floating notification when user leaves app while timer is running
         val state = viewModel.pomodoroState.value
         if (state.isRunning || state.isPaused) {

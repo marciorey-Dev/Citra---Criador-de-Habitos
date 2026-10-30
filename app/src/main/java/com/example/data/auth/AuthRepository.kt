@@ -22,6 +22,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import com.example.data.backup.BackupManager
+import com.example.data.model.Achievement
+import com.example.data.model.Category
+import com.example.data.model.FocusSession
+import com.example.data.model.Habit
+import com.example.data.model.Note
+import com.example.data.model.Task
 
 data class UserProfile(
     val uid: String,
@@ -191,6 +198,9 @@ class AuthRepository(private val context: Context) {
     suspend fun signInWithGoogle(): Result<UserProfile> {
         return try {
             val serverClientId = context.getString(R.string.default_web_client_id)
+            if (serverClientId.isBlank() || serverClientId == "default_web_client_id") {
+                return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))
+            }
             val signInOption = GetSignInWithGoogleOption.Builder(serverClientId).build()
 
             val request = GetCredentialRequest.Builder()
@@ -500,4 +510,75 @@ class AuthRepository(private val context: Context) {
             ).await()
         } catch (_: Exception) {}
     }
+
+    suspend fun syncAllUserDataToCloud(
+        tasks: List<Task>,
+        habits: List<Habit>,
+        notes: List<Note>,
+        categories: List<Category>,
+        focusSessions: List<FocusSession>,
+        achievements: List<Achievement>,
+        settingsMap: Map<String, Any>
+    ) {
+        val user = _currentUser.value ?: return
+        if (user.isGuest) return
+        try {
+            val totalFocusMins = focusSessions.sumOf { it.durationMinutes }
+            val completedTasks = tasks.count { it.isCompleted }
+            val completedHabits = habits.sumOf { it.currentStreak }
+            val unlockedAch = achievements.count { it.isUnlocked }
+
+            val userRef = firestore.collection("users").document(user.uid)
+            userRef.set(
+                mapOf(
+                    "totalFocusMinutes" to totalFocusMins,
+                    "completedTasksCount" to completedTasks,
+                    "completedHabitsCount" to completedHabits,
+                    "achievementsCount" to unlockedAch
+                ),
+                SetOptions.merge()
+            ).await()
+
+            val backupJson = BackupManager.createBackupJson(
+                tasks = tasks,
+                habits = habits,
+                focusSessions = focusSessions,
+                categories = categories,
+                achievements = achievements
+            )
+            val notesJson = BackupManager.exportNotesJson(notes)
+
+            userRef.collection("cloudSync").document("current").set(
+                mapOf(
+                    "backupJson" to backupJson,
+                    "notesJson" to notesJson,
+                    "settings" to settingsMap,
+                    "syncedAt" to System.currentTimeMillis()
+                )
+            ).await()
+        } catch (_: Exception) {}
+    }
+
+    suspend fun fetchCloudUserData(): CloudUserData? {
+        val user = _currentUser.value ?: return null
+        if (user.isGuest) return null
+        return try {
+            val doc = firestore.collection("users").document(user.uid)
+                .collection("cloudSync").document("current").get().await()
+            if (doc.exists()) {
+                val backupJson = doc.getString("backupJson")
+                val notesJson = doc.getString("notesJson")
+                val settings = doc.get("settings") as? Map<String, Any>
+                CloudUserData(backupJson, notesJson, settings)
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
+
+data class CloudUserData(
+    val backupJson: String?,
+    val notesJson: String?,
+    val settings: Map<String, Any>?
+)

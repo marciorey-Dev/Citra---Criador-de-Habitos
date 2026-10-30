@@ -47,6 +47,7 @@ import com.example.ui.MainViewModel
 import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
+import com.example.ui.components.AppTutorialDialog
 import com.example.util.QrCodeGenerator
 import kotlinx.coroutines.launch
 import java.io.File
@@ -69,6 +70,9 @@ fun ProfileScreen(
     val notes by viewModel.notes.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
     val habits by viewModel.habits.collectAsState()
+    val focusSessions by viewModel.focusSessions.collectAsState()
+    val keepScreenOn by viewModel.keepScreenOn.collectAsState()
+    val notificationSettings by viewModel.notificationSettings.collectAsState()
 
     var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: Amigos, 2: Dados
 
@@ -76,18 +80,33 @@ fun ProfileScreen(
     var showQrDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
+    var showTutorialDialog by remember { mutableStateOf(false) }
 
     // Friend Search
     var friendSearchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
 
-    // Photo pickers
+    // Photo pickers (Gallery + Camera)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
             authRepository.updateProfile(photoUrl = uri.toString())
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        if (bitmap != null) {
+            try {
+                val file = File(context.cacheDir, "profile_avatar_${System.currentTimeMillis()}.png")
+                file.outputStream().use { out ->
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out)
+                }
+                authRepository.updateProfile(photoUrl = Uri.fromFile(file).toString())
+            } catch (_: Exception) {}
         }
     }
 
@@ -529,6 +548,12 @@ fun ProfileScreen(
                                         }
                                     }
 
+                                    val totalMinutesSum = remember(focusSessions) { focusSessions.sumOf { it.durationMinutes } }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Máximo de Minutos Somados:", fontSize = 12.sp)
+                                        Text("$totalMinutesSum min (${totalMinutesSum / 60}h ${totalMinutesSum % 60}m)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                    }
+
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("Espaço Ocupado pelo Citra:", fontSize = 12.sp)
                                         Text(appMb, fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -549,6 +574,70 @@ fun ProfileScreen(
                                         Text("Tarefas / Hábitos Ativos:", fontSize = 12.sp)
                                         Text("${tasks.size} tarefas • ${habits.size} hábitos", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
+                                }
+                            }
+
+                            // Accessibility Card
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Acessibilidade e Usabilidade", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Manter Tela Ligada no Timer", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Impede o dispositivo de bloquear enquanto foca", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Switch(
+                                            checked = keepScreenOn,
+                                            onCheckedChange = { viewModel.setKeepScreenOn(it) }
+                                        )
+                                    }
+
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Resposta Tátil / Vibração", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Vibrar ao concluir ciclos e alarmes", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Switch(
+                                            checked = notificationSettings.vibrate,
+                                            onCheckedChange = {
+                                                viewModel.updateNotificationSettings(notificationSettings.copy(vibrate = it))
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Action: Tutorial do App
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showTutorialDialog = true }
+                            ) {
+                                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.School, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Tutorial e Dicas do Citra", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Revisar o guia rápido de foco e organização", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null)
                                 }
                             }
 
@@ -713,6 +802,19 @@ fun ProfileScreen(
                     Button(
                         onClick = {
                             showImageSourceDialog = false
+                            cameraLauncher.launch(null)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Tirar Foto com a Câmera")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            showImageSourceDialog = false
                             photoPickerLauncher.launch(
                                 androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                             )
@@ -733,5 +835,9 @@ fun ProfileScreen(
                 }
             }
         )
+    }
+
+    if (showTutorialDialog) {
+        AppTutorialDialog(onDismiss = { showTutorialDialog = false })
     }
 }

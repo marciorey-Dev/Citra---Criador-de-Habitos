@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -54,10 +55,12 @@ fun TimerScreen(
     var isCategoryTrashVisible by remember { mutableStateOf(false) }
     var categoryToDelete by remember { mutableStateOf<com.example.data.model.Category?>(null) }
 
-    // Presets in 5-minute increments (10 to 120min focus, 5 to 50min break, 1 to 12 cycles)
-    val focusPresets = remember { (10..120 step 5).toList() }
-    val breakPresets = remember { (5..50 step 5).toList() }
-    val cyclePresets = remember { (1..12).toList() }
+    var showManualTimeInputDialog by remember { mutableStateOf(false) }
+
+    // Presets for quick selection
+    val focusPresets = remember { listOf(10, 15, 20, 25, 30, 45, 60, 90, 120) }
+    val breakPresets = remember { listOf(5, 10, 15, 20, 25, 30) }
+    val cyclePresets = remember { listOf(1, 2, 3, 4, 6, 8, 12) }
 
     val isRunning = pomodoroState.isRunning
 
@@ -238,15 +241,32 @@ fun TimerScreen(
                 )
             }
 
-            // Digital Time Display at center
+            // Digital Time Display at center with translucent edit pencil
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = formattedTime,
-                    fontSize = 42.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    letterSpacing = 1.sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(enabled = !isRunning) {
+                            showManualTimeInputDialog = true
+                        }
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = formattedTime,
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Editar tempo",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(2.dp))
 
@@ -470,7 +490,7 @@ fun TimerScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 2. CONFIGURAÇÃO DA SESSÃO: ESTILO ROLL DE COFRE COM AGULHA E PINOS GIRATÓRIOS
+        // 2. CONFIGURAÇÃO DA SESSÃO: PRESETS RÁPIDOS
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -495,45 +515,141 @@ fun TimerScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "🔐 Roll de Cofre",
+                        text = "⏱️ Ajuste Rápido",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
 
-                // 1. Tempo de Foco (10 a 120 min de 5 em 5)
-                VaultDialSelector(
-                    label = "Tempo de Foco (10 a 120 min)",
-                    selectedValue = pomodoroState.focusMinutes,
-                    values = focusPresets,
-                    unitLabel = "min",
-                    accentColor = MaterialTheme.colorScheme.primary,
-                    enabled = !isRunning,
-                    onValueChange = { viewModel.setFocusDuration(it) }
-                )
+                // 1. Tempo de Foco
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Tempo de Foco",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Text(
+                                text = "${pomodoroState.focusMinutes} min",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(focusPresets) { mins ->
+                            val isSelected = pomodoroState.focusMinutes == mins
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { if (!isRunning) viewModel.setFocusDuration(mins) },
+                                enabled = !isRunning,
+                                label = { Text("${mins}m", fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
 
-                // 2. Tempo de Pausa (5 a 50 min de 5 em 5)
-                VaultDialSelector(
-                    label = "Tempo de Pausa (5 a 50 min)",
-                    selectedValue = pomodoroState.breakMinutes,
-                    values = breakPresets,
-                    unitLabel = "min",
-                    accentColor = GreenAccent,
-                    enabled = !isRunning,
-                    onValueChange = { viewModel.setBreakDuration(it) }
-                )
+                // 2. Tempo de Pausa
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Tempo de Pausa",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = GreenContainer
+                        ) {
+                            Text(
+                                text = "${pomodoroState.breakMinutes} min",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = OnGreenContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(breakPresets) { mins ->
+                            val isSelected = pomodoroState.breakMinutes == mins
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { if (!isRunning) viewModel.setBreakDuration(mins) },
+                                enabled = !isRunning,
+                                label = { Text("${mins}m", fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
 
-                // 3. Ciclos de Repetição (1x a 12x)
-                VaultDialSelector(
-                    label = "Ciclos de Repetição (1x a 12x)",
-                    selectedValue = pomodoroState.totalCycles,
-                    values = cyclePresets,
-                    unitLabel = "x",
-                    accentColor = MaterialTheme.colorScheme.primary,
-                    enabled = !isRunning,
-                    onValueChange = { viewModel.setTotalCycles(it) }
-                )
+                // 3. Ciclos de Repetição
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Ciclos de Repetição",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = "${pomodoroState.totalCycles}x",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(cyclePresets) { cycles ->
+                            val isSelected = pomodoroState.totalCycles == cycles
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { if (!isRunning) viewModel.setTotalCycles(cycles) },
+                                enabled = !isRunning,
+                                label = { Text("${cycles}x", fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -546,6 +662,86 @@ fun TimerScreen(
             onConfirm = { name, emoji ->
                 viewModel.addCustomCategory(name, emoji)
                 showAddCategoryDialog = false
+            }
+        )
+    }
+
+    if (showManualTimeInputDialog) {
+        var tempMinutesText by remember { mutableStateOf(pomodoroState.focusMinutes.toString()) }
+        var errorMessage by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showManualTimeInputDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Ajustar Tempo do Timer",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Digite a minutagem desejada para o foco (valor de 1 a 120 minutos):",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    OutlinedTextField(
+                        value = tempMinutesText,
+                        onValueChange = { input ->
+                            val digitsOnly = input.filter { it.isDigit() }.take(3)
+                            tempMinutesText = digitsOnly
+                            val num = digitsOnly.toIntOrNull()
+                            errorMessage = when {
+                                digitsOnly.isEmpty() -> "Informe os minutos"
+                                num == null || num <= 0 -> "O valor deve ser maior que 0"
+                                num > 120 -> "O tempo máximo é de 120 minutos"
+                                else -> null
+                            }
+                        },
+                        label = { Text("Tempo de Foco (min)") },
+                        singleLine = true,
+                        isError = errorMessage != null,
+                        supportingText = {
+                            if (errorMessage != null) {
+                                Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
+                            } else {
+                                Text("Máximo: 120 min")
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val num = tempMinutesText.toIntOrNull()
+                        if (num != null && num in 1..120) {
+                            viewModel.setFocusDuration(num)
+                            showManualTimeInputDialog = false
+                        }
+                    },
+                    enabled = errorMessage == null && tempMinutesText.isNotBlank(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Definir")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showManualTimeInputDialog = false }) {
+                    Text("Cancelar")
+                }
             }
         )
     }

@@ -15,7 +15,7 @@ import com.example.data.local.PreferencesManager
 import com.example.data.local.NotificationSettings
 import com.example.data.local.SavedTimerSnapshot
 import com.example.data.model.*
-import com.example.data.repository.HabitCraftRepository
+import com.example.data.repository.CitraRepository
 import com.example.notifications.NotificationHelper
 import com.example.ui.theme.ThemeAccent
 import kotlinx.coroutines.Job
@@ -49,7 +49,7 @@ data class FlexiblePomodoroState(
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getInstance(application)
-    val repository = HabitCraftRepository(application, database)
+    val repository = CitraRepository(application, database)
     val musicPlayer = LocalMusicPlayer(application)
     val preferencesManager = PreferencesManager(application)
 

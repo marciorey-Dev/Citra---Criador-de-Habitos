@@ -63,7 +63,7 @@ fun WhatsNewDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "HabitCraft Versão 0.5.0",
+                    text = "Citra Versão 0.7.1",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
@@ -85,44 +85,39 @@ fun WhatsNewDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeatureHighlightItem(
+                        icon = "☁️",
+                        title = "Sincronização em Nuvem Firebase",
+                        description = "Seus hábitos, tarefas, notas, timer e configurações agora sincronizam automaticamente com a nuvem."
+                    )
+                    FeatureHighlightItem(
+                        icon = "👤",
+                        title = "Nova Aba 'Eu' & Comunidade",
+                        description = "Gerencie seu perfil, compartilhe seu ID único de 9 dígitos via QR Code, busque amigos e dispute no ranking global."
+                    )
+                    FeatureHighlightItem(
+                        icon = "⏱️",
+                        title = "Ajuste Manual e Seletor do Timer",
+                        description = "Toque no lápis translúcido para digitar qualquer minutagem até 120min, ou selecione rapidamente pelos novos botões de tempo."
+                    )
+                    FeatureHighlightItem(
+                        icon = "🎵",
+                        title = "Música Ambiente de Pausa e Fundo",
+                        description = "Trilha sonora ambiente relaxante durante pausas ou tocando continuamente enquanto usa o aplicativo, com ajuste fino de volume."
+                    )
+                    FeatureHighlightItem(
+                        icon = "🔒",
+                        title = "Controle de Privacidade",
+                        description = "Escolha entre perfil público para competir no ranking ou perfil privado para compartilhar dados apenas com amigos autorizados."
+                    )
+                    FeatureHighlightItem(
                         icon = "📝",
                         title = "Modo Imersivo para Notas",
                         description = "Espaço máximo de tela sem barras superiores nem inferiores ao editar notas. Menus e barras ocultos automaticamente."
                     )
                     FeatureHighlightItem(
-                        icon = "🧮",
-                        title = "Código & Matemática em Tela Cheia",
-                        description = "Abra blocos de sintaxe ou equações em um ambiente 100% focado e sem distrações."
-                    )
-                    FeatureHighlightItem(
                         icon = "📊",
-                        title = "Tabelas Unificadas Estilo Planilha",
-                        description = "Crie tabelas com até 5 colunas expansíveis, grade contínua e redimensionamento automático de texto."
-                    )
-                    FeatureHighlightItem(
-                        icon = "🌫️",
-                        title = "Desfoque Gaussiano Efetivo",
-                        description = "Algoritmo de desfoque fotográfico que desfoca qualquer imagem de fundo até 100% com total nitidez."
-                    )
-                    FeatureHighlightItem(
-                        icon = "⏱️",
-                        title = "Timer com Rastreamento Real",
-                        description = "O Pomodoro continua contando com precisão pelo relógio mesmo se o app for limpo da memória ou o aparelho desligar."
-                    )
-                    FeatureHighlightItem(
-                        icon = "⏰",
-                        title = "Alarmes Resilientes ao Reinício",
-                        description = "Lembretes e avisos das tarefas e hábitos são automaticamente reagendados ao ligar o celular."
-                    )
-                    FeatureHighlightItem(
-                        icon = "🟢",
-                        title = "Círculos Semanais de Hábitos",
-                        description = "Acompanhe visualmente a consistência dos 7 dias da semana abaixo do horário de cada hábito."
-                    )
-                    FeatureHighlightItem(
-                        icon = "💾",
-                        title = "Backup Automático no Dispositivo",
-                        description = "Seus dados são salvos continuamente no armazenamento do aparelho para nunca perder seu progresso."
+                        title = "Estatísticas & Painel de Dados",
+                        description = "Acompanhe seus gráficos de foco e veja dados técnicos de armazenamento ocupado pelo Citra no seu Android."
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -162,7 +157,7 @@ fun WhatsNewDialog(
                             Spacer(modifier = Modifier.height(8.dp))
                             Button(
                                 onClick = {
-                                    val url = "https://wa.me/244932918030?text=Ol%C3%A1%20M%C3%A1rcio%2C%20estou%20testando%20o%20HabitCraft%20v0.5.0!"
+                                    val url = "https://wa.me/244932918030?text=Ol%C3%A1%20M%C3%A1rcio%2C%20estou%20testando%20o%20Citra%20v0.7.1!"
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                     try { context.startActivity(intent) } catch (_: Exception) {}
                                 },

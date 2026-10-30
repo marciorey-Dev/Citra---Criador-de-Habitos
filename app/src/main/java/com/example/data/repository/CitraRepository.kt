@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import java.text.SimpleDateFormat
 import java.util.*
 
-class HabitCraftRepository(
+class CitraRepository(
     private val context: Context,
     private val database: AppDatabase
 ) {
@@ -393,8 +393,8 @@ class HabitCraftRepository(
             val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
             noteDao.insertNote(
                 Note(
-                    title = "Guia do HabitCraft 🍊",
-                    content = """# Bem-vindo ao HabitCraft!
+                    title = "Guia do Citra 🍊",
+                    content = """# Bem-vindo ao Citra!
 Seu companheiro de produtividade, estudos e organização.
 
 ### Recursos:

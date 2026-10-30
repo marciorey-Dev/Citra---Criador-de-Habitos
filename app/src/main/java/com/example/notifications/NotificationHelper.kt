@@ -18,10 +18,10 @@ import com.example.R
 import java.util.Calendar
 
 object NotificationHelper {
-    const val CHANNEL_TASKS = "habitcraft_tasks"
-    const val CHANNEL_HABITS = "habitcraft_habits"
-    const val CHANNEL_ALERTS = "habitcraft_alerts"
-    const val CHANNEL_TIMER_ONGOING = "habitcraft_timer_ongoing"
+    const val CHANNEL_TASKS = "citra_tasks"
+    const val CHANNEL_HABITS = "citra_habits"
+    const val CHANNEL_ALERTS = "citra_alerts"
+    const val CHANNEL_TIMER_ONGOING = "citra_timer_ongoing"
 
     const val TIMER_NOTIFICATION_ID = 99999
 
@@ -244,7 +244,7 @@ object NotificationHelper {
         if (minutesBefore > 0) {
             val advanceTriggerTime = dueTimestamp - (minutesBefore * 60 * 1000L)
             if (advanceTriggerTime > now) {
-                val advanceIntent = Intent(context, HabitCraftNotificationReceiver::class.java).apply {
+                val advanceIntent = Intent(context, CitraNotificationReceiver::class.java).apply {
                     putExtra(EXTRA_TYPE, TYPE_TASK)
                     putExtra(EXTRA_TITLE, "Tarefa em Breve: $title")
                     putExtra(EXTRA_MESSAGE, "Vence em $minutesBefore minutos! Fique atento.")
@@ -263,7 +263,7 @@ object NotificationHelper {
 
         // 2. Exact-time reminder (at deadline)
         if (dueTimestamp > now) {
-            val exactIntent = Intent(context, HabitCraftNotificationReceiver::class.java).apply {
+            val exactIntent = Intent(context, CitraNotificationReceiver::class.java).apply {
                 putExtra(EXTRA_TYPE, TYPE_TASK)
                 putExtra(EXTRA_TITLE, "Prazo da Tarefa: $title")
                 putExtra(EXTRA_MESSAGE, "Prazo final agora! Conclua sua tarefa.")
@@ -311,7 +311,7 @@ object NotificationHelper {
 
     fun cancelTaskReminder(context: Context, taskId: Long) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val intent = Intent(context, HabitCraftNotificationReceiver::class.java)
+        val intent = Intent(context, CitraNotificationReceiver::class.java)
 
         val p1 = PendingIntent.getBroadcast(context, taskId.toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         alarmManager.cancel(p1)
@@ -341,7 +341,7 @@ object NotificationHelper {
                     add(Calendar.DAY_OF_YEAR, 1)
                 }
             }
-            val intentAdvance = Intent(context, HabitCraftNotificationReceiver::class.java).apply {
+            val intentAdvance = Intent(context, CitraNotificationReceiver::class.java).apply {
                 putExtra(EXTRA_TYPE, TYPE_HABIT)
                 putExtra(EXTRA_TITLE, "Hábito em $leadMinutes min: $title")
                 putExtra(EXTRA_MESSAGE, "Horário programado: $timeString. Prepare-se para seu hábito!")
@@ -371,7 +371,7 @@ object NotificationHelper {
                 add(Calendar.DAY_OF_YEAR, 1)
             }
         }
-        val intentExact = Intent(context, HabitCraftNotificationReceiver::class.java).apply {
+        val intentExact = Intent(context, CitraNotificationReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, TYPE_HABIT)
             putExtra(EXTRA_TITLE, "Hora do Hábito: $title")
             putExtra(EXTRA_MESSAGE, "Hora exata de praticar seu hábito! Mantenha sua sequência ativa.")
@@ -424,7 +424,7 @@ object NotificationHelper {
         }
 
         val requestCode = if (isAdvance) (habitId + 10000).toInt() else (habitId + 60000).toInt()
-        val intent = Intent(context, HabitCraftNotificationReceiver::class.java).apply {
+        val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, TYPE_HABIT)
             putExtra(EXTRA_TITLE, if (isAdvance) "Hábito em $leadMinutes min: $title" else "Hora do Hábito: $title")
             putExtra(EXTRA_MESSAGE, if (isAdvance) "Horário programado: $timeString. Prepare-se para seu hábito!" else "Hora exata de praticar seu hábito! Mantenha sua sequência ativa.")
@@ -446,7 +446,7 @@ object NotificationHelper {
 
     fun cancelHabitReminder(context: Context, habitId: Long) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val intent = Intent(context, HabitCraftNotificationReceiver::class.java)
+        val intent = Intent(context, CitraNotificationReceiver::class.java)
 
         val p1 = PendingIntent.getBroadcast(context, (habitId + 10000).toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         alarmManager.cancel(p1)

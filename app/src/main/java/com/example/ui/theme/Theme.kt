@@ -12,7 +12,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 @Composable
-fun HabitCraftTheme(
+fun CitraTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     accent: ThemeAccent = ThemeAccent.TANGERINA,
     content: @Composable () -> Unit

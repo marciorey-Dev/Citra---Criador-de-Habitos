@@ -81,7 +81,7 @@ object NoteExportHelper {
             isAntiAlias = true
         }
         val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
-        val metaText = "Categoria: $noteCategory  •  Exportado em $dateStr  •  HabitCraft"
+        val metaText = "Categoria: $noteCategory  •  Exportado em $dateStr  •  Citra"
         canvas.drawText(metaText, margin, y + 10f, metaPaint)
         y += 20f
 
@@ -421,7 +421,7 @@ object NoteExportHelper {
         sb.append("<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n")
         sb.append("<meta charset=\"utf-8\">\n")
         sb.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
-        sb.append("<title>${escapeHtml(title)} - HabitCraft</title>\n")
+        sb.append("<title>${escapeHtml(title)} - Citra</title>\n")
         sb.append("<style>\n")
         sb.append("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 800px; margin: 40px auto; padding: 0 20px; background: #f8fafc; }\n")
         sb.append(".card { background: #ffffff; padding: 36px; border-radius: 18px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }\n")
@@ -446,7 +446,7 @@ object NoteExportHelper {
         sb.append(".footer { margin-top: 36px; text-align: center; font-size: 0.8rem; color: #94a3b8; }\n")
         sb.append("</style>\n</head>\n<body>\n<div class=\"card\">\n")
         sb.append("<h1>${escapeHtml(title)}</h1>\n")
-        sb.append("<div class=\"meta\"><span class=\"badge\">$noteCategory</span><span>Exportado do HabitCraft</span></div>\n")
+        sb.append("<div class=\"meta\"><span class=\"badge\">$noteCategory</span><span>Exportado do Citra</span></div>\n")
 
         for (block in blocks) {
             when (block) {
@@ -480,7 +480,7 @@ object NoteExportHelper {
             }
         }
 
-        sb.append("<div class=\"footer\">HabitCraft • Produtividade & Notas</div>\n")
+        sb.append("<div class=\"footer\">Citra • Produtividade & Notas</div>\n")
         sb.append("</div>\n</body>\n</html>")
         return sb.toString()
     }
@@ -595,7 +595,7 @@ object NoteExportHelper {
 
         // Meta
         val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-        canvas.drawText("📁 $noteCategory   •   📅 $dateStr   •   🍊 HabitCraft", padding, y + 14f, metaPaint)
+        canvas.drawText("📁 $noteCategory   •   📅 $dateStr   •   🍊 Citra", padding, y + 14f, metaPaint)
         y += 32f
 
         // Divider

@@ -53,14 +53,14 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "Sobre o HabitCraft",
+                    text = "Sobre o Citra",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 Text(
-                    text = "Versão 0.5.0 • Produtividade Gamificada Local",
+                    text = "Versão 0.7.1 • Foco, Hábitos e Produtividade com Backup na Nuvem",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

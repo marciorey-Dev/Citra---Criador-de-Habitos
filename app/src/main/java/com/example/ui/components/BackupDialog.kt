@@ -52,7 +52,7 @@ fun BackupDialog(
                             val json = onExportBackup()
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "application/json"
-                                putExtra(Intent.EXTRA_SUBJECT, "HabitCraft_Backup.json")
+                                putExtra(Intent.EXTRA_SUBJECT, "Citra_Backup.json")
                                 putExtra(Intent.EXTRA_TEXT, json)
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "Compartilhar / Salvar Backup JSON"))
@@ -70,7 +70,7 @@ fun BackupDialog(
                         onClick = {
                             val json = onExportBackup()
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("HabitCraft Backup", json))
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Citra Backup", json))
                             Toast.makeText(context, "Backup copiado para a área de transferência!", Toast.LENGTH_SHORT).show()
                         },
                         shape = RoundedCornerShape(12.dp),

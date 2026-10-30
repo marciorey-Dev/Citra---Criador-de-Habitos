@@ -30,6 +30,7 @@ import com.example.data.local.NotificationSettings
 import com.example.ui.MainViewModel
 import com.example.ui.theme.ThemeAccent
 import com.example.notifications.NotificationHelper
+import com.example.util.AmbientBreakMusicManager
 import com.example.util.SoundEffectsManager
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -363,6 +364,69 @@ fun SettingsDialog(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
+                        // Música Ambiente de Pausa e Fundo
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Música Ambiente de Pausa e Fundo 🎵", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        Text(
+                                            "Trilha analógica suave para momentos de descanso ou foco contínuo",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Tocar contínuo em segundo plano", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text("Mantém o áudio ambiente ativo enquanto usa o aplicativo", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Switch(
+                                        checked = tempNotificationSettings.ambientBreakMusicInApp,
+                                        onCheckedChange = { enabled ->
+                                            tempNotificationSettings = tempNotificationSettings.copy(ambientBreakMusicInApp = enabled)
+                                            AmbientBreakMusicManager.setAlwaysPlayingInApp(context, enabled)
+                                        }
+                                    )
+                                }
+
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Volume do Áudio Ambiente", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        Text("${(tempNotificationSettings.ambientMusicVolume * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Slider(
+                                        value = tempNotificationSettings.ambientMusicVolume,
+                                        onValueChange = { vol ->
+                                            tempNotificationSettings = tempNotificationSettings.copy(ambientMusicVolume = vol)
+                                            AmbientBreakMusicManager.setVolume(vol)
+                                        },
+                                        valueRange = 0f..1f,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
                         // Toggles
                         Card(
                             shape = RoundedCornerShape(16.dp),
@@ -460,7 +524,7 @@ fun SettingsDialog(
                                     )
                                 }
                                 Text(
-                                    text = "O Android desativa tarefas em segundo plano e bloqueia alarmes comuns após longas horas de repouso (Doze Mode). O HabitCraft utiliza AlarmClock e WakeLock de alta precisão para garantir que tarefas e hábitos toquem pontualmente.",
+                                    text = "O Android desativa tarefas em segundo plano e bloqueia alarmes comuns após longas horas de repouso (Doze Mode). O Citra utiliza AlarmClock e WakeLock de alta precisão para garantir que tarefas e hábitos toquem pontualmente.",
                                     fontSize = 12.sp,
                                     lineHeight = 16.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant

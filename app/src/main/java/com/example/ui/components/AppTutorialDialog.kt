@@ -35,7 +35,7 @@ fun AppTutorialDialog(
     val steps = listOf(
         TutorialStep(
             iconEmoji = "🍊",
-            title = "Bem-vindo ao HabitCraft!",
+            title = "Bem-vindo ao Citra!",
             description = "Seu novo espaço minimalista e acolhedor para gerenciar tempo, tarefas, hábitos diários e anotações.",
             tip = "Vamos fazer um rápido tour para você dominar todas as ferramentas!"
         ),
@@ -85,7 +85,7 @@ fun AppTutorialDialog(
             iconEmoji = "🏆",
             title = "8. Conquistas, Notificações & Backup",
             description = "No menu superior de três pontos (⋮), acerte os sons de notificação, veja suas conquistas desbloqueadas e faça backup local em JSON.",
-            tip = "Você está pronto para ser mais produtivo com HabitCraft!"
+            tip = "Você está pronto para ser mais produtivo com Citra!"
         )
     )
 

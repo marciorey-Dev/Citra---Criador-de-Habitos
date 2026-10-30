@@ -103,7 +103,7 @@ fun FullScreenBlockDialog(
     }
 
     fun copyToClipboard() {
-        val clip = ClipData.newPlainText("HabitCraft Block", textState)
+        val clip = ClipData.newPlainText("Citra Block", textState)
         clipboardManager.setPrimaryClip(clip)
         Toast.makeText(context, "Copiado para a área de transferência!", Toast.LENGTH_SHORT).show()
     }
