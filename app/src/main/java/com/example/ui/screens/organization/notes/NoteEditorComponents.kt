@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -64,6 +65,8 @@ fun VisualBlockItem(
     onToggleFullscreen: () -> Unit,
     onLinkClick: (String) -> Unit,
     onLongPressChecklist: ((ChecklistBlock) -> Unit)? = null,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null,
     onUpdate: (VisualBlock) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -542,8 +545,13 @@ fun VisualBlockItem(
                             }
                         }
 
-                        IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Fullscreen, contentDescription = "Tela Cheia", tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
 
@@ -595,8 +603,13 @@ fun VisualBlockItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("📐 Equação Matemática", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Fullscreen, contentDescription = "Tela Cheia", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
 
@@ -625,59 +638,12 @@ fun VisualBlockItem(
         }
 
         is TableBlock -> {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-            ) {
-                Column(modifier = Modifier.padding(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Tabela", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                        IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.Gray, modifier = Modifier.size(14.dp))
-                        }
-                    }
-
-                    // Headers
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        block.headers.forEachIndexed { colIdx, header ->
-                            OutlinedTextField(
-                                value = header,
-                                onValueChange = { newH ->
-                                    val newHeaders = block.headers.toMutableList().apply { set(colIdx, newH) }
-                                    onUpdate(block.copy(headers = newHeaders))
-                                },
-                                textStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.weight(1f).padding(2.dp)
-                            )
-                        }
-                    }
-
-                    // Rows
-                    block.rows.forEachIndexed { rowIdx, row ->
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            row.forEachIndexed { colIdx, cell ->
-                                OutlinedTextField(
-                                    value = cell,
-                                    onValueChange = { newCell ->
-                                        val newRows = block.rows.map { it.toMutableList() }.toMutableList()
-                                        newRows[rowIdx][colIdx] = newCell
-                                        onUpdate(block.copy(rows = newRows))
-                                    },
-                                    textStyle = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.weight(1f).padding(2.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            ExcelTableEditor(
+                block = block,
+                isDarkBg = isDarkBg,
+                onUpdate = onUpdate,
+                onDelete = onDelete
+            )
         }
 
         is DividerBlock -> {
@@ -1024,6 +990,7 @@ private fun AudioBlockPlayer(
     val isCurrentAudio = playbackState.playingBlockId == block.id
 
     var isEditingTitle by remember { mutableStateOf(false) }
+    var showVolumeSlider by remember { mutableStateOf(false) }
 
     val currentPosition = if (isCurrentAudio) playbackState.currentPositionMs else 0
     val duration = if (isCurrentAudio) playbackState.durationMs else 0
@@ -1170,6 +1137,24 @@ private fun AudioBlockPlayer(
                     }
                 }
 
+                // Volume Toggle Button
+                IconButton(
+                    onClick = { showVolumeSlider = !showVolumeSlider },
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(
+                            if (showVolumeSlider) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                            CircleShape
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = "Ajustar volume",
+                        tint = if (showVolumeSlider) MaterialTheme.colorScheme.primary else Color.Gray,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 // Loop Toggle Button
                 IconButton(
                     onClick = {
@@ -1194,6 +1179,258 @@ private fun AudioBlockPlayer(
                     )
                 }
             }
+
+            // Volume Adjustment Slider Row
+            if (showVolumeSlider) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, start = 8.dp, end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Slider(
+                        value = block.volume,
+                        onValueChange = { newVol ->
+                            onUpdate(block.copy(volume = newVol))
+                            NoteAudioPlaybackManager.setVolume(newVol)
+                        },
+                        valueRange = 0f..1f,
+                        modifier = Modifier.weight(1f).height(20.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    Text(
+                        text = "${(block.volume * 100).toInt()}%",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }
+
+/**
+ * Excel-style spreadsheet table with clean sharp grid lines, bold darker header row,
+ * in-place editable cells, real-time sync with Markdown, and horizontal scrolling for wide tables.
+ */
+@Composable
+fun ExcelTableEditor(
+    block: TableBlock,
+    isDarkBg: Boolean,
+    onUpdate: (TableBlock) -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    val gridBorderColor = if (isDarkBg) Color(0xFF475569) else Color(0xFFCBD5E1)
+    val headerBgColor = if (isDarkBg) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val headerTextColor = if (isDarkBg) Color(0xFFF1F5F9) else Color(0xFF0F172A)
+    val cellTextColor = if (isDarkBg) Color.White else Color(0xFF1E293B)
+    val colWidth = 130.dp
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        // Excel Top Action Toolbar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.TableChart,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Planilha (${block.headers.size} cols × ${block.rows.size} lins)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Add Column
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.clickable {
+                        val nextColNum = block.headers.size + 1
+                        val newHeaders = block.headers + "Coluna $nextColNum"
+                        val newRows = block.rows.map { it + "" }
+                        onUpdate(block.copy(headers = newHeaders, rows = newRows))
+                    }
+                ) {
+                    Text("+ Col", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+
+                // Add Row
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.clickable {
+                        val newRow = List(block.headers.size) { "" }
+                        onUpdate(block.copy(rows = block.rows + listOf(newRow)))
+                    }
+                ) {
+                    Text("+ Linha", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                }
+
+                // Remove Col (if > 1)
+                if (block.headers.size > 1) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.clickable {
+                            val newHeaders = block.headers.dropLast(1)
+                            val newRows = block.rows.map { it.dropLast(1) }
+                            onUpdate(block.copy(headers = newHeaders, rows = newRows))
+                        }
+                    ) {
+                        Text("- Col", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+
+                // Remove Row (if > 1)
+                if (block.rows.size > 1) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.clickable {
+                            val newRows = block.rows.dropLast(1)
+                            onUpdate(block.copy(rows = newRows))
+                        }
+                    ) {
+                        Text("- Linha", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+
+                if (onDelete != null) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(20.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Remover Tabela", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
+
+        // Excel Spreadsheet Grid with Horizontal Scroll and Sharp Borders (No rounded bubbles!)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, gridBorderColor)
+                .horizontalScroll(rememberScrollState())
+        ) {
+            Column {
+                // Header Row (Primeira linha mais carregada, estilo cabeçalho do Excel)
+                Row(
+                    modifier = Modifier
+                        .background(headerBgColor)
+                        .border(width = 0.5.dp, color = gridBorderColor)
+                ) {
+                    block.headers.forEachIndexed { colIdx, header ->
+                        Box(
+                            modifier = Modifier
+                                .width(colWidth)
+                                .height(38.dp)
+                                .border(width = 0.5.dp, color = gridBorderColor)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            BasicTextField(
+                                value = header,
+                                onValueChange = { newH ->
+                                    val newHeaders = block.headers.toMutableList().apply { set(colIdx, newH) }
+                                    onUpdate(block.copy(headers = newHeaders))
+                                },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = headerTextColor
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                // Data Rows (Células no estilo planilha Excel com edição direta)
+                block.rows.forEachIndexed { rowIdx, row ->
+                    val rowBg = if (rowIdx % 2 == 0) {
+                        if (isDarkBg) Color(0xFF1E293B) else Color.White
+                    } else {
+                        if (isDarkBg) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .background(rowBg)
+                            .border(width = 0.5.dp, color = gridBorderColor)
+                    ) {
+                        // Ensure row has same count of cells as headers
+                        val safeCells = if (row.size < block.headers.size) {
+                            row + List(block.headers.size - row.size) { "" }
+                        } else row
+
+                        safeCells.take(block.headers.size).forEachIndexed { colIdx, cell ->
+                            Box(
+                                modifier = Modifier
+                                    .width(colWidth)
+                                    .height(38.dp)
+                                    .border(width = 0.5.dp, color = gridBorderColor)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                BasicTextField(
+                                    value = cell,
+                                    onValueChange = { newCell ->
+                                        val newRows = block.rows.map { it.toMutableList() }.toMutableList()
+                                        while (newRows.size <= rowIdx) {
+                                            newRows.add(MutableList(block.headers.size) { "" })
+                                        }
+                                        while (newRows[rowIdx].size <= colIdx) {
+                                            newRows[rowIdx].add("")
+                                        }
+                                        newRows[rowIdx][colIdx] = newCell
+                                        onUpdate(block.copy(rows = newRows))
+                                    },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 12.sp,
+                                        color = cellTextColor
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

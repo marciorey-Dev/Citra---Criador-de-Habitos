@@ -656,3 +656,172 @@ fun LinkNoteToEntityDialog(
         }
     )
 }
+
+/**
+ * Dialog to configure and automatically generate a Markdown table (rows x columns).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CreateTableDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (rows: Int, cols: Int) -> Unit
+) {
+    var cols by remember { mutableIntStateOf(3) }
+    var rows by remember { mutableIntStateOf(3) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.TableChart,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Criar Tabela (Estilo Excel)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    "Escolha a quantidade de colunas e linhas para gerar a tabela automaticamente:",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Columns Picker
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Colunas:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (cols > 1) cols-- },
+                                    enabled = cols > 1,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Diminuir colunas", modifier = Modifier.size(16.dp))
+                                }
+                                Text(
+                                    "$cols",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                )
+                                IconButton(
+                                    onClick = { if (cols < 12) cols++ },
+                                    enabled = cols < 12,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Aumentar colunas", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            listOf(2, 3, 4, 5).forEach { c ->
+                                FilterChip(
+                                    selected = cols == c,
+                                    onClick = { cols = c },
+                                    label = { Text("$c", fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Rows Picker
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Linhas de dados:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (rows > 1) rows-- },
+                                    enabled = rows > 1,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Diminuir linhas", modifier = Modifier.size(16.dp))
+                                }
+                                Text(
+                                    "$rows",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp)
+                                )
+                                IconButton(
+                                    onClick = { if (rows < 25) rows++ },
+                                    enabled = rows < 25,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Aumentar linhas", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            listOf(2, 3, 5, 10).forEach { r ->
+                                FilterChip(
+                                    selected = rows == r,
+                                    onClick = { rows = r },
+                                    label = { Text("$r", fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Dimensions preview badge
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Grade gerada: $cols colunas × $rows linhas (rolagem lateral Excel)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(rows, cols) }) {
+                Text("Criar Tabela")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
+}
+

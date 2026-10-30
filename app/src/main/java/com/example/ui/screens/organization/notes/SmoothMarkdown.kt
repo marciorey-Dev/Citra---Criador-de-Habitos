@@ -160,26 +160,47 @@ object SmoothMarkdownConverter {
                     continue
                 }
 
-                // Audio (![audio:title](url))
-                Regex("^!\\[audio:(.*?)\\]\\((.*?)\\)$").matches(trimmed) -> {
-                    val match = Regex("^!\\[audio:(.*?)\\]\\((.*?)\\)$").find(trimmed)
+                // Audio (![audio:title|vol:..|loop](url) or [audio:...](url))
+                Regex("^!?\\[audio:(.*?)\\]\\((.*?)\\)$").matches(trimmed) -> {
+                    val match = Regex("^!?\\[audio:(.*?)\\]\\((.*?)\\)$").find(trimmed)
                     if (match != null) {
-                        blocks.add(AudioBlock(title = match.groupValues[1], url = match.groupValues[2]))
+                        val rawTitle = match.groupValues[1]
+                        val parts = rawTitle.split("|").map { it.trim() }
+                        var title = parts.getOrNull(0) ?: "Áudio"
+                        var volume = 1.0f
+                        var isLoop = false
+                        for (p in parts.drop(1)) {
+                            when {
+                                p.startsWith("vol:") -> volume = (p.removePrefix("vol:").toFloatOrNull() ?: 100f) / 100f
+                                p == "loop" -> isLoop = true
+                            }
+                        }
+                        blocks.add(AudioBlock(title = title, url = match.groupValues[2], volume = volume.coerceIn(0f, 1f), isLoop = isLoop))
                     }
                     i++
                     continue
                 }
 
-                // Image (![alt|width|align](url) or ![alt](url))
+                // Image (![alt|width|align|side:text](url))
                 Regex("^!\\[(.*?)\\]\\((.*?)\\)$").matches(trimmed) -> {
                     val match = Regex("^!\\[(.*?)\\]\\((.*?)\\)$").find(trimmed)
                     if (match != null) {
                         val rawAlt = match.groupValues[1]
-                        val parts = rawAlt.split("|")
-                        val alt = parts.getOrNull(0) ?: ""
-                        val width = parts.getOrNull(1)?.toIntOrNull() ?: 100
-                        val align = parts.getOrNull(2) ?: "center"
-                        blocks.add(ImageBlock(alt = alt, url = match.groupValues[2], widthPercent = width, alignment = align))
+                        val parts = rawAlt.split("|").map { it.trim() }
+                        var alt = ""
+                        var width = 100
+                        var align = "center"
+                        var side = ""
+                        for (part in parts) {
+                            when {
+                                part.endsWith("%") -> width = part.removeSuffix("%").toIntOrNull() ?: 100
+                                part.toIntOrNull() != null -> width = part.toInt()
+                                part.equals("left", ignoreCase = true) || part.equals("right", ignoreCase = true) || part.equals("center", ignoreCase = true) -> align = part.lowercase()
+                                part.startsWith("side:") -> side = part.removePrefix("side:")
+                                else -> alt = part
+                            }
+                        }
+                        blocks.add(ImageBlock(alt = alt, url = match.groupValues[2], widthPercent = width.coerceIn(25, 100), alignment = align, sideText = side))
                     }
                     i++
                     continue
@@ -349,10 +370,13 @@ object SmoothMarkdownConverter {
                     sb.append("---\n\n")
                 }
                 is ImageBlock -> {
-                    sb.append("![${block.alt}|${block.widthPercent}|${block.alignment}](${block.url})\n\n")
+                    val sidePart = if (block.sideText.isNotBlank()) "|side:${block.sideText}" else ""
+                    sb.append("![${block.alt}|${block.widthPercent}%|${block.alignment}$sidePart](${block.url})\n\n")
                 }
                 is AudioBlock -> {
-                    sb.append("![audio:${block.title}](${block.url})\n\n")
+                    val volPart = if (block.volume < 0.99f || block.volume > 1.01f) "|vol:${(block.volume * 100).toInt()}" else ""
+                    val loopPart = if (block.isLoop) "|loop" else ""
+                    sb.append("![audio:${block.title}$volPart$loopPart](${block.url})\n\n")
                 }
                 is CalloutBlock -> {
                     sb.append("> [!${block.type.uppercase()}] ${block.text}\n\n")
