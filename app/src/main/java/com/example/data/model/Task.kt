@@ -22,5 +22,7 @@ data class Task(
     val isCompleted: Boolean = false,
     val completedAt: Long? = null,
     val focusMinutesCompleted: Int = 0,
+    val customSoundUri: String = "",
+    val loopAlarm: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )

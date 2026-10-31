@@ -75,6 +75,8 @@ object BackupManager {
                 put("isCompleted", t.isCompleted)
                 put("completedAt", t.completedAt ?: JSONObject.NULL)
                 put("focusMinutesCompleted", t.focusMinutesCompleted)
+                put("customSoundUri", t.customSoundUri)
+                put("loopAlarm", t.loopAlarm)
                 put("createdAt", t.createdAt)
             }
             tasksArray.put(obj)
@@ -95,6 +97,8 @@ object BackupManager {
                 put("bestStreak", h.bestStreak)
                 put("lastCompletedDate", h.lastCompletedDate)
                 put("completedDatesCsv", h.completedDatesCsv)
+                put("customSoundUri", h.customSoundUri)
+                put("loopAlarm", h.loopAlarm)
                 put("createdAt", h.createdAt)
             }
             habitsArray.put(obj)
@@ -180,6 +184,8 @@ object BackupManager {
                         isCompleted = obj.optBoolean("isCompleted", false),
                         completedAt = if (obj.isNull("completedAt")) null else obj.optLong("completedAt"),
                         focusMinutesCompleted = obj.optInt("focusMinutesCompleted", 0),
+                        customSoundUri = obj.optString("customSoundUri", ""),
+                        loopAlarm = obj.optBoolean("loopAlarm", false),
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                     )
                 )
@@ -203,6 +209,8 @@ object BackupManager {
                         bestStreak = obj.optInt("bestStreak", 0),
                         lastCompletedDate = obj.optString("lastCompletedDate", ""),
                         completedDatesCsv = obj.optString("completedDatesCsv", ""),
+                        customSoundUri = obj.optString("customSoundUri", ""),
+                        loopAlarm = obj.optBoolean("loopAlarm", false),
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                     )
                 )

@@ -182,12 +182,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _openCreateNoteTrigger.value = false
     }
 
-    // What's New dialog for v0.7.4
+    // What's New dialog for v0.7.8
     private val _whatsNewVisible = MutableStateFlow(false)
     val whatsNewVisible: StateFlow<Boolean> = _whatsNewVisible.asStateFlow()
 
     fun dismissWhatsNew() {
-        preferencesManager.setLastSeenWhatsNewVersion("0.7.4")
+        preferencesManager.setLastSeenWhatsNewVersion("0.7.8")
         _whatsNewVisible.value = false
     }
 
@@ -213,7 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         NotificationHelper.initNotificationChannels(application)
         restoreTimerSnapshotOnStartup()
-        if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.4") {
+        if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.8") {
             _whatsNewVisible.value = true
         }
         viewModelScope.launch {
@@ -614,7 +614,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         priority: TaskPriority,
         dueDateText: String,
         dueTimestamp: Long?,
-        reminderMinutesBefore: Int
+        reminderMinutesBefore: Int,
+        customSoundUri: String = "",
+        loopAlarm: Boolean = false
     ) {
         viewModelScope.launch {
             repository.insertTask(
@@ -624,7 +626,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     priority = priority,
                     dueDateText = dueDateText.ifBlank { todayString },
                     dueDateTimestamp = dueTimestamp,
-                    reminderMinutesBefore = reminderMinutesBefore
+                    reminderMinutesBefore = reminderMinutesBefore,
+                    customSoundUri = customSoundUri,
+                    loopAlarm = loopAlarm
                 )
             )
             _userMessage.emit("Tarefa criada com sucesso!")
@@ -665,7 +669,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         iconEmoji: String,
         reminderTime: String,
         reminderLeadMinutes: Int,
-        frequencyDays: String
+        frequencyDays: String,
+        customSoundUri: String = "",
+        loopAlarm: Boolean = false
     ) {
         viewModelScope.launch {
             repository.insertHabit(
@@ -675,7 +681,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     iconEmoji = iconEmoji.ifBlank { "✨" },
                     reminderTime = reminderTime.ifBlank { "08:00" },
                     reminderLeadMinutes = reminderLeadMinutes,
-                    frequencyDays = frequencyDays.ifBlank { "ALL" }
+                    frequencyDays = frequencyDays.ifBlank { "ALL" },
+                    customSoundUri = customSoundUri,
+                    loopAlarm = loopAlarm
                 )
             )
             _userMessage.emit("Hábito '$title' adicionado (lembrete às $reminderTime)!")
@@ -781,6 +789,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.permanentlyDeleteNote(note)
             _userMessage.emit("Anotação excluída definitivamente.")
+        }
+    }
+
+    fun deleteAllTasks() {
+        viewModelScope.launch {
+            repository.deleteAllTasks()
+            _userMessage.emit("Todas as tarefas foram apagadas.")
+        }
+    }
+
+    fun deleteAllHabits() {
+        viewModelScope.launch {
+            repository.deleteAllHabits()
+            _userMessage.emit("Todos os hábitos foram apagados.")
+        }
+    }
+
+    fun deleteAllNotes() {
+        viewModelScope.launch {
+            repository.deleteAllNotes()
+            _userMessage.emit("Todas as anotações foram apagadas.")
+        }
+    }
+
+    fun resetAllAppData() {
+        viewModelScope.launch {
+            repository.resetAllData()
+            _userMessage.emit("Todos os dados do app foram resetados com sucesso.")
         }
     }
 

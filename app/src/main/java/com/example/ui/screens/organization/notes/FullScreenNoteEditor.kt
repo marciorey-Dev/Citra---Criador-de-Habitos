@@ -109,6 +109,7 @@ fun FullScreenNoteEditor(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val noteScrollState = rememberScrollState()
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
     var category by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
@@ -128,6 +129,22 @@ fun FullScreenNoteEditor(
     val isDarkBg = bgUri != null
     val textColor = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface
     val primaryColor = MaterialTheme.colorScheme.primary
+
+    // Auto-center screen to cursor location on selection change / click
+    var lastSelectionOffset by remember { mutableStateOf(-1) }
+    LaunchedEffect(editorValue.selection) {
+        val selStart = editorValue.selection.start
+        if (selStart >= 0 && selStart != lastSelectionOffset && editorValue.text.isNotEmpty()) {
+            lastSelectionOffset = selStart
+            val textLen = editorValue.text.length
+            if (textLen > 0 && noteScrollState.maxValue > 0) {
+                val ratio = selStart.toFloat() / textLen.toFloat()
+                val target = ((ratio * noteScrollState.maxValue) - (noteScrollState.viewportSize / 3)).toInt()
+                    .coerceIn(0, noteScrollState.maxValue)
+                noteScrollState.animateScrollTo(target)
+            }
+        }
+    }
 
     // Loaded blurred background bitmap cache
     var processedBackgroundBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -642,7 +659,7 @@ fun FullScreenNoteEditor(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(noteScrollState)
                     .padding(horizontal = 20.dp)
                     .padding(top = 10.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -840,6 +857,17 @@ fun FullScreenNoteEditor(
                             editorValue = editorValue.copy(text = md)
                         }
 
+                        fun centerBlockOnScreen(blockIndex: Int) {
+                            if (readingBlocks.isNotEmpty() && noteScrollState.maxValue > 0) {
+                                val ratio = blockIndex.toFloat() / readingBlocks.size.toFloat()
+                                val target = ((ratio * noteScrollState.maxValue) - (noteScrollState.viewportSize / 3)).toInt()
+                                    .coerceIn(0, noteScrollState.maxValue)
+                                coroutineScope.launch {
+                                    noteScrollState.animateScrollTo(target)
+                                }
+                            }
+                        }
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -870,6 +898,7 @@ fun FullScreenNoteEditor(
                                             color = headingColor,
                                             modifier = Modifier
                                                 .fillMaxWidth()
+                                                .clickable { centerBlockOnScreen(idx) }
                                                 .padding(vertical = 4.dp)
                                         )
                                     }
@@ -897,7 +926,11 @@ fun FullScreenNoteEditor(
                                                                 val links = annotated.getStringAnnotations("LINK", offset, offset)
                                                                 if (links.isNotEmpty()) {
                                                                     handleLinkClick(links.first().item)
+                                                                } else {
+                                                                    centerBlockOnScreen(idx)
                                                                 }
+                                                            } else {
+                                                                centerBlockOnScreen(idx)
                                                             }
                                                         }
                                                     )

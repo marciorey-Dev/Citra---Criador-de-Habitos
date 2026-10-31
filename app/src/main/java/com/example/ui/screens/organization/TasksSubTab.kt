@@ -142,8 +142,8 @@ fun TasksSubTab(
         QuickAddTaskDialog(
             categories = categories,
             onDismiss = { showAddDialog = false },
-            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore ->
-                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore)
+            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loop ->
+                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loop)
                 showAddDialog = false
             }
         )
@@ -322,6 +322,21 @@ fun QuickAddTaskDialog(
     onDismiss: () -> Unit,
     onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int) -> Unit
 ) {
+    QuickAddTaskDialog(
+        categories = categories,
+        onDismiss = onDismiss,
+        onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, _, _ ->
+            onConfirm(title, category, priority, dueText, dueTimestamp, minutesBefore)
+        }
+    )
+}
+
+@Composable
+fun QuickAddTaskDialog(
+    categories: List<Category>,
+    onDismiss: () -> Unit,
+    onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int, customSoundUri: String, loopAlarm: Boolean) -> Unit
+) {
     val context = LocalContext.current
     var title by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(categories.firstOrNull()?.name ?: "Geral") }
@@ -333,6 +348,8 @@ fun QuickAddTaskDialog(
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(cal.time))
     }
     var reminderMinutesBefore by remember { mutableStateOf(15) }
+    var customSoundUri by remember { mutableStateOf("") }
+    var loopAlarm by remember { mutableStateOf(false) }
     var showMoreOptions by remember { mutableStateOf(false) }
 
     fun openDateTimePicker() {
@@ -422,7 +439,7 @@ fun QuickAddTaskDialog(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        if (showMoreOptions) "Menos detalhes" else "+ Mais opções (Prioridade, Categoria, Lembrete)",
+                        if (showMoreOptions) "Menos detalhes" else "+ Mais opções (Prioridade, Categoria, Alarme)",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -470,6 +487,22 @@ fun QuickAddTaskDialog(
                                 )
                             }
                         }
+
+                        // Opção de Toque em Loop
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(
+                                checked = loopAlarm,
+                                onCheckedChange = { loopAlarm = it }
+                            )
+                        }
                     }
                 }
             }
@@ -478,7 +511,7 @@ fun QuickAddTaskDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onConfirm(title.trim(), category, priority, dueDateText, selectedTimestamp, reminderMinutesBefore)
+                        onConfirm(title.trim(), category, priority, dueDateText, selectedTimestamp, reminderMinutesBefore, customSoundUri, loopAlarm)
                     }
                 },
                 enabled = title.isNotBlank(),
@@ -511,6 +544,8 @@ fun EditTaskDialog(
     var dueDateText by remember { mutableStateOf(task.dueDateText) }
     var selectedTimestamp by remember { mutableStateOf(task.dueDateTimestamp) }
     var reminderMinutesBefore by remember { mutableStateOf(task.reminderMinutesBefore) }
+    var customSoundUri by remember { mutableStateOf(task.customSoundUri) }
+    var loopAlarm by remember { mutableStateOf(task.loopAlarm) }
 
     fun openDateTimePicker() {
         val currentCal = Calendar.getInstance()
@@ -598,6 +633,21 @@ fun EditTaskDialog(
                         )
                     }
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = loopAlarm,
+                        onCheckedChange = { loopAlarm = it }
+                    )
+                }
             }
         },
         confirmButton = {
@@ -611,7 +661,9 @@ fun EditTaskDialog(
                                 priority = priority,
                                 dueDateText = dueDateText,
                                 dueDateTimestamp = selectedTimestamp,
-                                reminderMinutesBefore = reminderMinutesBefore
+                                reminderMinutesBefore = reminderMinutesBefore,
+                                customSoundUri = customSoundUri,
+                                loopAlarm = loopAlarm
                             )
                         )
                     }

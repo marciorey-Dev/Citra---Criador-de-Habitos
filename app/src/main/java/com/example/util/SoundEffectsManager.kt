@@ -16,6 +16,7 @@ data class SoundItem(
 
 object SoundEffectsManager {
     private var previewPlayer: MediaPlayer? = null
+    private var activeAlarmPlayer: MediaPlayer? = null
 
     const val DEFAULT_TASK_SOUND_ID = "sound_tarefa_concluida_default"
     const val DEFAULT_HABIT_SOUND_ID = "sound_checkin_habito_default"
@@ -61,6 +62,9 @@ object SoundEffectsManager {
     }
 
     fun getSoundName(id: String): String {
+        if (id.startsWith("content://") || id.startsWith("file://")) {
+            return "Música Personalizada do Aparelho"
+        }
         return getSoundById(id).name
     }
 
@@ -68,8 +72,20 @@ object SoundEffectsManager {
         return getSoundById(id).resId
     }
 
-    fun getSoundUri(context: Context, id: String): Uri {
-        val resId = getSoundResId(id)
+    fun getSoundUri(context: Context, soundIdOrUri: String): Uri {
+        if (soundIdOrUri.isBlank()) {
+            val resId = getSoundResId(DEFAULT_NOTIFICATION_SOUND_ID)
+            return Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/$resId")
+        }
+        if (soundIdOrUri.startsWith("content://") || soundIdOrUri.startsWith("file://")) {
+            return try {
+                Uri.parse(soundIdOrUri)
+            } catch (_: Exception) {
+                val resId = getSoundResId(DEFAULT_NOTIFICATION_SOUND_ID)
+                Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/$resId")
+            }
+        }
+        val resId = getSoundResId(soundIdOrUri)
         return Uri.parse("${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/$resId")
     }
 
@@ -98,32 +114,106 @@ object SoundEffectsManager {
     }
 
     /**
+     * Dedicated alarm playback engine using USAGE_ALARM.
+     * Guarantees audible playback on the Alarm audio stream even in silent / DND modes.
+     */
+    @Synchronized
+    fun playAlarmAudio(context: Context, soundIdOrUri: String, loop: Boolean = false) {
+        try {
+            stopAlarmAudio()
+            val uri = getSoundUri(context, soundIdOrUri)
+            val player = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                        .build()
+                )
+                setDataSource(context, uri)
+                isLooping = loop
+                prepare()
+                if (!loop) {
+                    setOnCompletionListener { mp ->
+                        try { mp.release() } catch (_: Exception) {}
+                        if (activeAlarmPlayer == mp) activeAlarmPlayer = null
+                    }
+                }
+                start()
+            }
+            activeAlarmPlayer = player
+        } catch (_: Exception) {
+            // Fallback to bundled sound if custom URI failed
+            try {
+                val fallbackRes = getSoundResId(DEFAULT_NOTIFICATION_SOUND_ID)
+                val player = MediaPlayer.create(context, fallbackRes).apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    isLooping = loop
+                    if (!loop) {
+                        setOnCompletionListener { mp ->
+                            try { mp.release() } catch (_: Exception) {}
+                            if (activeAlarmPlayer == mp) activeAlarmPlayer = null
+                        }
+                    }
+                    start()
+                }
+                activeAlarmPlayer = player
+            } catch (_: Exception) {}
+        }
+    }
+
+    @Synchronized
+    fun stopAlarmAudio() {
+        try {
+            activeAlarmPlayer?.let {
+                if (it.isPlaying) it.stop()
+                it.release()
+            }
+        } catch (_: Exception) {}
+        activeAlarmPlayer = null
+    }
+
+    /**
      * Plays sound preview in settings dialog, stopping previous preview if running.
      */
     @Synchronized
-    fun playPreview(context: Context, soundId: String) {
+    fun playPreview(context: Context, soundIdOrUri: String) {
         try {
-            previewPlayer?.let {
-                if (it.isPlaying) {
-                    it.stop()
-                }
-                it.release()
-            }
-            val resId = getSoundResId(soundId)
-            previewPlayer = MediaPlayer.create(context, resId).apply {
+            stopPreview()
+            val uri = getSoundUri(context, soundIdOrUri)
+            previewPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build()
                 )
+                setDataSource(context, uri)
+                prepare()
                 setOnCompletionListener { mp ->
                     try { mp.release() } catch (_: Exception) {}
                     if (previewPlayer == mp) previewPlayer = null
                 }
                 start()
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            // Fallback for bundled IDs
+            try {
+                val resId = getSoundResId(soundIdOrUri)
+                previewPlayer = MediaPlayer.create(context, resId)?.apply {
+                    setOnCompletionListener { mp ->
+                        try { mp.release() } catch (_: Exception) {}
+                        if (previewPlayer == mp) previewPlayer = null
+                    }
+                    start()
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     @Synchronized

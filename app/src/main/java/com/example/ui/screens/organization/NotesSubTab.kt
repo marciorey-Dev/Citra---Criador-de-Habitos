@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -20,6 +21,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+
+enum class NoteSortOption(val label: String) {
+    LAST_UPDATED("Última Atualização"),
+    CREATION_DATE("Data de Criação"),
+    ALPHABETICAL("Ordem A-Z"),
+    CATEGORY("Categoria"),
+    SIZE("Tamanho")
+}
+
+enum class NoteLayoutMode(val label: String) {
+    GRID_2("Grade"),
+    GRID_3("Grade Pequena"),
+    DETAILS("Detalhes"),
+    LIST("Lista")
+}
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +73,9 @@ fun NotesSubTab(
     var isCreatingNew by remember { mutableStateOf(false) }
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var showTrashDialog by remember { mutableStateOf(false) }
+    var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
+    var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
@@ -77,6 +96,24 @@ fun NotesSubTab(
             }
             matchesCategory && matchesSearch
         }
+    }
+
+    // Sorted notes: Pinned notes ALWAYS stay at top unless unpinned!
+    val sortedNotes = remember(filteredNotes, currentSort) {
+        filteredNotes.sortedWith(
+            Comparator { a, b ->
+                if (a.isPinned != b.isPinned) {
+                    return@Comparator if (a.isPinned) -1 else 1
+                }
+                when (currentSort) {
+                    NoteSortOption.LAST_UPDATED -> b.updatedAt.compareTo(a.updatedAt)
+                    NoteSortOption.CREATION_DATE -> b.createdAt.compareTo(a.createdAt)
+                    NoteSortOption.ALPHABETICAL -> a.title.compareTo(b.title, ignoreCase = true)
+                    NoteSortOption.CATEGORY -> a.category.compareTo(b.category, ignoreCase = true)
+                    NoteSortOption.SIZE -> b.content.length.compareTo(a.content.length)
+                }
+            }
+        )
     }
 
     val pomodoroState by viewModel.pomodoroState.collectAsState()
@@ -251,9 +288,95 @@ fun NotesSubTab(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            if (filteredNotes.isEmpty()) {
+            // Sort and Layout Selection Toolbar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Sort selector
+                Box {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.clickable { showSortMenu = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(currentSort.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                        NoteSortOption.values().forEach { opt ->
+                            DropdownMenuItem(
+                                text = { Text(opt.label, fontSize = 12.sp, fontWeight = if (opt == currentSort) FontWeight.Bold else FontWeight.Normal) },
+                                leadingIcon = {
+                                    Icon(
+                                        when (opt) {
+                                            NoteSortOption.LAST_UPDATED -> Icons.Default.Update
+                                            NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
+                                            NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
+                                            NoteSortOption.CATEGORY -> Icons.Default.Label
+                                            NoteSortOption.SIZE -> Icons.Default.FormatSize
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (opt == currentSort) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    currentSort = opt
+                                    showSortMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Layout switcher
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NoteLayoutMode.values().forEach { mode ->
+                        val isSelected = currentLayout == mode
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clickable { currentLayout = mode }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = when (mode) {
+                                        NoteLayoutMode.GRID_2 -> Icons.Default.GridView
+                                        NoteLayoutMode.GRID_3 -> Icons.Default.ViewComfy
+                                        NoteLayoutMode.DETAILS -> Icons.Default.ViewAgenda
+                                        NoteLayoutMode.LIST -> Icons.Default.ViewList
+                                    },
+                                    contentDescription = mode.label,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (sortedNotes.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -283,24 +406,86 @@ fun NotesSubTab(
                     }
                 }
             } else {
-                // 2-Column Square Cards Grid
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 88.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .testTag("notes_grid")
-                ) {
-                    items(filteredNotes, key = { it.id }) { note ->
-                        SquareNoteCard(
-                            note = note,
-                            onClick = { activeNoteToEdit = note },
-                            onTogglePin = { viewModel.togglePinNote(note) },
-                            onDelete = { noteToDelete = note }
-                        )
+                when (currentLayout) {
+                    NoteLayoutMode.GRID_2 -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .testTag("notes_grid")
+                        ) {
+                            items(sortedNotes, key = { it.id }) { note ->
+                                SquareNoteCard(
+                                    note = note,
+                                    onClick = { activeNoteToEdit = note },
+                                    onTogglePin = { viewModel.togglePinNote(note) },
+                                    onDelete = { noteToDelete = note }
+                                )
+                            }
+                        }
+                    }
+                    NoteLayoutMode.GRID_3 -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .testTag("notes_grid_small")
+                        ) {
+                            items(sortedNotes, key = { it.id }) { note ->
+                                SmallSquareNoteCard(
+                                    note = note,
+                                    onClick = { activeNoteToEdit = note },
+                                    onTogglePin = { viewModel.togglePinNote(note) },
+                                    onDelete = { noteToDelete = note }
+                                )
+                            }
+                        }
+                    }
+                    NoteLayoutMode.DETAILS -> {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .testTag("notes_details_list")
+                        ) {
+                            items(sortedNotes, key = { it.id }) { note ->
+                                DetailNoteCard(
+                                    note = note,
+                                    onClick = { activeNoteToEdit = note },
+                                    onTogglePin = { viewModel.togglePinNote(note) },
+                                    onDelete = { noteToDelete = note }
+                                )
+                            }
+                        }
+                    }
+                    NoteLayoutMode.LIST -> {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .testTag("notes_simple_list")
+                        ) {
+                            items(sortedNotes, key = { it.id }) { note ->
+                                ListNoteCard(
+                                    note = note,
+                                    onClick = { activeNoteToEdit = note },
+                                    onTogglePin = { viewModel.togglePinNote(note) },
+                                    onDelete = { noteToDelete = note }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -392,10 +577,18 @@ fun SquareNoteCard(
             .take(120)
     }
 
+    val categoryColor = when (note.category.lowercase()) {
+        "trabalho", "work" -> OrangePrimary
+        "estudos", "study" -> BlueAccent
+        "saúde", "fitness" -> GreenAccent
+        "ideias", "criatividade" -> PurpleAccent
+        else -> MaterialTheme.colorScheme.primary
+    }
+
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (note.isPinned) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+            containerColor = if (note.isPinned) categoryColor.copy(alpha = 0.08f)
             else MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 3.dp else 1.5.dp),
@@ -403,9 +596,8 @@ fun SquareNoteCard(
             .fillMaxWidth()
             .aspectRatio(0.95f)
             .border(
-                width = if (note.isPinned) 1.5.dp else 1.dp,
-                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                width = if (note.isPinned) 2.5.dp else 1.dp,
+                color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(18.dp)
             )
             .clickable { onClick() }
@@ -425,7 +617,7 @@ fun SquareNoteCard(
             ) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -434,7 +626,7 @@ fun SquareNoteCard(
                         Icon(
                             imageVector = Icons.Default.Label,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            tint = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(11.dp)
                         )
                         Spacer(modifier = Modifier.width(3.dp))
@@ -442,7 +634,7 @@ fun SquareNoteCard(
                             text = note.category,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -455,9 +647,9 @@ fun SquareNoteCard(
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(
-                            imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Default.PushPin,
+                            imageVector = Icons.Default.PushPin,
                             contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                            tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                            tint = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -548,6 +740,310 @@ fun SquareNoteCard(
                             modifier = Modifier.size(14.dp)
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Small 3-Column Card for Notes
+ */
+@Composable
+fun SmallSquareNoteCard(
+    note: Note,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val categoryColor = when (note.category.lowercase()) {
+        "trabalho", "work" -> OrangePrimary
+        "estudos", "study" -> BlueAccent
+        "saúde", "fitness" -> GreenAccent
+        "ideias", "criatividade" -> PurpleAccent
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Card(
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (note.isPinned) categoryColor.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 2.5.dp else 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(0.9f)
+            .border(
+                width = if (note.isPinned) 2.dp else 1.dp,
+                color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(14.dp)
+            )
+            .clickable { onClick() }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                ) {
+                    Text(
+                        text = note.category.take(6),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+
+                if (note.isPinned) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = "Fixada",
+                        tint = categoryColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = note.title,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 14.sp
+            )
+
+            Text(
+                text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
+                fontSize = 9.sp,
+                color = MaterialTheme.colorScheme.outline
+            )
+        }
+    }
+}
+
+/**
+ * Details Layout Card (Title, Category, First Paragraph Clean Excerpt, and Full Actions)
+ */
+@Composable
+fun DetailNoteCard(
+    note: Note,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val categoryColor = when (note.category.lowercase()) {
+        "trabalho", "work" -> OrangePrimary
+        "estudos", "study" -> BlueAccent
+        "saúde", "fitness" -> GreenAccent
+        "ideias", "criatividade" -> PurpleAccent
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    val cleanExcerpt = remember(note.content) {
+        note.content
+            .lines()
+            .map { it.trim() }
+            .filter { line ->
+                line.isNotBlank() &&
+                !line.startsWith("---") &&
+                !line.startsWith("|") &&
+                !line.startsWith("```") &&
+                !line.startsWith("$$") &&
+                !line.startsWith("![audio:") &&
+                !line.startsWith("![")
+            }
+            .joinToString(" ") { line ->
+                line.replace(Regex("!\\[audio:.*?\\]\\(.*?\\)"), "")
+                    .replace(Regex("!\\[.*?\\]\\(.*?\\)"), "")
+                    .replace(Regex("<.*?>"), "")
+                    .replace(Regex("[#*`~=_]+"), "")
+                    .replace(Regex("\\[(x| )\\]"), "")
+            }
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(180)
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (note.isPinned) categoryColor.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 2.5.dp else 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (note.isPinned) 2.5.dp else 1.dp,
+                color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clickable { onClick() }
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                ) {
+                    Text(
+                        text = note.category,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    IconButton(onClick = onTogglePin, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                            tint = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Excluir",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Text(
+                text = note.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (cleanExcerpt.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = cleanExcerpt,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 17.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/**
+ * List Layout Card (Titles Only - compact and efficient)
+ */
+@Composable
+fun ListNoteCard(
+    note: Note,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val categoryColor = when (note.category.lowercase()) {
+        "trabalho", "work" -> OrangePrimary
+        "estudos", "study" -> BlueAccent
+        "saúde", "fitness" -> GreenAccent
+        "ideias", "criatividade" -> PurpleAccent
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (note.isPinned) categoryColor.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = if (note.isPinned) 2.dp else 1.dp,
+                color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                ) {
+                    Text(
+                        text = note.category.take(8),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Text(
+                    text = note.title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onTogglePin, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                        tint = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "Excluir",
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }

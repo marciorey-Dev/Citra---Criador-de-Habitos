@@ -64,14 +64,14 @@ fun WhatsNewDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Citra Versão 0.7.4",
+                    text = "Citra Versão 0.7.9",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 Text(
-                    text = "Principais novidades e melhorias da Versão 0.7.4",
+                    text = "Organização Otimizada, Modos de Notas, Alarmes em Loop e Gestão de Dados",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -86,44 +86,64 @@ fun WhatsNewDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeatureHighlightItem(
-                        icon = "✨",
-                        title = "Carregamento Inicial Orgânico",
-                        description = "Nova tela de inicialização suave com ícone do Citra. Os dados e a sessão são carregados antes da entrada, eliminando o piscar do login."
+                        icon = "🗂️",
+                        title = "Novos Modos de Visualização e Ordenação",
+                        description = "Alterne entre Grade (2 colunas), Grade Pequena (3 colunas), Detalhes (com primeiro parágrafo) e Lista compacta. Ordene por data, categoria, tamanho ou A-Z com notas fixadas sempre no topo."
+                    )
+                    FeatureHighlightItem(
+                        icon = "📌",
+                        title = "Novo Visual para Notas Fixadas",
+                        description = "Bordas marcadas na cor da categoria e ícone de pin colorido, eliminando o fundo cinza para um visual leve e elegante."
+                    )
+                    FeatureHighlightItem(
+                        icon = "🎯",
+                        title = "Auto-Centralização ao Tocar na Nota",
+                        description = "Ao posicionar o cursor no Live Preview ou tocar em blocos na leitura, a tela rola suavemente para centralizar o texto focado."
+                    )
+                    FeatureHighlightItem(
+                        icon = "⚠️",
+                        title = "Alerta de Hábito Não Cumprido",
+                        description = "Hábitos não realizados após o horário ficam destacados em vermelho e enviam um aviso 5 minutos depois (configurável)."
+                    )
+                    FeatureHighlightItem(
+                        icon = "🔁",
+                        title = "Toque em Loop Contínuo",
+                        description = "Agora você pode ativar o alarme contínuo em tarefas ou hábitos prioritários, tocando repetidamente até ser atendido."
                     )
                     FeatureHighlightItem(
                         icon = "💾",
-                        title = "Mídias e Perfil 100% Persistentes",
-                        description = "Sua foto de perfil, fotos de notas e áudios importados agora ficam salvos no armazenamento interno do app e nunca se perdem ao reiniciar."
+                        title = "Backup Local e Limpeza de Dados no Perfil",
+                        description = "Crie ou restaure backups JSON diretamente na aba Dados de 'Eu'. Recursos para resetar tarefas, hábitos, notas ou todos os dados com confirmação segura."
+                    )
+                    FeatureHighlightItem(
+                        icon = "📁",
+                        title = "Transparência do Armazenamento de Notas",
+                        description = "Suas notas continuam como arquivos .md puros em 'Documentos/Citra Docs/', livres de bancos de dados fechados."
+                    )
+                    FeatureHighlightItem(
+                        icon = "📐",
+                        title = "Interface Limpa e Sem Títulos Desnecessários",
+                        description = "Mais espaço vertical útil no menu de Tarefas, removendo cabeçalhos redundantes e subindo os elementos."
+                    )
+                    FeatureHighlightItem(
+                        icon = "📁",
+                        title = "Músicas do seu Aparelho",
+                        description = "Você pode selecionar qualquer arquivo de música (MP3, WAV) direto do seu celular para ser o toque do app dali em diante."
+                    )
+                    FeatureHighlightItem(
+                        icon = "🔄",
+                        title = "Resistência a Reinicializações (BootReceiver)",
+                        description = "Se o seu aparelho descarregar ou reiniciar, o Citra restaura automaticamente todos os seus alarmes ativos com seus respectivos toques."
+                    )
+                    FeatureHighlightItem(
+                        icon = "📊",
+                        title = "Tabelas Excel Integradas e Editáveis",
+                        description = "Tabelas com estilo planilha, linhas e colunas customizáveis, rolagem lateral suave e edição direta no modo leitura."
                     )
                     FeatureHighlightItem(
                         icon = "🎙️",
                         title = "Gravação de Áudio Direto na Nota",
                         description = "Grave notas de voz diretamente no editor de notas e salve automaticamente os arquivos na pasta 'CitraRecord' em Músicas."
-                    )
-                    FeatureHighlightItem(
-                        icon = "🎵",
-                        title = "Player de Áudio Estilo WhatsApp",
-                        description = "Progresso dinâmico de áudio com scrubbing manual, ondas visuais e título discreto editável direto no cabeçalho."
-                    )
-                    FeatureHighlightItem(
-                        icon = "📝",
-                        title = "Markdown Suave sem Símbolos Visíveis",
-                        description = "Negrito, itálico, tachado, sublinhado, destaque e links abrem direto sem expor códigos como ** ou ~~. Parágrafos não se multiplicam ao reabrir."
-                    )
-                    FeatureHighlightItem(
-                        icon = "⏱️",
-                        title = "Ajuste Dinâmico do Timer sem Lápis",
-                        description = "Toque direto nos números do cronômetro para mudar os minutos imediatamente, sem caixas de diálogo adicionais."
-                    )
-                    FeatureHighlightItem(
-                        icon = "👥",
-                        title = "Gerenciamento e Partilha com Amigos",
-                        description = "Exclua amigos indesejados e envie notas completas escolhendo formatos (.md, .pdf, .txt, .html), salvando direto em Downloads."
-                    )
-                    FeatureHighlightItem(
-                        icon = "🔄",
-                        title = "Frequência de Sincronização Customizável",
-                        description = "Escolha a cadência de sincronização: a cada 1 hora, diária, semanal ou sempre ao abrir o aplicativo."
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))

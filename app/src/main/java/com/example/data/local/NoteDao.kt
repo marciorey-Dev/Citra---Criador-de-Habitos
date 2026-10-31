@@ -50,4 +50,7 @@ interface NoteDao {
 
     @Query("SELECT * FROM notes WHERE isDeleted = 0")
     suspend fun getAllNotesSync(): List<Note>
+
+    @Query("DELETE FROM notes")
+    suspend fun deleteAllNotes()
 }

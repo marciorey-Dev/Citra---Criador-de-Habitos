@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -42,10 +43,39 @@ fun BackupDialog(
             ) {
                 if (!isRestoreMode) {
                     Text(
-                        text = "Exporte todos os seus dados (Tarefas, Hábitos, Sessões Pomodoro, Categorias e Conquistas) em um arquivo JSON. As notas não são incluídas neste arquivo.",
+                        text = "Exporte todos os seus dados (Tarefas, Hábitos, Sessões Pomodoro, Categorias e Conquistas) em um arquivo JSON.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("📁", fontSize = 20.sp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Onde ficam salvas as suas notas?",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "As anotações são arquivos Markdown (.md) independentes gravados em 'Documentos/Citra Docs/' no armazenamento do seu aparelho. Elas não dependem do banco de dados e nunca são perdidas.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    }
 
                     Button(
                         onClick = {

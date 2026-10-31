@@ -646,19 +646,34 @@ fun NotificationSoundSelector(
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
-                    IconButton(
-                        onClick = {
-                            SoundEffectsManager.stopPreview()
-                            onClearCustomAudio()
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Remover áudio customizado",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(16.dp)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                SoundEffectsManager.playPreview(context, customUri)
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.VolumeUp,
+                                contentDescription = "Ouvir áudio selecionado",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                SoundEffectsManager.stopPreview()
+                                onClearCustomAudio()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Remover áudio customizado",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }

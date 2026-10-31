@@ -49,6 +49,8 @@ import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
 import com.example.ui.components.AppTutorialDialog
+import com.example.ui.components.BackupDialog
+import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
 import com.example.util.MediaStorageHelper
 import com.example.util.NoteExportHelper
@@ -88,6 +90,8 @@ fun ProfileScreen(
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
+    var showBackupDialog by remember { mutableStateOf(false) }
+    var resetTarget by remember { mutableStateOf<String?>(null) } // "tasks", "habits", "notes", "all"
 
     // Friend Share / Delete state
     var friendToRemove by remember { mutableStateOf<FriendItem?>(null) }
@@ -992,6 +996,146 @@ fun ProfileScreen(
                                 }
                             }
 
+                            // Local Backup Card (Abaixo da Sincronização)
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("💾", fontSize = 18.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text("Backup Local de Dados", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                            Text("Exporte ou restaure suas tarefas, hábitos e dados em JSON", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { showBackupDialog = true },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Criar Backup", fontSize = 12.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { showBackupDialog = true },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Carregar Backup", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Notes Storage Location Card
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("📁", fontSize = 18.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Onde estão as suas notas?", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
+                                    }
+                                    Text(
+                                        text = "As notas do Citra não são salvas dentro do banco do app ou no arquivo de backup: elas são documentos Markdown (.md) puros gravados em 'Documentos/Citra Docs/' na raiz do seu celular. Você tem 100% de posse dos seus arquivos e pode abri-los no Obsidian, Word ou em qualquer outro programa.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        lineHeight = 15.sp
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            clipboardManager.setPrimaryClip(ClipData.newPlainText("Caminho Citra Docs", "Documentos/Citra Docs/"))
+                                            Toast.makeText(context, "Caminho 'Documentos/Citra Docs/' copiado!", Toast.LENGTH_SHORT).show()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Copiar Caminho das Notas", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            // Data Reset and Deletion Card
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("⚠️", fontSize = 18.sp)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text("Gerenciamento e Limpeza de Dados", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                                            Text("Apague categorias específicas ou resete todos os dados", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedButton(
+                                            onClick = { resetTarget = "tasks" },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Apagar Todas as Tarefas", fontSize = 12.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { resetTarget = "habits" },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Apagar Todos os Hábitos", fontSize = 12.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { resetTarget = "notes" },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Apagar Todas as Notas", fontSize = 12.sp)
+                                        }
+
+                                        Button(
+                                            onClick = { resetTarget = "all" },
+                                            colors = ButtonDefaults.buttonColors(containerColor = RedAction),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Resetar Todos os Dados do App", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+
                             // Accessibility Card
                             Card(
                                 shape = RoundedCornerShape(16.dp),
@@ -1459,6 +1603,49 @@ fun ProfileScreen(
                     Text("Cancelar")
                 }
             }
+        )
+    }
+
+    if (showBackupDialog) {
+        BackupDialog(
+            onExportBackup = { viewModel.exportBackupJson() },
+            onRestoreBackup = { json -> viewModel.restoreBackupJson(json) },
+            onDismiss = { showBackupDialog = false }
+        )
+    }
+
+    if (resetTarget != null) {
+        val (dialogTitle, dialogMessage, onConfirmAction) = when (resetTarget) {
+            "tasks" -> Triple(
+                "Apagar Todas as Tarefas",
+                "Tem certeza que deseja apagar permanentemente todas as suas tarefas? Esta ação não pode ser desfeita.",
+                { viewModel.deleteAllTasks(); Toast.makeText(context, "Todas as tarefas foram removidas.", Toast.LENGTH_SHORT).show() }
+            )
+            "habits" -> Triple(
+                "Apagar Todos os Hábitos",
+                "Tem certeza que deseja apagar todos os hábitos e histórico de sequências? Esta ação não pode ser desfeita.",
+                { viewModel.deleteAllHabits(); Toast.makeText(context, "Todos os hábitos foram removidos.", Toast.LENGTH_SHORT).show() }
+            )
+            "notes" -> Triple(
+                "Apagar Todas as Notas",
+                "Tem certeza que deseja apagar as notas do banco de dados? (Os arquivos .md em 'Citra Docs' permanecerão guardados no seu dispositivo se quiser importá-los novamente).",
+                { viewModel.deleteAllNotes(); Toast.makeText(context, "Anotações do banco foram removidas.", Toast.LENGTH_SHORT).show() }
+            )
+            else -> Triple(
+                "Resetar Todos os Dados do App",
+                "ATENÇÃO: Isso irá apagar permanentemente todas as tarefas, hábitos, notas, histórico de foco Pomodoro e conquistas. Deseja continuar?",
+                { viewModel.resetAllAppData(); Toast.makeText(context, "Todos os dados foram resetados com sucesso.", Toast.LENGTH_LONG).show() }
+            )
+        }
+
+        ConfirmDeleteDialog(
+            title = dialogTitle,
+            message = dialogMessage,
+            onConfirm = {
+                onConfirmAction()
+                resetTarget = null
+            },
+            onDismiss = { resetTarget = null }
         )
     }
 }

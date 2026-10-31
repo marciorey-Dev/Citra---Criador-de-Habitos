@@ -1,12 +1,13 @@
 package com.example.notifications
 
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.RingtoneManager
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.os.VibrationEffect
@@ -15,6 +16,9 @@ import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.data.local.NotificationSettings
+import com.example.data.local.PreferencesManager
+import com.example.util.SoundEffectsManager
 import java.util.Calendar
 
 object NotificationHelper {
@@ -34,9 +38,12 @@ object NotificationHelper {
     const val EXTRA_HABIT_TIME = "notification_habit_time"
     const val EXTRA_HABIT_LEAD = "notification_habit_lead"
     const val EXTRA_IS_ADVANCE = "notification_is_advance"
+    const val EXTRA_LOOP_ALARM = "notification_loop_alarm"
+    const val EXTRA_IS_MISSED = "notification_is_missed"
 
     const val TYPE_TASK = "task"
     const val TYPE_HABIT = "habit"
+    const val TYPE_HABIT_MISSED = "habit_missed"
     const val TYPE_POMODORO = "pomodoro"
     const val TYPE_ACHIEVEMENT = "achievement"
 
@@ -85,46 +92,67 @@ object NotificationHelper {
         }
     }
 
+    /**
+     * Resolves or dynamically creates a NotificationChannel configured specifically
+     * with the user's selected sound URI and AudioAttributes.USAGE_ALARM.
+     * This bypasses the Android 8.0+ limitation where channel sound cannot be changed once created.
+     */
+    fun getOrCreateSoundChannel(
+        context: Context,
+        baseChannelId: String,
+        channelName: String,
+        soundIdOrUri: String
+    ): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return baseChannelId
+        }
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val sanitizedKey = soundIdOrUri.replace(Regex("[^a-zA-Z0-9_]"), "_").take(32)
+        val dynamicChannelId = "${baseChannelId}_v2_${sanitizedKey.ifEmpty { "def" }}"
+
+        val existing = notificationManager.getNotificationChannel(dynamicChannelId)
+        if (existing == null) {
+            val soundUri = SoundEffectsManager.getSoundUri(context, soundIdOrUri)
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .build()
+
+            val channel = NotificationChannel(
+                dynamicChannelId,
+                channelName,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notificações com toque personalizado do Citra"
+                setSound(soundUri, audioAttributes)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 250, 500)
+                setBypassDnd(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        return dynamicChannelId
+    }
+
     fun initNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val prefs = PreferencesManager(context)
+            val settings = prefs.settings.value
 
-            val tasksChannel = NotificationChannel(
-                CHANNEL_TASKS,
-                "Lembretes de Tarefas",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Notificações de prazos e deveres de tarefas agendadas"
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 400, 200, 400)
-                setBypassDnd(true)
-                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-            }
+            val taskSound = if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
+            val habitSound = if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+            val pomodoroSound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
 
-            val habitsChannel = NotificationChannel(
-                CHANNEL_HABITS,
-                "Lembretes de Hábitos",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Notificações de hábitos diários com antecedência"
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 300, 150, 300)
-                setBypassDnd(true)
-                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-            }
+            // Pre-create initial sound channels
+            getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound)
+            getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound)
+            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound)
 
-            val alertsChannel = NotificationChannel(
-                CHANNEL_ALERTS,
-                "Pomodoro & Conquistas",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Alertas de conclusão do Pomodoro e conquistas desbloqueadas"
-                enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 200, 500)
-                setBypassDnd(true)
-                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-            }
-
+            // Low priority channel for ongoing countdown
             val timerOngoingChannel = NotificationChannel(
                 CHANNEL_TIMER_ONGOING,
                 "Contador Pomodoro Ativo",
@@ -133,10 +161,22 @@ object NotificationHelper {
                 description = "Mostra a contagem regressiva enquanto o timer estiver em execução"
                 setShowBadge(false)
             }
+            notificationManager.createNotificationChannel(timerOngoingChannel)
+        }
+    }
 
-            notificationManager.createNotificationChannels(
-                listOf(tasksChannel, habitsChannel, alertsChannel, timerOngoingChannel)
-            )
+    /**
+     * Called whenever user updates their sound settings to prepare updated channels immediately.
+     */
+    fun prewarmChannelsForNewSettings(context: Context, settings: NotificationSettings) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val taskSound = if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
+            val habitSound = if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+            val pomodoroSound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
+
+            getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound)
+            getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound)
+            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound)
         }
     }
 
@@ -147,8 +187,37 @@ object NotificationHelper {
         title: String,
         message: String,
         customSoundUriString: String = "",
-        vibratePhone: Boolean = true
+        vibratePhone: Boolean = true,
+        loopAlarm: Boolean = false
     ) {
+        // Resolve effective sound
+        val effectiveSound = if (customSoundUriString.isNotBlank()) {
+            customSoundUriString
+        } else {
+            val prefs = PreferencesManager(context)
+            val settings = prefs.settings.value
+            when {
+                channelId.contains("habit") -> if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+                channelId.contains("alert") -> if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
+                else -> if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
+            }
+        }
+
+        val baseChannel = when {
+            channelId.contains("habit") -> CHANNEL_HABITS
+            channelId.contains("alert") -> CHANNEL_ALERTS
+            else -> CHANNEL_TASKS
+        }
+        val channelName = when {
+            channelId.contains("habit") -> "Lembretes de Hábitos"
+            channelId.contains("alert") -> "Pomodoro & Conquistas"
+            else -> "Lembretes de Tarefas"
+        }
+
+        val activeChannelId = getOrCreateSoundChannel(context, baseChannel, channelName, effectiveSound)
+        val soundUri = SoundEffectsManager.getSoundUri(context, effectiveSound)
+
+        // Activity intent
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -159,36 +228,41 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val soundUri: Uri = if (customSoundUriString.isNotBlank() && !customSoundUriString.startsWith("sound_")) {
-            try {
-                Uri.parse(customSoundUriString)
-            } catch (_: Exception) {
-                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            }
-        } else {
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        // Full Screen Intent to wake up and display on lock screen
+        val fullScreenIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            context,
+            id + 80000,
+            fullScreenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
-        val notification = NotificationCompat.Builder(context, channelId)
+        val notificationBuilder = NotificationCompat.Builder(context, activeChannelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(message)
-            .setAutoCancel(true)
+            .setAutoCancel(!loopAlarm)
+            .setOngoing(loopAlarm)
             .setSound(soundUri)
             .setContentIntent(pendingIntent)
+            .setFullScreenIntent(fullScreenPendingIntent, true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setVibrate(longArrayOf(0, 500, 250, 500))
-            .build()
+
+        val notification = notificationBuilder.build()
+        if (loopAlarm) {
+            notification.flags = notification.flags or Notification.FLAG_INSISTENT
+        }
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(id, notification)
 
-        // Directly play sound effect if custom sound is a bundled effect
-        if (customSoundUriString.isNotBlank() && customSoundUriString.startsWith("sound_")) {
-            com.example.util.SoundEffectsManager.playSoundById(context, customSoundUriString)
-        }
+        // Active audio playback via STREAM_ALARM (Dual Engine)
+        SoundEffectsManager.playAlarmAudio(context, effectiveSound, loop = loopAlarm)
 
         if (vibratePhone) {
             triggerVibration(context, 500)
@@ -236,9 +310,24 @@ object NotificationHelper {
         notificationManager.cancel(TIMER_NOTIFICATION_ID)
     }
 
-    fun scheduleTaskReminder(context: Context, taskId: Long, title: String, dueTimestamp: Long, minutesBefore: Int, customSoundUri: String = "") {
+    fun scheduleTaskReminder(
+        context: Context,
+        taskId: Long,
+        title: String,
+        dueTimestamp: Long,
+        minutesBefore: Int,
+        customSoundUri: String = "",
+        loopAlarm: Boolean = false
+    ) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val now = System.currentTimeMillis()
+
+        val effectiveSound = if (customSoundUri.isNotBlank()) {
+            customSoundUri
+        } else {
+            val settings = PreferencesManager(context).settings.value
+            if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
+        }
 
         // 1. Advance reminder (if minutesBefore > 0)
         if (minutesBefore > 0) {
@@ -249,7 +338,8 @@ object NotificationHelper {
                     putExtra(EXTRA_TITLE, "Tarefa em Breve: $title")
                     putExtra(EXTRA_MESSAGE, "Vence em $minutesBefore minutos! Fique atento.")
                     putExtra(EXTRA_ID, taskId.toInt())
-                    putExtra(EXTRA_SOUND_URI, customSoundUri)
+                    putExtra(EXTRA_SOUND_URI, effectiveSound)
+                    putExtra(EXTRA_LOOP_ALARM, loopAlarm)
                 }
                 val pendingAdvance = PendingIntent.getBroadcast(
                     context,
@@ -268,7 +358,8 @@ object NotificationHelper {
                 putExtra(EXTRA_TITLE, "Prazo da Tarefa: $title")
                 putExtra(EXTRA_MESSAGE, "Prazo final agora! Conclua sua tarefa.")
                 putExtra(EXTRA_ID, (taskId + 50000).toInt())
-                putExtra(EXTRA_SOUND_URI, customSoundUri)
+                putExtra(EXTRA_SOUND_URI, effectiveSound)
+                putExtra(EXTRA_LOOP_ALARM, loopAlarm)
             }
             val pendingExact = PendingIntent.getBroadcast(
                 context,
@@ -280,9 +371,12 @@ object NotificationHelper {
         }
     }
 
+    /**
+     * Schedules alarm using AlarmClockInfo as first-class citizen.
+     * AlarmClockInfo pierces through Doze mode, app standby, and OEM restrictions.
+     */
     private fun tryScheduleExact(context: Context, alarmManager: AlarmManager, triggerTime: Long, pendingIntent: PendingIntent) {
         try {
-            // First and best choice: setAlarmClock (exempt from Doze mode, app standby, and battery restrictions)
             val showIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             }
@@ -320,7 +414,15 @@ object NotificationHelper {
         alarmManager.cancel(p2)
     }
 
-    fun scheduleHabitReminder(context: Context, habitId: Long, title: String, timeString: String, leadMinutes: Int = 10, customSoundUri: String = "") {
+    fun scheduleHabitReminder(
+        context: Context,
+        habitId: Long,
+        title: String,
+        timeString: String,
+        leadMinutes: Int = 10,
+        customSoundUri: String = "",
+        loopAlarm: Boolean = false
+    ) {
         val parts = timeString.split(":")
         if (parts.size != 2) return
         val hour = parts[0].toIntOrNull() ?: return
@@ -328,6 +430,13 @@ object NotificationHelper {
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val now = System.currentTimeMillis()
+
+        val effectiveSound = if (customSoundUri.isNotBlank()) {
+            customSoundUri
+        } else {
+            val settings = PreferencesManager(context).settings.value
+            if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+        }
 
         // 1. Advance reminder (if leadMinutes > 0)
         if (leadMinutes > 0) {
@@ -346,11 +455,12 @@ object NotificationHelper {
                 putExtra(EXTRA_TITLE, "Hábito em $leadMinutes min: $title")
                 putExtra(EXTRA_MESSAGE, "Horário programado: $timeString. Prepare-se para seu hábito!")
                 putExtra(EXTRA_ID, (habitId + 10000).toInt())
-                putExtra(EXTRA_SOUND_URI, customSoundUri)
+                putExtra(EXTRA_SOUND_URI, effectiveSound)
                 putExtra(EXTRA_HABIT_ID, habitId)
                 putExtra(EXTRA_HABIT_TIME, timeString)
                 putExtra(EXTRA_HABIT_LEAD, leadMinutes)
                 putExtra(EXTRA_IS_ADVANCE, true)
+                putExtra(EXTRA_LOOP_ALARM, loopAlarm)
             }
             val pAdvance = PendingIntent.getBroadcast(
                 context,
@@ -376,11 +486,12 @@ object NotificationHelper {
             putExtra(EXTRA_TITLE, "Hora do Hábito: $title")
             putExtra(EXTRA_MESSAGE, "Hora exata de praticar seu hábito! Mantenha sua sequência ativa.")
             putExtra(EXTRA_ID, (habitId + 60000).toInt())
-            putExtra(EXTRA_SOUND_URI, customSoundUri)
+            putExtra(EXTRA_SOUND_URI, effectiveSound)
             putExtra(EXTRA_HABIT_ID, habitId)
             putExtra(EXTRA_HABIT_TIME, timeString)
             putExtra(EXTRA_HABIT_LEAD, leadMinutes)
             putExtra(EXTRA_IS_ADVANCE, false)
+            putExtra(EXTRA_LOOP_ALARM, loopAlarm)
         }
         val pExact = PendingIntent.getBroadcast(
             context,
@@ -389,6 +500,32 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         tryScheduleExact(context, alarmManager, calExact.timeInMillis, pExact)
+
+        // 3. Missed habit alert (5 minutes after expiration)
+        val settings = PreferencesManager(context).settings.value
+        if (settings.notifyMissedHabits) {
+            val calMissed = Calendar.getInstance().apply {
+                timeInMillis = calExact.timeInMillis + (5 * 60 * 1000L)
+            }
+            val intentMissed = Intent(context, CitraNotificationReceiver::class.java).apply {
+                putExtra(EXTRA_TYPE, TYPE_HABIT_MISSED)
+                putExtra(EXTRA_TITLE, "⚠️ Hábito não realizado: $title")
+                putExtra(EXTRA_MESSAGE, "Já passaram 5 minutos do horário limite. Ainda dá tempo de completar seu hábito hoje!")
+                putExtra(EXTRA_ID, (habitId + 90000).toInt())
+                putExtra(EXTRA_SOUND_URI, effectiveSound)
+                putExtra(EXTRA_HABIT_ID, habitId)
+                putExtra(EXTRA_HABIT_TIME, timeString)
+                putExtra(EXTRA_HABIT_LEAD, leadMinutes)
+                putExtra(EXTRA_LOOP_ALARM, false)
+            }
+            val pMissed = PendingIntent.getBroadcast(
+                context,
+                (habitId + 90000).toInt(),
+                intentMissed,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            tryScheduleExact(context, alarmManager, calMissed.timeInMillis, pMissed)
+        }
     }
 
     /**
@@ -402,7 +539,8 @@ object NotificationHelper {
         timeString: String,
         leadMinutes: Int,
         customSoundUri: String,
-        isAdvance: Boolean
+        isAdvance: Boolean,
+        loopAlarm: Boolean = false
     ) {
         val parts = timeString.split(":")
         if (parts.size != 2) return
@@ -410,6 +548,13 @@ object NotificationHelper {
         val minute = parts[1].toIntOrNull() ?: return
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+
+        val effectiveSound = if (customSoundUri.isNotBlank()) {
+            customSoundUri
+        } else {
+            val settings = PreferencesManager(context).settings.value
+            if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+        }
 
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
@@ -429,11 +574,12 @@ object NotificationHelper {
             putExtra(EXTRA_TITLE, if (isAdvance) "Hábito em $leadMinutes min: $title" else "Hora do Hábito: $title")
             putExtra(EXTRA_MESSAGE, if (isAdvance) "Horário programado: $timeString. Prepare-se para seu hábito!" else "Hora exata de praticar seu hábito! Mantenha sua sequência ativa.")
             putExtra(EXTRA_ID, requestCode)
-            putExtra(EXTRA_SOUND_URI, customSoundUri)
+            putExtra(EXTRA_SOUND_URI, effectiveSound)
             putExtra(EXTRA_HABIT_ID, habitId)
             putExtra(EXTRA_HABIT_TIME, timeString)
             putExtra(EXTRA_HABIT_LEAD, leadMinutes)
             putExtra(EXTRA_IS_ADVANCE, isAdvance)
+            putExtra(EXTRA_LOOP_ALARM, loopAlarm)
         }
         val pIntent = PendingIntent.getBroadcast(
             context,
@@ -453,6 +599,9 @@ object NotificationHelper {
 
         val p2 = PendingIntent.getBroadcast(context, (habitId + 60000).toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         alarmManager.cancel(p2)
+
+        val p3 = PendingIntent.getBroadcast(context, (habitId + 90000).toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        alarmManager.cancel(p3)
     }
 
     fun triggerVibration(context: Context, durationMs: Long = 400) {

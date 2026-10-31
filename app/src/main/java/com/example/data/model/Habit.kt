@@ -17,5 +17,7 @@ data class Habit(
     val bestStreak: Int = 0,
     val lastCompletedDate: String = "", // e.g. "2026-10-27"
     val completedDatesCsv: String = "", // comma-separated YYYY-MM-DD
+    val customSoundUri: String = "",
+    val loopAlarm: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )

@@ -32,25 +32,6 @@ fun OrganizationScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (!isNoteEditorOpen) {
-            // Top Header
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Text(
-                    text = "Organização",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Tarefas, Hábitos Diários & Anotações",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
             // Top Tab Switcher
             TabRow(
                 selectedTabIndex = selectedTabIndex,

@@ -109,6 +109,9 @@ val GreenLight = Color(0xFF4CAF50)
 val GreenContainer = Color(0xFFE8F5E9)
 val OnGreenContainer = Color(0xFF00390B)
 
+val BlueAccent = Color(0xFF1E88E5)
+val PurpleAccent = Color(0xFF7E57C2)
+
 val CreamBackground = Color(0xFFFCFAF7)
 val CreamSurface = Color(0xFFFFFFFF)
 val CreamSurfaceVariant = Color(0xFFF4EFEA)

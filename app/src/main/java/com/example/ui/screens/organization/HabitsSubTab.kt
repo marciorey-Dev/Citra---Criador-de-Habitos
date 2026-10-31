@@ -148,8 +148,8 @@ fun HabitsSubTab(
         AddHabitDialog(
             categories = categories,
             onDismiss = { showAddDialog = false },
-            onConfirm = { title, category, emoji, time, leadMinutes, frequency ->
-                viewModel.addHabit(title, category, emoji, time, leadMinutes, frequency)
+            onConfirm = { title, category, emoji, time, leadMinutes, frequency, soundUri, loop ->
+                viewModel.addHabit(title, category, emoji, time, leadMinutes, frequency, soundUri, loop)
                 showAddDialog = false
             }
         )
@@ -189,11 +189,31 @@ fun HabitItemCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val isExpiredToday = remember(isDoneToday, habit.reminderTime) {
+        if (isDoneToday || habit.reminderTime.isBlank() || !habit.reminderTime.contains(":")) {
+            false
+        } else {
+            try {
+                val parts = habit.reminderTime.split(":")
+                val rHour = parts[0].trim().toInt()
+                val rMin = parts[1].trim().toInt()
+                val now = Calendar.getInstance()
+                val nowMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+                val reminderMinutes = rHour * 60 + rMin
+                nowMinutes >= reminderMinutes
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isDoneToday) {
                 MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
+            } else if (isExpiredToday) {
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
             } else {
                 MaterialTheme.colorScheme.surface
             }
@@ -203,8 +223,14 @@ fun HabitItemCard(
             .fillMaxWidth()
             .clickable { onEdit() }
             .border(
-                width = 1.dp,
-                color = if (isDoneToday) GreenAccent.copy(alpha = 0.7f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                width = if (isExpiredToday) 2.dp else 1.dp,
+                color = if (isDoneToday) {
+                    GreenAccent.copy(alpha = 0.7f)
+                } else if (isExpiredToday) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                },
                 shape = RoundedCornerShape(18.dp)
             )
             .testTag("habit_item_${habit.id}")
@@ -223,7 +249,13 @@ fun HabitItemCard(
                     modifier = Modifier
                         .size(46.dp)
                         .background(
-                            if (isDoneToday) GreenContainer.copy(alpha = 0.7f) else MaterialTheme.colorScheme.primaryContainer,
+                            if (isDoneToday) {
+                                GreenContainer.copy(alpha = 0.7f)
+                            } else if (isExpiredToday) {
+                                MaterialTheme.colorScheme.errorContainer
+                            } else {
+                                MaterialTheme.colorScheme.primaryContainer
+                            },
                             CircleShape
                         ),
                     contentAlignment = Alignment.Center
@@ -243,7 +275,7 @@ fun HabitItemCard(
                             text = habit.title,
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = if (isExpiredToday && !isDoneToday) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f, fill = false),
                             maxLines = 1,
                             softWrap = false
@@ -262,6 +294,21 @@ fun HabitItemCard(
                                 softWrap = false,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                             )
+                        }
+                        if (isExpiredToday) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.errorContainer
+                            ) {
+                                Text(
+                                    text = "⚠️ Expirado",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
 
@@ -376,7 +423,7 @@ fun HabitItemCard(
 fun AddHabitDialog(
     categories: List<Category>,
     onDismiss: () -> Unit,
-    onConfirm: (title: String, category: String, iconEmoji: String, reminderTime: String, reminderLeadMinutes: Int, frequencyDays: String) -> Unit
+    onConfirm: (title: String, category: String, iconEmoji: String, reminderTime: String, reminderLeadMinutes: Int, frequencyDays: String, customSoundUri: String, loopAlarm: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var title by remember { mutableStateOf("") }
@@ -385,6 +432,8 @@ fun AddHabitDialog(
     var reminderTime by remember { mutableStateOf("08:00") }
     var reminderLeadMinutes by remember { mutableStateOf(10) } // Opção no menu do hábito
     var frequencyDays by remember { mutableStateOf("ALL") }
+    var customSoundUri by remember { mutableStateOf("") }
+    var loopAlarm by remember { mutableStateOf(false) }
 
     val emojis = listOf("💧", "🏃", "📚", "🧘", "🥗", "💊", "🛌", "💻", "✨", "🎯", "🚶", "🎸")
 
@@ -469,13 +518,29 @@ fun AddHabitDialog(
                         )
                     }
                 }
+
+                // Opção de Toque em Loop
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = loopAlarm,
+                        onCheckedChange = { loopAlarm = it }
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onConfirm(title.trim(), category, selectedEmoji, reminderTime, reminderLeadMinutes, frequencyDays)
+                        onConfirm(title.trim(), category, selectedEmoji, reminderTime, reminderLeadMinutes, frequencyDays, customSoundUri, loopAlarm)
                     }
                 },
                 enabled = title.isNotBlank(),
@@ -506,6 +571,8 @@ fun EditHabitDialog(
     var selectedEmoji by remember { mutableStateOf(habit.iconEmoji) }
     var reminderTime by remember { mutableStateOf(habit.reminderTime) }
     var reminderLeadMinutes by remember { mutableStateOf(habit.reminderLeadMinutes) }
+    var customSoundUri by remember { mutableStateOf(habit.customSoundUri) }
+    var loopAlarm by remember { mutableStateOf(habit.loopAlarm) }
 
     val emojis = listOf("💧", "🏃", "📚", "🧘", "🥗", "💊", "🛌", "💻", "✨", "🎯", "🚶", "🎸")
 
@@ -588,6 +655,21 @@ fun EditHabitDialog(
                         )
                     }
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = loopAlarm,
+                        onCheckedChange = { loopAlarm = it }
+                    )
+                }
             }
         },
         confirmButton = {
@@ -600,7 +682,9 @@ fun EditHabitDialog(
                                 category = category,
                                 iconEmoji = selectedEmoji,
                                 reminderTime = reminderTime,
-                                reminderLeadMinutes = reminderLeadMinutes
+                                reminderLeadMinutes = reminderLeadMinutes,
+                                customSoundUri = customSoundUri,
+                                loopAlarm = loopAlarm
                             )
                         )
                     }

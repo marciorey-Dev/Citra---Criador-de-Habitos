@@ -21,11 +21,12 @@ data class NotificationSettings(
     val vibrate: Boolean = true,
     val headsUpBanner: Boolean = true,
     val notifyAchievements: Boolean = true,
+    val notifyMissedHabits: Boolean = true,
     val ambientBreakMusicInApp: Boolean = false,
     val ambientMusicVolume: Float = 0.5f
 )
 
-class PreferencesManager(context: Context) {
+class PreferencesManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("citra_prefs", Context.MODE_PRIVATE)
 
     // Theme Accent
@@ -86,6 +87,7 @@ class PreferencesManager(context: Context) {
             vibrate = prefs.getBoolean("vibrate", true),
             headsUpBanner = prefs.getBoolean("heads_up", true),
             notifyAchievements = prefs.getBoolean("notify_achievements", true),
+            notifyMissedHabits = prefs.getBoolean("notify_missed_habits", true),
             ambientBreakMusicInApp = prefs.getBoolean("ambient_music_in_app", false),
             ambientMusicVolume = prefs.getFloat("ambient_music_volume", 0.5f)
         )
@@ -119,11 +121,15 @@ class PreferencesManager(context: Context) {
             putBoolean("vibrate", newSettings.vibrate)
             putBoolean("heads_up", newSettings.headsUpBanner)
             putBoolean("notify_achievements", newSettings.notifyAchievements)
+            putBoolean("notify_missed_habits", newSettings.notifyMissedHabits)
             putBoolean("ambient_music_in_app", newSettings.ambientBreakMusicInApp)
             putFloat("ambient_music_volume", newSettings.ambientMusicVolume)
             apply()
         }
         _settings.value = newSettings
+        try {
+            com.example.notifications.NotificationHelper.prewarmChannelsForNewSettings(context, newSettings)
+        } catch (_: Exception) {}
     }
 
     fun setTutorialSeen(seen: Boolean = true) {

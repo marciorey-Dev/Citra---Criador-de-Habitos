@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import com.example.data.local.AppDatabase
+import com.example.data.local.PreferencesManager
 import com.example.data.model.*
 import com.example.notifications.NotificationHelper
 import kotlinx.coroutines.flow.Flow
@@ -19,6 +20,7 @@ class CitraRepository(
     private val focusSessionDao = database.focusSessionDao()
     private val categoryDao = database.categoryDao()
     private val achievementDao = database.achievementDao()
+    private val preferencesManager = PreferencesManager(context)
 
     // Categories
     val allCategories: Flow<List<Category>> = categoryDao.getAllCategories()
@@ -42,12 +44,17 @@ class CitraRepository(
     suspend fun insertTask(task: Task): Long {
         val id = taskDao.insertTask(task)
         if (task.dueDateTimestamp != null && task.dueDateTimestamp > System.currentTimeMillis()) {
+            val settings = preferencesManager.settings.value
+            val sound = if (task.customSoundUri.isNotBlank()) task.customSoundUri
+                else if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
             NotificationHelper.scheduleTaskReminder(
-                context,
-                id,
-                task.title,
-                task.dueDateTimestamp,
-                task.reminderMinutesBefore
+                context = context,
+                taskId = id,
+                title = task.title,
+                dueTimestamp = task.dueDateTimestamp,
+                minutesBefore = task.reminderMinutesBefore,
+                customSoundUri = sound,
+                loopAlarm = task.loopAlarm
             )
         }
         return id
@@ -59,12 +66,17 @@ class CitraRepository(
             NotificationHelper.cancelTaskReminder(context, task.id)
             checkTaskAchievements()
         } else if (task.dueDateTimestamp != null && task.dueDateTimestamp > System.currentTimeMillis()) {
+            val settings = preferencesManager.settings.value
+            val sound = if (task.customSoundUri.isNotBlank()) task.customSoundUri
+                else if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
             NotificationHelper.scheduleTaskReminder(
-                context,
-                task.id,
-                task.title,
-                task.dueDateTimestamp,
-                task.reminderMinutesBefore
+                context = context,
+                taskId = task.id,
+                title = task.title,
+                dueTimestamp = task.dueDateTimestamp,
+                minutesBefore = task.reminderMinutesBefore,
+                customSoundUri = sound,
+                loopAlarm = task.loopAlarm
             )
         }
     }
@@ -91,7 +103,18 @@ class CitraRepository(
     suspend fun insertHabit(habit: Habit): Long {
         val id = habitDao.insertHabit(habit)
         if (habit.reminderTime.isNotBlank()) {
-            NotificationHelper.scheduleHabitReminder(context, id, habit.title, habit.reminderTime)
+            val settings = preferencesManager.settings.value
+            val sound = if (habit.customSoundUri.isNotBlank()) habit.customSoundUri
+                else if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+            NotificationHelper.scheduleHabitReminder(
+                context = context,
+                habitId = id,
+                title = habit.title,
+                timeString = habit.reminderTime,
+                leadMinutes = habit.reminderLeadMinutes,
+                customSoundUri = sound,
+                loopAlarm = habit.loopAlarm
+            )
         }
         return id
     }
@@ -99,7 +122,18 @@ class CitraRepository(
     suspend fun updateHabit(habit: Habit) {
         habitDao.updateHabit(habit)
         if (habit.reminderTime.isNotBlank()) {
-            NotificationHelper.scheduleHabitReminder(context, habit.id, habit.title, habit.reminderTime)
+            val settings = preferencesManager.settings.value
+            val sound = if (habit.customSoundUri.isNotBlank()) habit.customSoundUri
+                else if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+            NotificationHelper.scheduleHabitReminder(
+                context = context,
+                habitId = habit.id,
+                title = habit.title,
+                timeString = habit.reminderTime,
+                leadMinutes = habit.reminderLeadMinutes,
+                customSoundUri = sound,
+                loopAlarm = habit.loopAlarm
+            )
         }
     }
 
@@ -221,14 +255,39 @@ class CitraRepository(
                     currentProgress = achievement.maxProgress
                 )
             )
-            NotificationHelper.showInstantNotification(
-                context,
-                id.hashCode(),
-                NotificationHelper.CHANNEL_ALERTS,
-                "🏆 Conquista Desbloqueada!",
-                "${achievement.iconEmoji} ${achievement.title}: ${achievement.description}"
-            )
+            val settings = preferencesManager.settings.value
+            if (settings.notifyAchievements) {
+                val sound = if (settings.achievementSound.isNotBlank()) settings.achievementSound else settings.alertSound
+                NotificationHelper.showInstantNotification(
+                    context = context,
+                    id = id.hashCode(),
+                    channelId = NotificationHelper.CHANNEL_ALERTS,
+                    title = "🏆 Conquista Desbloqueada!",
+                    message = "${achievement.iconEmoji} ${achievement.title}: ${achievement.description}",
+                    customSoundUriString = sound,
+                    vibratePhone = settings.vibrate
+                )
+            }
         }
+    }
+
+    suspend fun deleteAllTasks() {
+        taskDao.deleteAllTasks()
+    }
+
+    suspend fun deleteAllHabits() {
+        habitDao.deleteAllHabits()
+    }
+
+    suspend fun deleteAllNotes() {
+        noteDao.deleteAllNotes()
+    }
+
+    suspend fun resetAllData() {
+        taskDao.deleteAllTasks()
+        habitDao.deleteAllHabits()
+        noteDao.deleteAllNotes()
+        focusSessionDao.deleteAllSessions()
     }
 
     private suspend fun checkFocusAchievements(focusMinutes: Int, breakMinutes: Int) {
