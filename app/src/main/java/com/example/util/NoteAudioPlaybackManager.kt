@@ -34,20 +34,30 @@ object NoteAudioPlaybackManager {
     private val _playbackState = MutableStateFlow(NoteAudioState())
     val playbackState: StateFlow<NoteAudioState> = _playbackState.asStateFlow()
 
+    fun isCurrentAudio(blockId: String, url: String): Boolean {
+        val s = _playbackState.value
+        return s.playingBlockId == blockId || (s.currentUrl.isNotBlank() && s.currentUrl == url)
+    }
+
+    fun isPlayingAudio(blockId: String, url: String): Boolean {
+        return isCurrentAudio(blockId, url) && _playbackState.value.isPlaying
+    }
+
     fun playOrPause(context: Context, blockId: String, url: String, volume: Float, isLoop: Boolean) {
         val currentState = _playbackState.value
+        val isSameAudio = currentState.playingBlockId == blockId || (currentState.currentUrl.isNotBlank() && currentState.currentUrl == url)
 
         // If clicking the same block that is currently playing -> pause it
-        if (currentState.playingBlockId == blockId && currentState.isPlaying) {
+        if (isSameAudio && currentState.isPlaying) {
             pause()
             return
         }
 
         // If clicking the same block that is paused -> resume it
-        if (currentState.playingBlockId == blockId && mediaPlayer != null) {
+        if (isSameAudio && mediaPlayer != null) {
             try {
                 mediaPlayer?.start()
-                _playbackState.update { it.copy(isPlaying = true) }
+                _playbackState.update { it.copy(isPlaying = true, playingBlockId = blockId) }
                 startProgressTracker()
                 return
             } catch (e: Exception) {

@@ -36,6 +36,33 @@ object AmbientBreakMusicManager {
         }
     }
 
+    private var wasPlayingBeforeBackground = false
+
+    fun onAppBackgrounded() {
+        if (mediaPlayer?.isPlaying == true) {
+            wasPlayingBeforeBackground = true
+            try {
+                mediaPlayer?.pause()
+            } catch (_: Exception) {}
+        } else {
+            wasPlayingBeforeBackground = false
+        }
+    }
+
+    fun onAppForegrounded(context: Context) {
+        if (wasPlayingBeforeBackground || isAlwaysPlayingInApp || isBreakActive) {
+            if (mediaPlayer != null) {
+                try {
+                    mediaPlayer?.start()
+                    wasPlayingBeforeBackground = false
+                    return
+                } catch (_: Exception) {}
+            }
+            startPlaying(context)
+            wasPlayingBeforeBackground = false
+        }
+    }
+
     fun setAlwaysPlayingInApp(context: Context, enabled: Boolean) {
         isAlwaysPlayingInApp = enabled
         if (enabled) {

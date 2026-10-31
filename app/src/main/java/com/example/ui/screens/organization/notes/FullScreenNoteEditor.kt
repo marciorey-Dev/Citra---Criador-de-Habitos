@@ -46,6 +46,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -101,15 +105,34 @@ fun FullScreenNoteEditor(
     pomodoroState: FlexiblePomodoroState? = null,
     onNavigateToTimer: (() -> Unit)? = null,
     onSaveAndClose: (title: String, content: String, category: String, isPinned: Boolean, bgUri: String?, blur: Float, brightness: Float) -> Unit,
+    onSaveOnly: ((title: String, content: String, category: String, isPinned: Boolean, bgUri: String?, blur: Float, brightness: Float) -> Unit)? = null,
     onClose: () -> Unit = {},
     onDelete: (() -> Unit)? = null,
     onOpenLinkedNote: ((Note) -> Unit)? = null,
-    onConvertChecklistToTask: ((title: String, date: String) -> Unit)? = null
+    onConvertChecklistToTask: ((title: String, date: String) -> Unit)? = null,
+    initialMode: NoteEditorMode = NoteEditorMode.LIVE_PREVIEW,
+    onModeChanged: ((NoteEditorMode) -> Unit)? = null,
+    onToggleChecklistTaskSync: ((checklistText: String, isChecked: Boolean) -> Unit)? = null,
+    onConvertChecklistToDirectTask: ((title: String, category: String, priority: String, dueDate: String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val noteScrollState = rememberScrollState()
+
+    var isToolbarVisible by remember { mutableStateOf(true) }
+    var previousScrollOffset by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(noteScrollState.value) {
+        val currentOffset = noteScrollState.value
+        val delta = currentOffset - previousScrollOffset
+        if (delta > 8 && currentOffset > 60) {
+            isToolbarVisible = false
+        } else if (delta < -8 || currentOffset <= 20) {
+            isToolbarVisible = true
+        }
+        previousScrollOffset = currentOffset
+    }
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
     var category by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
@@ -122,8 +145,8 @@ fun FullScreenNoteEditor(
     var editorValue by remember {
         mutableStateOf(TextFieldValue(initialNote?.content ?: ""))
     }
-    // Only Live Preview and Modo Leitura as requested
-    var editorMode by remember { mutableStateOf(NoteEditorMode.LIVE_PREVIEW) }
+    // Saved mode (Live Preview or Modo Leitura)
+    var editorMode by remember { mutableStateOf(initialMode) }
 
     val bodyFocusRequester = remember { FocusRequester() }
     val isDarkBg = bgUri != null
@@ -203,9 +226,9 @@ fun FullScreenNoteEditor(
         return title.isBlank() && editorValue.text.isBlank()
     }
 
-    fun saveCurrent() {
+    fun saveCurrent(close: Boolean = true) {
         if (isCompletelyEmpty() && initialNote == null) {
-            onClose()
+            if (close) onClose()
             return
         }
         val finalTitle = title.trim().ifBlank { "Sem título" }
@@ -214,20 +237,61 @@ fun FullScreenNoteEditor(
         // Sync directly to physical .md file in Documents/Citra Docs/
         CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, finalContent)
 
-        onSaveAndClose(
-            finalTitle,
-            finalContent,
-            category,
-            isPinned,
-            bgUri,
-            bgBlur,
-            bgBrightness
-        )
+        if (close) {
+            onSaveAndClose(
+                finalTitle,
+                finalContent,
+                category,
+                isPinned,
+                bgUri,
+                bgBlur,
+                bgBrightness
+            )
+        } else {
+            if (onSaveOnly != null) {
+                onSaveOnly(
+                    finalTitle,
+                    finalContent,
+                    category,
+                    isPinned,
+                    bgUri,
+                    bgBlur,
+                    bgBrightness
+                )
+            } else {
+                onSaveAndClose(
+                    finalTitle,
+                    finalContent,
+                    category,
+                    isPinned,
+                    bgUri,
+                    bgBlur,
+                    bgBrightness
+                )
+            }
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("Nota salva com sucesso! ✓")
+            }
+        }
     }
 
-    // Auto-save on back press
+    // Auto-save when app is put to background, user switches apps or exits
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                saveCurrent(close = false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Auto-save on back press and close editor
     BackHandler {
-        saveCurrent()
+        saveCurrent(close = true)
     }
 
     // Link navigation handler
@@ -444,11 +508,13 @@ fun FullScreenNoteEditor(
                             shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                             modifier = Modifier.clickable {
-                                editorMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
+                                val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
                                     NoteEditorMode.READING
                                 } else {
                                     NoteEditorMode.LIVE_PREVIEW
                                 }
+                                editorMode = newMode
+                                onModeChanged?.invoke(newMode)
                             }
                         ) {
                             Row(
@@ -477,7 +543,7 @@ fun FullScreenNoteEditor(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { saveCurrent() }) {
+                    IconButton(onClick = { saveCurrent(close = true) }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Voltar e Salvar",
@@ -502,7 +568,7 @@ fun FullScreenNoteEditor(
                         )
                     }
 
-                    IconButton(onClick = { saveCurrent() }) {
+                    IconButton(onClick = { saveCurrent(close = false) }) {
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Salvar",
@@ -549,14 +615,25 @@ fun FullScreenNoteEditor(
 
                             HorizontalDivider()
 
-                            // EXPORT MENU OPTIONS (PDF, MD, TXT, HTML, Image Card)
+                            // EXPORT MENU OPTIONS (DOCX, PDF, MD, TXT, HTML, Image Card)
+                            DropdownMenuItem(
+                                text = { Text("Exportar em Word (.docx)") },
+                                leadingIcon = { Icon(Icons.Default.Article, contentDescription = null, tint = primaryColor) },
+                                onClick = {
+                                    showMenu = false
+                                    val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
+                                    val uri = NoteExportHelper.exportToDocx(context, title, category, blocks, primaryColor.toArgb())
+                                    NoteExportHelper.shareUri(context, uri, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Exportar Nota em Word (.docx)")
+                                }
+                            )
+
                             DropdownMenuItem(
                                 text = { Text("Exportar em PDF (.pdf)") },
                                 leadingIcon = { Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = RedAction) },
                                 onClick = {
                                     showMenu = false
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                                    val uri = NoteExportHelper.exportToPdf(context, title, category, blocks)
+                                    val uri = NoteExportHelper.exportToPdf(context, title, category, blocks, primaryColor.toArgb())
                                     NoteExportHelper.shareUri(context, uri, "application/pdf", "Exportar Nota em PDF")
                                 }
                             )
@@ -589,7 +666,7 @@ fun FullScreenNoteEditor(
                                 onClick = {
                                     showMenu = false
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                                    val uri = NoteExportHelper.exportToHtmlFile(context, title, category, blocks)
+                                    val uri = NoteExportHelper.exportToHtmlFile(context, title, category, blocks, primaryColor.toArgb())
                                     NoteExportHelper.shareUri(context, uri, "text/html", "Exportar Página Web (.html)")
                                 }
                             )
@@ -600,7 +677,7 @@ fun FullScreenNoteEditor(
                                 onClick = {
                                     showMenu = false
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                                    val uri = NoteExportHelper.shareAsImage(context, title, category, blocks)
+                                    val uri = NoteExportHelper.shareAsImage(context, title, category, blocks, primaryColor.toArgb())
                                     NoteExportHelper.shareUri(context, uri, "image/png", "Compartilhar Imagem da Nota")
                                 }
                             )
@@ -664,42 +741,7 @@ fun FullScreenNoteEditor(
                     .padding(top = 10.dp, bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // 1. Categories above Title
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(bottom = 2.dp)
-                ) {
-                    items(categories) { cat ->
-                        val isSelected = category == cat.name
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .clickable { category = cat.name }
-                                .border(
-                                    width = if (isSelected) 1.5.dp else 0.dp,
-                                    color = if (isSelected) primaryColor else Color.Transparent,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Label, contentDescription = null, modifier = Modifier.size(13.dp), tint = primaryColor)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = cat.name,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 2. Note Title Input
+                // 1. Note Title Input
                 OutlinedTextField(
                     value = title,
                     onValueChange = { input ->
@@ -736,6 +778,63 @@ fun FullScreenNoteEditor(
                         .fillMaxWidth()
                         .testTag("note_full_title_input")
                 )
+
+                // 2. Categories selector immediately after Title (Direct & easily accessible)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Label,
+                        contentDescription = "Categoria da Nota",
+                        modifier = Modifier.size(16.dp),
+                        tint = primaryColor
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(categories) { cat ->
+                            val isSelected = category == cat.name
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                modifier = Modifier
+                                    .clickable { category = cat.name }
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) primaryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(13.dp),
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                    }
+                                    Text(
+                                        text = cat.name,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
@@ -951,6 +1050,7 @@ fun FullScreenNoteEditor(
                                                     val updated = block.copy(isChecked = checked)
                                                     val list = readingBlocks.toMutableList().apply { set(idx, updated) }
                                                     updateBlocksAndMarkdown(list)
+                                                    onToggleChecklistTaskSync?.invoke(block.text, checked)
                                                 },
                                                 modifier = Modifier.size(24.dp)
                                             )
@@ -1170,19 +1270,25 @@ fun FullScreenNoteEditor(
                 }
             }
 
-            // Floating Obsidian Formatting Toolbar (Docked at top/center of screen)
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                shadowElevation = 6.dp,
+            // Floating Obsidian Formatting Toolbar (Docked at top/center of screen, auto-hides on scroll down)
+            AnimatedVisibility(
+                visible = isToolbarVisible,
+                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 8.dp, start = 12.dp, end = 12.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Row(
@@ -1400,6 +1506,7 @@ fun FullScreenNoteEditor(
                     }
                 }
             }
+        }
 
             // CitraRecord recording HUD
             if (isRecordingAudio) {
@@ -1545,14 +1652,19 @@ fun FullScreenNoteEditor(
         )
     }
 
-    // Convert Checklist to Task modal
+    // Convert Checklist to Task modal (Direct Task Creation)
     if (checklistItemToConvert != null) {
         ConvertChecklistToTaskDialog(
             initialTitle = checklistItemToConvert!!,
+            categories = categories,
             onDismiss = { checklistItemToConvert = null },
-            onConfirm = { taskTitle, dueDate ->
+            onConfirm = { taskTitle, taskCategory, taskPriority, dueDate ->
                 checklistItemToConvert = null
-                onConvertChecklistToTask?.invoke(taskTitle, dueDate)
+                if (onConvertChecklistToDirectTask != null) {
+                    onConvertChecklistToDirectTask(taskTitle, taskCategory, taskPriority, dueDate)
+                } else {
+                    onConvertChecklistToTask?.invoke(taskTitle, dueDate)
+                }
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("Tarefa criada com sucesso: $taskTitle ($dueDate)")
                 }
@@ -1666,32 +1778,17 @@ private fun ObsidianWhatsAppAudioPlayer(
     onUpdateTitle: (String) -> Unit,
     onDelete: () -> Unit
 ) {
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentPositionMs by remember { mutableStateOf(0) }
-    var totalDurationMs by remember { mutableStateOf(0) }
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    val context = LocalContext.current
+    val playbackState by NoteAudioPlaybackManager.playbackState.collectAsState()
+    val isCurrentAudio = NoteAudioPlaybackManager.isCurrentAudio(token.url, token.url)
+    val isPlaying = isCurrentAudio && playbackState.isPlaying
+    val currentPositionMs = if (isCurrentAudio) playbackState.currentPositionMs else 0
+    val totalDurationMs = if (isCurrentAudio) playbackState.durationMs else 0
+
     var isEditingTitle by remember { mutableStateOf(false) }
     var editedTitle by remember(token.titleOrAlt) { mutableStateOf(token.titleOrAlt) }
-    var volume by remember { mutableStateOf(1.0f) }
+    var volume by remember { mutableFloatStateOf(1.0f) }
     var showVolumeControl by remember { mutableStateOf(false) }
-
-    DisposableEffect(token.url) {
-        onDispose {
-            mediaPlayer?.release()
-            mediaPlayer = null
-            isPlaying = false
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            mediaPlayer?.let {
-                currentPositionMs = it.currentPosition
-                totalDurationMs = it.duration.coerceAtLeast(0)
-            }
-            kotlinx.coroutines.delay(200)
-        }
-    }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -1708,29 +1805,13 @@ private fun ObsidianWhatsAppAudioPlayer(
                 // Play / Pause WhatsApp button
                 IconButton(
                     onClick = {
-                        if (isPlaying) {
-                            mediaPlayer?.pause()
-                            isPlaying = false
-                        } else {
-                            try {
-                                if (mediaPlayer == null) {
-                                    val mp = MediaPlayer().apply {
-                                        setDataSource(token.url)
-                                        setVolume(volume, volume)
-                                        prepare()
-                                        setOnCompletionListener {
-                                            isPlaying = false
-                                            currentPositionMs = 0
-                                        }
-                                    }
-                                    mediaPlayer = mp
-                                    totalDurationMs = mp.duration.coerceAtLeast(0)
-                                }
-                                mediaPlayer?.setVolume(volume, volume)
-                                mediaPlayer?.start()
-                                isPlaying = true
-                            } catch (_: Exception) {}
-                        }
+                        NoteAudioPlaybackManager.playOrPause(
+                            context = context,
+                            blockId = token.url,
+                            url = token.url,
+                            volume = volume,
+                            isLoop = false
+                        )
                     },
                     modifier = Modifier
                         .size(40.dp)
@@ -1777,9 +1858,10 @@ private fun ObsidianWhatsAppAudioPlayer(
                     Slider(
                         value = progress,
                         onValueChange = { fraction ->
-                            val targetMs = (fraction * totalDurationMs).toInt()
-                            currentPositionMs = targetMs
-                            mediaPlayer?.seekTo(targetMs)
+                            if (totalDurationMs > 0) {
+                                val targetMs = (fraction * totalDurationMs).toInt()
+                                NoteAudioPlaybackManager.seekTo(targetMs)
+                            }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1820,7 +1902,15 @@ private fun ObsidianWhatsAppAudioPlayer(
                     )
                 }
 
-                IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
+                IconButton(
+                    onClick = {
+                        if (isCurrentAudio) {
+                            NoteAudioPlaybackManager.stop()
+                        }
+                        onDelete()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
                     Icon(Icons.Default.Close, contentDescription = "Remover Áudio", tint = RedAction, modifier = Modifier.size(16.dp))
                 }
             }
@@ -1844,7 +1934,7 @@ private fun ObsidianWhatsAppAudioPlayer(
                         value = volume,
                         onValueChange = { newV ->
                             volume = newV
-                            mediaPlayer?.setVolume(newV, newV)
+                            NoteAudioPlaybackManager.setVolume(newV)
                         },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f).height(18.dp)

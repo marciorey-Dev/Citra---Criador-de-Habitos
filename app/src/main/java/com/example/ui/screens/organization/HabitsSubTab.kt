@@ -435,8 +435,6 @@ fun AddHabitDialog(
     var customSoundUri by remember { mutableStateOf("") }
     var loopAlarm by remember { mutableStateOf(false) }
 
-    val emojis = listOf("💧", "🏃", "📚", "🧘", "🥗", "💊", "🛌", "💻", "✨", "🎯", "🚶", "🎸")
-
     fun openTimePicker() {
         val parts = reminderTime.split(":")
         val h = parts.getOrNull(0)?.toIntOrNull() ?: 8
@@ -470,22 +468,10 @@ fun AddHabitDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text("Ícone:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(emojis) { emoji ->
-                        Surface(
-                            shape = CircleShape,
-                            color = if (selectedEmoji == emoji) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clickable { selectedEmoji = emoji }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(text = emoji, fontSize = 18.sp)
-                            }
-                        }
-                    }
-                }
+                HabitEmojiSection(
+                    selectedEmoji = selectedEmoji,
+                    onSelectEmoji = { selectedEmoji = it }
+                )
 
                 Text("Horário Fixo:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Surface(
@@ -574,8 +560,6 @@ fun EditHabitDialog(
     var customSoundUri by remember { mutableStateOf(habit.customSoundUri) }
     var loopAlarm by remember { mutableStateOf(habit.loopAlarm) }
 
-    val emojis = listOf("💧", "🏃", "📚", "🧘", "🥗", "💊", "🛌", "💻", "✨", "🎯", "🚶", "🎸")
-
     fun openTimePicker() {
         val parts = reminderTime.split(":")
         val h = parts.getOrNull(0)?.toIntOrNull() ?: 8
@@ -608,22 +592,10 @@ fun EditHabitDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text("Ícone:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(emojis) { emoji ->
-                        Surface(
-                            shape = CircleShape,
-                            color = if (selectedEmoji == emoji) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clickable { selectedEmoji = emoji }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(text = emoji, fontSize = 18.sp)
-                            }
-                        }
-                    }
-                }
+                HabitEmojiSection(
+                    selectedEmoji = selectedEmoji,
+                    onSelectEmoji = { selectedEmoji = it }
+                )
 
                 Text("Horário Fixo:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Surface(

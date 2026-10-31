@@ -22,20 +22,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 
-enum class NoteSortOption(val label: String) {
-    LAST_UPDATED("Última Atualização"),
-    CREATION_DATE("Data de Criação"),
-    ALPHABETICAL("Ordem A-Z"),
-    CATEGORY("Categoria"),
-    SIZE("Tamanho")
-}
-
-enum class NoteLayoutMode(val label: String) {
-    GRID_2("Grade"),
-    GRID_3("Grade Pequena"),
-    DETAILS("Detalhes"),
-    LIST("Lista")
-}
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +42,21 @@ import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
+
+enum class NoteSortOption(val label: String) {
+    LAST_UPDATED("Última Atualização"),
+    CREATION_DATE("Data de Criação"),
+    ALPHABETICAL("Ordem A-Z"),
+    CATEGORY("Categoria"),
+    SIZE("Tamanho")
+}
+
+enum class NoteLayoutMode(val label: String) {
+    GRID_2("Grade"),
+    GRID_3("Grade Pequena"),
+    DETAILS("Detalhes"),
+    LIST("Lista")
+}
 
 @Composable
 fun NotesSubTab(
@@ -107,7 +108,7 @@ fun NotesSubTab(
                 }
                 when (currentSort) {
                     NoteSortOption.LAST_UPDATED -> b.updatedAt.compareTo(a.updatedAt)
-                    NoteSortOption.CREATION_DATE -> b.createdAt.compareTo(a.createdAt)
+                    NoteSortOption.CREATION_DATE -> b.id.compareTo(a.id)
                     NoteSortOption.ALPHABETICAL -> a.title.compareTo(b.title, ignoreCase = true)
                     NoteSortOption.CATEGORY -> a.category.compareTo(b.category, ignoreCase = true)
                     NoteSortOption.SIZE -> b.content.length.compareTo(a.content.length)
@@ -164,6 +165,35 @@ fun NotesSubTab(
                 activeNoteToEdit = null
                 viewModel.setNoteEditorOpen(false)
             },
+            onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness ->
+                viewModel.saveNote(
+                    id = activeNoteToEdit?.id ?: 0L,
+                    title = title,
+                    content = content,
+                    category = category,
+                    iconEmoji = "📝",
+                    associatedDate = activeNoteToEdit?.associatedDate,
+                    isPinned = isPinned,
+                    backgroundImageUri = bgUri,
+                    backgroundBlur = blur,
+                    backgroundBrightness = brightness,
+                    onSaved = { savedId ->
+                        if (activeNoteToEdit == null || activeNoteToEdit?.id == 0L) {
+                            activeNoteToEdit = Note(
+                                id = savedId,
+                                title = title,
+                                content = content,
+                                category = category,
+                                iconEmoji = "📝",
+                                isPinned = isPinned,
+                                backgroundImageUri = bgUri,
+                                backgroundBlur = blur,
+                                backgroundBrightness = brightness
+                            )
+                        }
+                    }
+                )
+            },
             onDelete = if (activeNoteToEdit != null) {
                 {
                     noteToDelete = activeNoteToEdit
@@ -175,6 +205,28 @@ fun NotesSubTab(
             onOpenLinkedNote = { note ->
                 activeNoteToEdit = note
                 isCreatingNew = false
+            },
+            initialMode = if (viewModel.getLastNoteEditorMode() == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
+            onModeChanged = { mode ->
+                viewModel.setLastNoteEditorMode(mode.name)
+            },
+            onToggleChecklistTaskSync = { checklistText, isChecked ->
+                viewModel.syncChecklistToTask(checklistText, isChecked)
+            },
+            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate ->
+                val priorityEnum = when (taskPriority) {
+                    "ALTA" -> TaskPriority.ALTA
+                    "BAIXA" -> TaskPriority.BAIXA
+                    else -> TaskPriority.MEDIA
+                }
+                viewModel.addTask(
+                    title = taskTitle,
+                    category = taskCategory,
+                    priority = priorityEnum,
+                    dueDateText = dueDate,
+                    dueTimestamp = null,
+                    reminderMinutesBefore = 0
+                )
             },
             onConvertChecklistToTask = { taskTitle, dueDate ->
                 viewModel.addTask(

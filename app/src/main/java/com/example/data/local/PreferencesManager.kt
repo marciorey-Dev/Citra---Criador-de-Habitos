@@ -198,6 +198,14 @@ class PreferencesManager(private val context: Context) {
             apply()
         }
     }
+
+    fun getLastNoteEditorMode(): String {
+        return prefs.getString("last_note_editor_mode", "LIVE_PREVIEW") ?: "LIVE_PREVIEW"
+    }
+
+    fun setLastNoteEditorMode(mode: String) {
+        prefs.edit().putString("last_note_editor_mode", mode).apply()
+    }
 }
 
 data class SavedTimerSnapshot(

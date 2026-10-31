@@ -647,8 +647,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        AmbientBreakMusicManager.onAppForegrounded(this)
+    }
+
     override fun onStop() {
         super.onStop()
+        // Stop note audio and pause background ambient audio on leaving app
+        com.example.util.NoteAudioPlaybackManager.stop()
+        AmbientBreakMusicManager.onAppBackgrounded()
+
         viewModel.triggerAutoBackup()
 
         // Sync all user data to Firebase Firestore if logged in

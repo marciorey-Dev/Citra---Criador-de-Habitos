@@ -182,14 +182,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _openCreateNoteTrigger.value = false
     }
 
-    // What's New dialog for v0.7.8
+    // What's New dialog for v0.7.11
     private val _whatsNewVisible = MutableStateFlow(false)
     val whatsNewVisible: StateFlow<Boolean> = _whatsNewVisible.asStateFlow()
 
     fun dismissWhatsNew() {
-        preferencesManager.setLastSeenWhatsNewVersion("0.7.8")
+        preferencesManager.setLastSeenWhatsNewVersion("0.7.11")
         _whatsNewVisible.value = false
     }
+
+    fun getLastNoteEditorMode(): String = preferencesManager.getLastNoteEditorMode()
+    fun setLastNoteEditorMode(mode: String) = preferencesManager.setLastNoteEditorMode(mode)
 
     // Sync Frequency and Timestamp
     val syncFrequency: StateFlow<String> = preferencesManager.syncFrequency
@@ -213,7 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         NotificationHelper.initNotificationChannels(application)
         restoreTimerSnapshotOnStartup()
-        if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.8") {
+        if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.11") {
             _whatsNewVisible.value = true
         }
         viewModelScope.launch {
@@ -649,6 +652,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (isDone) {
                 _userMessage.emit("Tarefa '${task.title}' concluída!")
             }
+            // Bidirectional sync: sync task completion status with all checklist items across notes
+            try {
+                val cleanTitle = task.title.trim()
+                if (cleanTitle.isNotEmpty()) {
+                    for (note in notes.value) {
+                        var updated = false
+                        var newContent = note.content
+                        if (isDone) {
+                            // Replace - [ ] TaskTitle with - [x] TaskTitle
+                            val regex = Regex("(?m)^(\\s*-\\s*\\[\\s*\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\s*)$")
+                            if (regex.containsMatchIn(newContent)) {
+                                newContent = regex.replace(newContent) { m ->
+                                    val prefix = m.groupValues[1].replace("[ ]", "[x]")
+                                    "$prefix${m.groupValues[2]}${m.groupValues[3]}"
+                                }
+                                updated = true
+                            }
+                        } else {
+                            // Replace - [x] TaskTitle or - [X] TaskTitle with - [ ] TaskTitle
+                            val regex = Regex("(?m)^(\\s*-\\s*\\[[xX]\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\s*)$")
+                            if (regex.containsMatchIn(newContent)) {
+                                newContent = regex.replace(newContent) { m ->
+                                    val prefix = m.groupValues[1].replace(Regex("\\[[xX]\\]"), "[ ]")
+                                    "$prefix${m.groupValues[2]}${m.groupValues[3]}"
+                                }
+                                updated = true
+                            }
+                        }
+                        if (updated) {
+                            repository.updateNote(note.copy(content = newContent, updatedAt = System.currentTimeMillis()))
+                            com.example.util.CitraDocsFileManager.saveNoteMarkdown(getApplication(), note.title, newContent)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun syncChecklistToTask(checklistText: String, isChecked: Boolean) {
+        val clean = checklistText.trim()
+        if (clean.isBlank()) return
+        val matchingTask = tasks.value.firstOrNull { it.title.trim().equals(clean, ignoreCase = true) }
+        if (matchingTask != null && matchingTask.isCompleted != isChecked) {
+            viewModelScope.launch {
+                repository.toggleTaskCompleted(matchingTask)
+            }
         }
     }
 
@@ -742,7 +791,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isPinned: Boolean = false,
         backgroundImageUri: String? = null,
         backgroundBlur: Float = 0.5f,
-        backgroundBrightness: Float = 0.5f
+        backgroundBrightness: Float = 0.5f,
+        onSaved: ((Long) -> Unit)? = null
     ) {
         viewModelScope.launch {
             val note = Note(
@@ -759,13 +809,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isDeleted = false,
                 updatedAt = System.currentTimeMillis()
             )
-            if (id == 0L) {
-                repository.insertNote(note)
+            val resultId = if (id == 0L) {
+                val newId = repository.insertNote(note)
                 _userMessage.emit("Anotação salva!")
+                newId
             } else {
                 repository.updateNote(note)
                 _userMessage.emit("Anotação atualizada!")
+                id
             }
+            onSaved?.invoke(resultId)
         }
     }
 

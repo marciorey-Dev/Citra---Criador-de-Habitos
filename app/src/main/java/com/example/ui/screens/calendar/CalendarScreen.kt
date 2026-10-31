@@ -31,6 +31,7 @@ import com.example.ui.MainViewModel
 import com.example.ui.screens.organization.QuickAddTaskDialog
 import com.example.ui.screens.organization.TaskItemCard
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
+import com.example.ui.screens.organization.notes.NoteEditorMode
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -154,6 +155,28 @@ fun CalendarScreen(
             onOpenLinkedNote = { note ->
                 activeNoteForEditor = note
                 isCreatingNoteForCalendar = false
+            },
+            initialMode = if (viewModel.getLastNoteEditorMode() == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
+            onModeChanged = { mode ->
+                viewModel.setLastNoteEditorMode(mode.name)
+            },
+            onToggleChecklistTaskSync = { checklistText, isChecked ->
+                viewModel.syncChecklistToTask(checklistText, isChecked)
+            },
+            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate ->
+                val priorityEnum = when (taskPriority) {
+                    "ALTA" -> TaskPriority.ALTA
+                    "BAIXA" -> TaskPriority.BAIXA
+                    else -> TaskPriority.MEDIA
+                }
+                viewModel.addTask(
+                    title = taskTitle,
+                    category = taskCategory,
+                    priority = priorityEnum,
+                    dueDateText = dueDate,
+                    dueTimestamp = null,
+                    reminderMinutesBefore = 0
+                )
             },
             onConvertChecklistToTask = { taskTitle, dueDate ->
                 viewModel.addTask(

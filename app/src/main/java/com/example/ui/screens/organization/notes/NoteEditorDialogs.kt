@@ -491,10 +491,14 @@ fun FindReplaceDialog(
 @Composable
 fun ConvertChecklistToTaskDialog(
     initialTitle: String,
+    categories: List<Category> = emptyList(),
     onDismiss: () -> Unit,
-    onConfirm: (title: String, dueDate: String) -> Unit
+    onConfirm: (title: String, category: String, priority: String, dueDate: String) -> Unit
 ) {
     var taskTitle by remember { mutableStateOf(initialTitle) }
+    var selectedCategory by remember { mutableStateOf(categories.firstOrNull()?.name ?: "Geral") }
+    var selectedPriority by remember { mutableStateOf("MEDIA") }
+    var showCategoryDropdown by remember { mutableStateOf(false) }
     val today = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
     var dueDate by remember { mutableStateOf(today) }
 
@@ -504,13 +508,13 @@ fun ConvertChecklistToTaskDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Converter em Tarefa", fontWeight = FontWeight.Bold)
+                Text("Criar Tarefa do Checklist", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Transforma este item da nota em uma Tarefa com prazo na sua lista principal.",
+                    text = "Criação direta de tarefa vinculada e sincronizada com a anotação.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -522,6 +526,52 @@ fun ConvertChecklistToTaskDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Category selection dropdown
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = selectedCategory,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Categoria") },
+                        trailingIcon = {
+                            IconButton(onClick = { showCategoryDropdown = true }) {
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable { showCategoryDropdown = true }
+                    )
+                    DropdownMenu(
+                        expanded = showCategoryDropdown,
+                        onDismissRequest = { showCategoryDropdown = false }
+                    ) {
+                        val allCats = if (categories.isEmpty()) listOf(Category(name = "Geral", colorHex = "#FF9800", icon = "📁")) else categories
+                        allCats.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat.name) },
+                                onClick = {
+                                    selectedCategory = cat.name
+                                    showCategoryDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Priority selector chips
+                Text("Prioridade:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("BAIXA" to "Baixa", "MEDIA" to "Média", "ALTA" to "Alta").forEach { (key, label) ->
+                        FilterChip(
+                            selected = selectedPriority == key,
+                            onClick = { selectedPriority = key },
+                            label = { Text(label, fontSize = 11.sp) }
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = dueDate,
@@ -536,12 +586,12 @@ fun ConvertChecklistToTaskDialog(
             Button(
                 onClick = {
                     if (taskTitle.isNotBlank()) {
-                        onConfirm(taskTitle.trim(), dueDate.trim())
+                        onConfirm(taskTitle.trim(), selectedCategory, selectedPriority, dueDate.trim())
                     }
                 },
                 enabled = taskTitle.isNotBlank()
             ) {
-                Text("Criar Tarefa")
+                Text("Criar Tarefa Direto")
             }
         },
         dismissButton = {

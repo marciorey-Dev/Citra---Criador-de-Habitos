@@ -64,14 +64,14 @@ fun WhatsNewDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Citra Versão 0.7.9",
+                    text = "Citra Versão 0.7.10",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 Text(
-                    text = "Organização Otimizada, Modos de Notas, Alarmes em Loop e Gestão de Dados",
+                    text = "Exportação .docx, Fidelidade Cromática de Tema, HTML Avançado & Salvamento Fluido",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -86,34 +86,34 @@ fun WhatsNewDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     FeatureHighlightItem(
-                        icon = "🗂️",
-                        title = "Novos Modos de Visualização e Ordenação",
-                        description = "Alterne entre Grade (2 colunas), Grade Pequena (3 colunas), Detalhes (com primeiro parágrafo) e Lista compacta. Ordene por data, categoria, tamanho ou A-Z com notas fixadas sempre no topo."
+                        icon = "📄",
+                        title = "Exportação Word (.docx) com Markdown Completo",
+                        description = "Exporte suas anotações para o formato Microsoft Word (.docx) preservando títulos, listas, tabelas, caixas de destaque, códigos e imagens incorporadas."
                     )
                     FeatureHighlightItem(
-                        icon = "📌",
-                        title = "Novo Visual para Notas Fixadas",
-                        description = "Bordas marcadas na cor da categoria e ícone de pin colorido, eliminando o fundo cinza para um visual leve e elegante."
+                        icon = "🎨",
+                        title = "Fidelidade Cromática ao Tema do App",
+                        description = "Em qualquer formato de exportação (PDF, DOCX, HTML ou Imagem), os elementos, bordas, cabeçalhos e divisores respeitam a cor do tema ativo no aplicativo."
                     )
                     FeatureHighlightItem(
-                        icon = "🎯",
-                        title = "Auto-Centralização ao Tocar na Nota",
-                        description = "Ao posicionar o cursor no Live Preview ou tocar em blocos na leitura, a tela rola suavemente para centralizar o texto focado."
+                        icon = "🖼️",
+                        title = "Imagens Preservadas e Convertidas na Exportação",
+                        description = "Imagens anexadas às suas notas agora são convertidas e embutidas como parte integral do ficheiro em PDF, DOCX, HTML (base64) e Imagem."
                     )
                     FeatureHighlightItem(
-                        icon = "⚠️",
-                        title = "Alerta de Hábito Não Cumprido",
-                        description = "Hábitos não realizados após o horário ficam destacados em vermelho e enviam um aviso 5 minutos depois (configurável)."
+                        icon = "🎵",
+                        title = "HTML Avançado com Player de Áudio Arte Interna",
+                        description = "Ao exportar em HTML, gravações de áudio são convertidas em arte multimídia interativa interna com player responsivo completo e visualizador embutido."
                     )
                     FeatureHighlightItem(
-                        icon = "🔁",
-                        title = "Toque em Loop Contínuo",
-                        description = "Agora você pode ativar o alarme contínuo em tarefas ou hábitos prioritários, tocando repetidamente até ser atendido."
+                        icon = "🏷️",
+                        title = "Categorias Logo Após o Título",
+                        description = "A seleção de categoria foi movida para logo abaixo do título da nota, em local direto, acessível e sem obstrução da barra de formatação."
                     )
                     FeatureHighlightItem(
                         icon = "💾",
-                        title = "Backup Local e Limpeza de Dados no Perfil",
-                        description = "Crie ou restaure backups JSON diretamente na aba Dados de 'Eu'. Recursos para resetar tarefas, hábitos, notas ou todos os dados com confirmação segura."
+                        title = "Salvamento Fluido sem Fechar & Auto-Save",
+                        description = "O botão de salvar salva a nota instantaneamente sem fechar o editor. E sair do app ou alternar entre janelas salva a anotação automaticamente."
                     )
                     FeatureHighlightItem(
                         icon = "📁",

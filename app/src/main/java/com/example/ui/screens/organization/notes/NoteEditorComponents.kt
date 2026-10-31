@@ -986,11 +986,12 @@ private fun AudioBlockPlayer(
 ) {
     val context = LocalContext.current
     val playbackState by NoteAudioPlaybackManager.playbackState.collectAsState()
-    val isPlayingThis = playbackState.playingBlockId == block.id && playbackState.isPlaying
-    val isCurrentAudio = playbackState.playingBlockId == block.id
+    val isCurrentAudio = NoteAudioPlaybackManager.isCurrentAudio(block.id, block.url)
+    val isPlayingThis = isCurrentAudio && playbackState.isPlaying
 
     var isEditingTitle by remember { mutableStateOf(false) }
     var showVolumeSlider by remember { mutableStateOf(false) }
+    var localVolume by remember(block.volume) { mutableFloatStateOf(block.volume) }
 
     val currentPosition = if (isCurrentAudio) playbackState.currentPositionMs else 0
     val duration = if (isCurrentAudio) playbackState.durationMs else 0
@@ -1196,10 +1197,13 @@ private fun AudioBlockPlayer(
                         modifier = Modifier.size(15.dp)
                     )
                     Slider(
-                        value = block.volume,
+                        value = localVolume,
                         onValueChange = { newVol ->
-                            onUpdate(block.copy(volume = newVol))
+                            localVolume = newVol
                             NoteAudioPlaybackManager.setVolume(newVol)
+                        },
+                        onValueChangeFinished = {
+                            onUpdate(block.copy(volume = localVolume))
                         },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f).height(20.dp),
@@ -1209,7 +1213,7 @@ private fun AudioBlockPlayer(
                         )
                     )
                     Text(
-                        text = "${(block.volume * 100).toInt()}%",
+                        text = "${(localVolume * 100).toInt()}%",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
