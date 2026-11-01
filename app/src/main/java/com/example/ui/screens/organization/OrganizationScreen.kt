@@ -3,7 +3,7 @@ package com.example.ui.screens.organization
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assignment
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Task
 import com.example.ui.MainViewModel
+import com.example.ui.screens.calendar.CalendarScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,7 +28,7 @@ fun OrganizationScreen(
     val tabs = listOf(
         Triple("Tarefas", Icons.Default.Assignment, "organization_tab_tasks"),
         Triple("Hábitos", Icons.Default.Whatshot, "organization_tab_habits"),
-        Triple("Notas", Icons.Default.Description, "organization_tab_notes")
+        Triple("Calendário", Icons.Default.CalendarMonth, "organization_tab_calendar")
     )
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -68,7 +69,13 @@ fun OrganizationScreen(
                     }
                 )
                 1 -> HabitsSubTab(viewModel = viewModel)
-                2 -> NotesSubTab(viewModel = viewModel)
+                2 -> CalendarScreen(
+                    viewModel = viewModel,
+                    onStartPomodoroForTask = { task ->
+                        viewModel.linkTaskToPomodoro(task)
+                        onNavigateToTimerWithTask(task)
+                    }
+                )
             }
         }
     }

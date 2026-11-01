@@ -4,15 +4,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class Screen(
@@ -42,6 +44,13 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Checklist
     )
 
+    object Notes : Screen(
+        route = "notes",
+        title = "Notas",
+        selectedIcon = Icons.Filled.Description,
+        unselectedIcon = Icons.Outlined.Description
+    )
+
     object Calendar : Screen(
         route = "calendar",
         title = "Calendário",
@@ -57,6 +66,6 @@ sealed class Screen(
     )
 
     companion object {
-        val allScreens = listOf(Home, Timer, Organization, Calendar, Profile)
+        val allScreens = listOf(Home, Timer, Organization, Notes, Profile)
     }
 }

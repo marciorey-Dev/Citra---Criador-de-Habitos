@@ -1578,12 +1578,7 @@ fun ProfileScreen(
                                 }
                                 "html" -> {
                                     val uri = NoteExportHelper.exportToHtmlFile(context, note.title, note.category, blocks)
-                                    try {
-                                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                        if (bytes != null) {
-                                            MediaStorageHelper.saveExportToDownloads(context, "${note.title}.html", "text/html", bytes)
-                                        }
-                                    } catch (_: Exception) {}
+                                    MediaStorageHelper.copyExportToDownloads(context, "${note.title}.html", "text/html", uri)
                                     NoteExportHelper.shareUri(context, uri, "text/html", "Enviar HTML para ${friend.displayName}")
                                     Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
                                 }

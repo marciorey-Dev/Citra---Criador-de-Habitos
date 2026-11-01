@@ -37,20 +37,22 @@ object AmbientBreakMusicManager {
     }
 
     private var wasPlayingBeforeBackground = false
+    private var isAppInBackground = false
 
     fun onAppBackgrounded() {
-        if (mediaPlayer?.isPlaying == true) {
-            wasPlayingBeforeBackground = true
-            try {
-                mediaPlayer?.pause()
-            } catch (_: Exception) {}
-        } else {
-            wasPlayingBeforeBackground = false
+        if (!isAppInBackground) {
+            isAppInBackground = true
+            wasPlayingBeforeBackground = mediaPlayer?.isPlaying == true || isAlwaysPlayingInApp
         }
+        try {
+            mediaPlayer?.pause()
+        } catch (_: Exception) {}
     }
 
     fun onAppForegrounded(context: Context) {
-        if (wasPlayingBeforeBackground || isAlwaysPlayingInApp || isBreakActive) {
+        isAppInBackground = false
+        val shouldPlay = isAlwaysPlayingInApp || (isBreakActive && wasPlayingBeforeBackground)
+        if (shouldPlay) {
             if (mediaPlayer != null) {
                 try {
                     mediaPlayer?.start()
@@ -59,8 +61,8 @@ object AmbientBreakMusicManager {
                 } catch (_: Exception) {}
             }
             startPlaying(context)
-            wasPlayingBeforeBackground = false
         }
+        wasPlayingBeforeBackground = false
     }
 
     fun setAlwaysPlayingInApp(context: Context, enabled: Boolean) {

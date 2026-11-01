@@ -53,6 +53,7 @@ import com.example.ui.navigation.Screen
 import com.example.ui.screens.auth.AuthScreen
 import com.example.ui.screens.calendar.CalendarScreen
 import com.example.ui.screens.home.HomeScreen
+import com.example.ui.screens.organization.NotesSubTab
 import com.example.ui.screens.organization.OrganizationScreen
 import com.example.ui.screens.organization.QuickAddTaskDialog
 import com.example.ui.screens.profile.ProfileScreen
@@ -145,15 +146,16 @@ class MainActivity : ComponentActivity() {
                 val initialPageIndex = remember(defaultStartTab) {
                     when (defaultStartTab) {
                         "TIMER" -> 1
-                        "ORGANIZATION", "NOTES" -> 2
-                        "CALENDAR" -> 3
+                        "ORGANIZATION" -> 2
+                        "NOTES" -> 3
+                        "CALENDAR" -> 2
                         "STATS", "PROFILE" -> 4
                         else -> 0 // "HOME"
                     }
                 }
 
                 LaunchedEffect(defaultStartTab) {
-                    if (defaultStartTab == "NOTES") {
+                    if (defaultStartTab == "CALENDAR") {
                         viewModel.setOrganizationSubTab(2)
                     }
                 }
@@ -255,17 +257,19 @@ class MainActivity : ComponentActivity() {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    // Screen Title (Clean current screen label)
-                                    Text(
-                                        text = currentScreen.title,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    // App title ONLY on Início screen per user request; other tabs remove title to save space
+                                    if (screens[pagerState.currentPage] == Screen.Home) {
+                                        Text(
+                                            text = "🍊 Citra",
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 20.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
 
                                     // Floating Top Mini-timer counter when timer is active outside the Timer tab
                                     val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
-                                    if (isTimerActive && pagerState.currentPage != 1) {
+                                    if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
                                         val mins = pomodoroState.remainingSeconds / 60
                                         val secs = pomodoroState.remainingSeconds % 60
                                         val formatted = String.format("%02d:%02d", mins, secs)
@@ -448,18 +452,39 @@ class MainActivity : ComponentActivity() {
                         ) {
                             screens.forEachIndexed { index, screen ->
                                 val selected = pagerState.currentPage == index
+                                val isNotes = screen == Screen.Notes
                                 NavigationBarItem(
                                     icon = {
-                                        Icon(
-                                            imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
-                                            contentDescription = screen.title
-                                        )
+                                        if (isNotes) {
+                                            // Prominent highlight styling for Notes tab per user request
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                                                shadowElevation = if (selected) 4.dp else 1.dp,
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                                        contentDescription = screen.title,
+                                                        tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Icon(
+                                                imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                                contentDescription = screen.title
+                                            )
+                                        }
                                     },
                                     label = {
                                         Text(
                                             text = screen.title,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                            fontSize = if (isNotes) 11.5.sp else 11.sp,
+                                            fontWeight = if (isNotes) FontWeight.ExtraBold else if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isNotes && !selected) MaterialTheme.colorScheme.primary else Color.Unspecified
                                         )
                                     },
                                     selected = selected,
@@ -471,7 +496,7 @@ class MainActivity : ComponentActivity() {
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = MaterialTheme.colorScheme.primary,
                                         selectedTextColor = MaterialTheme.colorScheme.primary,
-                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                        indicatorColor = if (isNotes) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
                                         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
@@ -504,7 +529,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onQuickAddNote = {
                                     viewModel.triggerCreateNote()
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(3) }
                                 }
                             )
                             Screen.Timer -> TimerScreen(
@@ -519,18 +544,21 @@ class MainActivity : ComponentActivity() {
                                     coroutineScope.launch { pagerState.animateScrollToPage(1) }
                                 }
                             )
-                            Screen.Calendar -> CalendarScreen(
-                                viewModel = viewModel,
-                                onStartPomodoroForTask = {
-                                    viewModel.linkTaskToPomodoro(it)
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
-                                }
+                            Screen.Notes -> NotesSubTab(
+                                viewModel = viewModel
                             )
                             Screen.Profile -> ProfileScreen(
                                 viewModel = viewModel,
                                 authRepository = authRepository,
                                 onOpenSettings = { showSettingsDialog = true },
                                 onOpenAuthGate = { showAuthDialog = true }
+                            )
+                            Screen.Calendar -> CalendarScreen(
+                                viewModel = viewModel,
+                                onStartPomodoroForTask = {
+                                    viewModel.linkTaskToPomodoro(it)
+                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                }
                             )
                         }
                     }
@@ -652,10 +680,22 @@ class MainActivity : ComponentActivity() {
         AmbientBreakMusicManager.onAppForegrounded(this)
     }
 
+    override fun onResume() {
+        super.onResume()
+        AmbientBreakMusicManager.onAppForegrounded(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Note audio is paused when leaving the app
+        com.example.util.NoteAudioPlaybackManager.pause()
+        AmbientBreakMusicManager.onAppBackgrounded()
+    }
+
     override fun onStop() {
         super.onStop()
-        // Stop note audio and pause background ambient audio on leaving app
-        com.example.util.NoteAudioPlaybackManager.stop()
+        // Pause note audio and background ambient audio on leaving app
+        com.example.util.NoteAudioPlaybackManager.pause()
         AmbientBreakMusicManager.onAppBackgrounded()
 
         viewModel.triggerAutoBackup()

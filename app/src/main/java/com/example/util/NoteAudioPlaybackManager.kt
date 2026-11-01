@@ -89,10 +89,26 @@ object NoteAudioPlaybackManager {
                         .setUsage(AudioAttributes.USAGE_MEDIA)
                         .build()
                 )
-                setDataSource(context, Uri.parse(url))
+                if (url.startsWith("content://")) {
+                    val uri = Uri.parse(url)
+                    try {
+                        context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                            setDataSource(pfd.fileDescriptor)
+                        } ?: setDataSource(context, uri)
+                    } catch (_: Exception) {
+                        setDataSource(context, uri)
+                    }
+                } else {
+                    val cleanPath = url.removePrefix("file://")
+                    setDataSource(cleanPath)
+                }
                 this.isLooping = isLoop
                 val safeVol = volume.coerceIn(0f, 1f)
                 setVolume(safeVol, safeVol)
+                setOnErrorListener { _, what, extra ->
+                    Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
+                    true // Prevents erroneous completion trigger
+                }
                 prepare()
                 setOnCompletionListener {
                     if (!isLoop) {

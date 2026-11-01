@@ -85,7 +85,9 @@ import com.example.util.MediaStorageHelper
 import com.example.util.InlineMarkdownHelper
 import com.example.util.NoteAudioPlaybackManager
 import com.example.util.NoteExportHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -168,22 +170,45 @@ fun FullScreenNoteEditor(
 
     // Loaded blurred background bitmap cache
     var processedBackgroundBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var missingMediaItems by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(bgUri, bgBlur) {
         if (!bgUri.isNullOrBlank()) {
-            try {
-                val uri = Uri.parse(bgUri)
-                val stream = context.contentResolver.openInputStream(uri)
-                val original = BitmapFactory.decodeStream(stream)
-                if (original != null) {
-                    val radius = (bgBlur * 24).toInt().coerceAtLeast(0)
-                    processedBackgroundBitmap = if (radius > 0) FastBlur.blur(original, radius) else original
+            withContext(Dispatchers.IO) {
+                try {
+                    val stream = MediaStorageHelper.openInputStream(context, bgUri!!)
+                    val original = stream?.use { BitmapFactory.decodeStream(it) }
+                    if (original != null) {
+                        val radius = (bgBlur * 24).toInt().coerceAtLeast(0)
+                        processedBackgroundBitmap = if (radius > 0) FastBlur.blur(original, radius) else original
+                    } else {
+                        processedBackgroundBitmap = null
+                    }
+                } catch (_: Exception) {
+                    processedBackgroundBitmap = null
                 }
-            } catch (_: Exception) {
-                processedBackgroundBitmap = null
             }
         } else {
             processedBackgroundBitmap = null
+        }
+    }
+
+    // Detect any missing media on opening note and alert user
+    LaunchedEffect(editorValue.text, bgUri, initialNote?.id) {
+        withContext(Dispatchers.IO) {
+            val missing = mutableListOf<String>()
+            if (!bgUri.isNullOrBlank() && !MediaStorageHelper.isMediaFileValid(context, bgUri)) {
+                missing.add("Imagem de fundo")
+            }
+            val tokens = ObsidianMarkdownEngine.parseMediaTokens(editorValue.text)
+            tokens.forEach { token ->
+                if (token.url.isNotBlank() && !MediaStorageHelper.isMediaFileValid(context, token.url)) {
+                    val name = token.titleOrAlt.ifBlank { token.url.substringAfterLast('/') }
+                    val type = if (token.isAudio) "Áudio" else "Imagem"
+                    missing.add("$type: $name")
+                }
+            }
+            missingMediaItems = missing
         }
     }
 
@@ -524,7 +549,16 @@ fun FullScreenNoteEditor(
     ) { uri ->
         if (uri != null) {
             val permanentBg = MediaStorageHelper.saveNoteBackground(context, uri)
-            bgUri = permanentBg ?: uri.toString()
+            if (permanentBg != null) {
+                bgUri = permanentBg
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Imagem de fundo salva com sucesso!")
+                }
+            } else {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Falha ao salvar imagem de fundo permanente.")
+                }
+            }
         }
     }
 
@@ -541,10 +575,26 @@ fun FullScreenNoteEditor(
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     var fullscreenBlockIndex by remember { mutableStateOf<Int?>(null) }
     var showCreateTableDialog by remember { mutableStateOf(false) }
+    var showAudioExportWarningDialog by remember { mutableStateOf(false) }
 
     // Parse active media tokens for interactive widgets in Live Preview
     val parsedMediaTokens = remember(editorValue.text) {
         ObsidianMarkdownEngine.parseMediaTokens(editorValue.text)
+    }
+
+    val missingMediaTokens = remember(parsedMediaTokens, bgUri) {
+        val missing = mutableListOf<String>()
+        if (bgUri != null && !MediaStorageHelper.isMediaFileValid(context, bgUri)) {
+            missing.add("Imagem de fundo não encontrada")
+        }
+        for (token in parsedMediaTokens) {
+            if (token.url.isNotBlank() && !MediaStorageHelper.isMediaFileValid(context, token.url)) {
+                val name = token.titleOrAlt.ifBlank { token.url.substringAfterLast("/") }
+                val type = if (token.isAudio) "Áudio" else "Imagem"
+                missing.add("$type: \"$name\"")
+            }
+        }
+        missing
     }
 
     // Markdown file import launcher
@@ -751,8 +801,13 @@ fun FullScreenNoteEditor(
                                 onClick = {
                                     showMenu = false
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                                    val uri = NoteExportHelper.exportToHtmlFile(context, title, category, blocks, primaryColor.toArgb())
-                                    NoteExportHelper.shareUri(context, uri, "text/html", "Exportar Página Web (.html)")
+                                    val hasAudio = blocks.any { it is AudioBlock && it.url.isNotBlank() }
+                                    if (hasAudio) {
+                                        showAudioExportWarningDialog = true
+                                    } else {
+                                        val uri = NoteExportHelper.exportToHtmlFile(context, title, category, blocks, primaryColor.toArgb())
+                                        NoteExportHelper.shareUri(context, uri, "text/html", "Exportar Página Web (.html)")
+                                    }
                                 }
                             )
 
@@ -819,13 +874,302 @@ fun FullScreenNoteEditor(
             }
 
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(noteScrollState)
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 10.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxSize()
             ) {
+                // Floating Obsidian Formatting Toolbar (Docked at top of screen above the note title, auto-hides on scroll down)
+                AnimatedVisibility(
+                    visible = isToolbarVisible,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 2.dp, start = 12.dp, end = 12.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 8.dp,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                // 1. Inline formatters
+                                ToolbarToolButton(label = "B", icon = Icons.Default.FormatBold) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "**", "**")
+                                }
+                                ToolbarToolButton(label = "I", icon = Icons.Default.FormatItalic) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "*", "*")
+                                }
+                                ToolbarToolButton(label = "<>", icon = Icons.Default.Code) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
+                                }
+                                ToolbarToolButton(label = "Link", icon = Icons.Default.Link) {
+                                    showLinkDialog = true
+                                }
+
+                                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                // 2. Line Prefix Tools (Headers, Checklists, Lists, Tables)
+                                Box {
+                                    ToolbarToolButton(label = "Título", icon = Icons.Default.Title) {
+                                        showTitlesMenu = true
+                                    }
+                                    DropdownMenu(
+                                        expanded = showTitlesMenu,
+                                        onDismissRequest = { showTitlesMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("H1 - Título Principal", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+                                            onClick = {
+                                                showTitlesMenu = false
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "# ")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("H2 - Subtítulo", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                                            onClick = {
+                                                showTitlesMenu = false
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "## ")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("H3 - Seção", fontSize = 14.sp, fontWeight = FontWeight.Medium) },
+                                            onClick = {
+                                                showTitlesMenu = false
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "### ")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("H4 - Subseção", fontSize = 13.sp) },
+                                            onClick = {
+                                                showTitlesMenu = false
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "#### ")
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("H5 - Tópico", fontSize = 12.sp) },
+                                            onClick = {
+                                                showTitlesMenu = false
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "##### ")
+                                            }
+                                        )
+                                    }
+                                }
+
+                                ToolbarToolButton(label = "Checklist", icon = Icons.Default.CheckBox) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- [ ] ")
+                                }
+
+                                ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- ")
+                                }
+
+                                ToolbarToolButton(label = "Citação", icon = Icons.Default.FormatQuote) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "> ")
+                                }
+
+                                ToolbarToolButton(label = "Tabela", icon = Icons.Default.TableChart) {
+                                    showCreateTableDialog = true
+                                }
+
+                                ToolbarToolButton(label = "Divisor", icon = Icons.Default.HorizontalRule) {
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "---")
+                                }
+
+                                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                // 3. Media buttons (Images & Audios)
+                                ToolbarToolButton(label = "Imagem", icon = Icons.Default.Image) {
+                                    imagePickerLauncher.launch("image/*")
+                                }
+
+                                ToolbarToolButton(label = "Áudio", icon = Icons.Default.Audiotrack) {
+                                    audioPickerLauncher.launch("audio/*")
+                                }
+
+                                ToolbarToolButton(
+                                    label = if (isRecordingAudio) "Parar" else "Gravar",
+                                    icon = if (isRecordingAudio) Icons.Default.Stop else Icons.Default.Mic
+                                ) {
+                                    if (isRecordingAudio) {
+                                        stopRecording()
+                                    } else {
+                                        recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
+                                }
+
+                                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                // 4. Advanced expand toggle
+                                IconButton(
+                                    onClick = { showAdvancedToolbar = !showAdvancedToolbar },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .background(
+                                            if (showAdvancedToolbar) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                            CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tune,
+                                        contentDescription = "Opções Avançadas",
+                                        tint = if (showAdvancedToolbar) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Expanded secondary toolbar row
+                            AnimatedVisibility(visible = showAdvancedToolbar) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+                                    tonalElevation = 6.dp,
+                                    modifier = Modifier
+                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        ToolbarToolButton(label = "Tachado", icon = Icons.Default.FormatStrikethrough) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "~~", "~~")
+                                        }
+                                        ToolbarToolButton(label = "Sublinhado", icon = Icons.Default.FormatUnderlined) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "<u>", "</u>")
+                                        }
+                                        ToolbarToolButton(label = "Destaque", icon = Icons.Default.BorderColor) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "==", "==")
+                                        }
+                                        ToolbarToolButton(label = "Bloco Código", icon = Icons.Default.Code) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "```kotlin\n// código\n```")
+                                        }
+                                        ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "$$ E = mc^2 $$")
+                                        }
+
+                                        VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                        // Callout dropdown
+                                        Box {
+                                            ToolbarToolButton(label = "Callout", icon = Icons.Default.Announcement) {
+                                                showCalloutMenu = true
+                                            }
+                                            DropdownMenu(expanded = showCalloutMenu, onDismissRequest = { showCalloutMenu = false }) {
+                                                DropdownMenuItem(text = { Text("ℹ️ Info") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!INFO] Informação...") })
+                                                DropdownMenuItem(text = { Text("💡 Dica") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!TIP] Dica importante...") })
+                                                DropdownMenuItem(text = { Text("⚠️ Aviso") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!WARNING] Atenção...") })
+                                                DropdownMenuItem(text = { Text("🚨 Importante") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!IMPORTANT] Crítico...") })
+                                            }
+                                        }
+
+                                        ToolbarToolButton(label = "Recolhível", icon = Icons.Default.UnfoldMore) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "<details><summary>Resumo</summary>\nConteúdo recolhível\n</details>")
+                                        }
+
+                                        ToolbarToolButton(label = "Buscar/Substituir", icon = Icons.Default.FindReplace) {
+                                            showFindReplaceDialog = true
+                                        }
+
+                                        ToolbarToolButton(label = "Vincular", icon = Icons.Default.Share) {
+                                            showLinkToEntityDialog = true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Main Note Content
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(noteScrollState)
+                        .padding(horizontal = 20.dp)
+                        .padding(top = 8.dp, bottom = 120.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Warning banner for missing media files
+                    if (missingMediaTokens.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = "Aviso de mídia",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = "Arquivos de mídia não encontrados nesta nota",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                missingMediaTokens.forEach { missingItem ->
+                                    Text(
+                                        text = "• $missingItem",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                Text(
+                                    text = "O arquivo de origem pode ter sido apagado do aparelho. Novas mídias inseridas são copiadas e mantidas de forma permanente.",
+                                    fontSize = 11.sp,
+                                    fontStyle = FontStyle.Italic,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+                    }
                 // 1. Note Title Input
                 OutlinedTextField(
                     value = title,
@@ -1415,243 +1759,6 @@ fun FullScreenNoteEditor(
                         }
                 )
             }
-
-            // Floating Obsidian Formatting Toolbar (Docked at top/center of screen, auto-hides on scroll down)
-            AnimatedVisibility(
-                visible = isToolbarVisible,
-                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 8.dp, start = 12.dp, end = 12.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 8.dp,
-                    shadowElevation = 6.dp,
-                    modifier = Modifier
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        // 1. Inline formatters
-                        ToolbarToolButton(label = "B", icon = Icons.Default.FormatBold) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "**", "**")
-                        }
-                        ToolbarToolButton(label = "I", icon = Icons.Default.FormatItalic) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "*", "*")
-                        }
-                        ToolbarToolButton(label = "<>", icon = Icons.Default.Code) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
-                        }
-                        ToolbarToolButton(label = "Link", icon = Icons.Default.Link) {
-                            showLinkDialog = true
-                        }
-
-                        VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                        // 2. Line Prefix Tools (Headers, Checklists, Lists, Tables)
-                        Box {
-                            ToolbarToolButton(label = "Título", icon = Icons.Default.Title) {
-                                showTitlesMenu = true
-                            }
-                            DropdownMenu(
-                                expanded = showTitlesMenu,
-                                onDismissRequest = { showTitlesMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("H1 - Título Principal", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-                                    onClick = {
-                                        showTitlesMenu = false
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "# ")
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("H2 - Subtítulo", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
-                                    onClick = {
-                                        showTitlesMenu = false
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "## ")
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("H3 - Seção", fontSize = 14.sp, fontWeight = FontWeight.Medium) },
-                                    onClick = {
-                                        showTitlesMenu = false
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "### ")
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("H4 - Subseção", fontSize = 13.sp) },
-                                    onClick = {
-                                        showTitlesMenu = false
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "#### ")
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("H5 - Tópico", fontSize = 12.sp) },
-                                    onClick = {
-                                        showTitlesMenu = false
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "##### ")
-                                    }
-                                )
-                            }
-                        }
-
-                        ToolbarToolButton(label = "Checklist", icon = Icons.Default.CheckBox) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- [ ] ")
-                        }
-
-                        ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- ")
-                        }
-
-                        ToolbarToolButton(label = "Citação", icon = Icons.Default.FormatQuote) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "> ")
-                        }
-
-                        ToolbarToolButton(label = "Tabela", icon = Icons.Default.TableChart) {
-                            showCreateTableDialog = true
-                        }
-
-                        ToolbarToolButton(label = "Divisor", icon = Icons.Default.HorizontalRule) {
-                            pushHistory()
-                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "---")
-                        }
-
-                        VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                        // 3. Media buttons (Images & Audios)
-                        ToolbarToolButton(label = "Imagem", icon = Icons.Default.Image) {
-                            imagePickerLauncher.launch("image/*")
-                        }
-
-                        ToolbarToolButton(label = "Áudio", icon = Icons.Default.Audiotrack) {
-                            audioPickerLauncher.launch("audio/*")
-                        }
-
-                        ToolbarToolButton(
-                            label = if (isRecordingAudio) "Parar" else "Gravar",
-                            icon = if (isRecordingAudio) Icons.Default.Stop else Icons.Default.Mic
-                        ) {
-                            if (isRecordingAudio) {
-                                stopRecording()
-                            } else {
-                                recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                            }
-                        }
-
-                        VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                        // 4. Advanced expand toggle
-                        IconButton(
-                            onClick = { showAdvancedToolbar = !showAdvancedToolbar },
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(
-                                    if (showAdvancedToolbar) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                                    CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Opções Avançadas",
-                                tint = if (showAdvancedToolbar) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    // Expanded secondary toolbar row
-                    AnimatedVisibility(visible = showAdvancedToolbar) {
-                        Surface(
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
-                            tonalElevation = 6.dp,
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp, vertical = 4.dp)
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(18.dp))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                ToolbarToolButton(label = "Tachado", icon = Icons.Default.FormatStrikethrough) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "~~", "~~")
-                                }
-                                ToolbarToolButton(label = "Sublinhado", icon = Icons.Default.FormatUnderlined) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "<u>", "</u>")
-                                }
-                                ToolbarToolButton(label = "Destaque", icon = Icons.Default.BorderColor) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "==", "==")
-                                }
-                                ToolbarToolButton(label = "Bloco Código", icon = Icons.Default.Code) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "```kotlin\n// código\n```")
-                                }
-                                ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "$$ E = mc^2 $$")
-                                }
-
-                                VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                                // Callout dropdown
-                                Box {
-                                    ToolbarToolButton(label = "Callout", icon = Icons.Default.Announcement) {
-                                        showCalloutMenu = true
-                                    }
-                                    DropdownMenu(expanded = showCalloutMenu, onDismissRequest = { showCalloutMenu = false }) {
-                                        DropdownMenuItem(text = { Text("ℹ️ Info") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!INFO] Informação...") })
-                                        DropdownMenuItem(text = { Text("💡 Dica") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!TIP] Dica importante...") })
-                                        DropdownMenuItem(text = { Text("⚠️ Aviso") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!WARNING] Atenção...") })
-                                        DropdownMenuItem(text = { Text("🚨 Importante") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!IMPORTANT] Crítico...") })
-                                    }
-                                }
-
-                                ToolbarToolButton(label = "Recolhível", icon = Icons.Default.UnfoldMore) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "<details><summary>Resumo</summary>\nConteúdo recolhível\n</details>")
-                                }
-
-                                ToolbarToolButton(label = "Buscar/Substituir", icon = Icons.Default.FindReplace) {
-                                    showFindReplaceDialog = true
-                                }
-
-                                ToolbarToolButton(label = "Vincular", icon = Icons.Default.Share) {
-                                    showLinkToEntityDialog = true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
             // CitraRecord recording HUD
@@ -1768,6 +1875,38 @@ fun FullScreenNoteEditor(
                 }
                 val tableMarkdown = (listOf(header, separator) + bodyLines).joinToString("\n")
                 editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, tableMarkdown)
+            }
+        )
+    }
+
+    // Audio Export Warning Modal per user requirement
+    if (showAudioExportWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showAudioExportWarningDialog = false },
+            icon = { Text("🎵", fontSize = 28.sp) },
+            title = { Text("Exportação com Áudio", fontWeight = FontWeight.Bold) },
+            text = {
+                Text("O arquivo ficará bem maior por causa do áudio")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showAudioExportWarningDialog = false
+                        val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
+                        val uri = NoteExportHelper.exportToHtmlFile(context, title, category, blocks, primaryColor.toArgb())
+                        NoteExportHelper.shareUri(context, uri, "text/html", "Exportar Página Web (.html)")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor)
+                ) {
+                    Text("Continuar", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showAudioExportWarningDialog = false }
+                ) {
+                    Text("Cancelar")
+                }
             }
         )
     }
@@ -1935,6 +2074,58 @@ private fun ObsidianWhatsAppAudioPlayer(
     var editedTitle by remember(token.titleOrAlt) { mutableStateOf(token.titleOrAlt) }
     var volume by remember { mutableFloatStateOf(1.0f) }
     var showVolumeControl by remember { mutableStateOf(false) }
+
+    LaunchedEffect(playbackState.volume, isCurrentAudio) {
+        if (isCurrentAudio) {
+            volume = playbackState.volume
+        }
+    }
+
+    val isMediaValid = remember(token.url) {
+        token.url.isBlank() || MediaStorageHelper.isMediaFileValid(context, token.url)
+    }
+
+    if (!isMediaValid && token.url.isNotBlank()) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Áudio não encontrado",
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Arquivo de áudio não encontrado",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Text(
+                        text = token.titleOrAlt.ifBlank { token.url.substringAfterLast("/") },
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                    )
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remover áudio ausente",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -2110,6 +2301,53 @@ private fun ObsidianSideBySideImageWidget(
     onChangeSideText: (String) -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
+    val isMediaValid = remember(token.url) {
+        token.url.isBlank() || MediaStorageHelper.isMediaFileValid(context, token.url)
+    }
+
+    if (!isMediaValid && token.url.isNotBlank()) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.BrokenImage,
+                    contentDescription = "Imagem não encontrada",
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Arquivo de imagem não encontrado",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Text(
+                        text = token.titleOrAlt.ifBlank { token.url.substringAfterLast("/") },
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                    )
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remover imagem ausente",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+        return
+    }
+
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),

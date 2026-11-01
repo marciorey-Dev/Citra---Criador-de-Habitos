@@ -1085,6 +1085,12 @@ private fun AudioBlockPlayer(
     var showVolumeSlider by remember { mutableStateOf(false) }
     var localVolume by remember(block.volume) { mutableFloatStateOf(block.volume) }
 
+    LaunchedEffect(playbackState.volume, isCurrentAudio) {
+        if (isCurrentAudio) {
+            localVolume = playbackState.volume
+        }
+    }
+
     val currentPosition = if (isCurrentAudio) playbackState.currentPositionMs else 0
     val duration = if (isCurrentAudio) playbackState.durationMs else 0
 
@@ -1321,6 +1327,9 @@ private fun AudioBlockPlayer(
                         onValueChange = { newVol ->
                             localVolume = newVol
                             NoteAudioPlaybackManager.setVolume(newVol)
+                        },
+                        onValueChangeFinished = {
+                            onUpdate(block.copy(volume = localVolume))
                         },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f).height(20.dp),

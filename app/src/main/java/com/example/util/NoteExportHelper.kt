@@ -1177,8 +1177,8 @@ object NoteExportHelper {
         blocks: List<VisualBlock>,
         themeColor: Int = Color.parseColor("#FF6F00")
     ): Uri {
-        val width = 900
-        val padding = 48f
+        val width = 840
+        val padding = 44f
         val contentWidth = (width - (padding * 2)).toInt()
 
         val titlePaint = TextPaint().apply {
@@ -1215,6 +1215,17 @@ object NoteExportHelper {
             typeface = Typeface.MONOSPACE
             isAntiAlias = true
         }
+        val headerTextPaint = TextPaint().apply {
+            color = Color.parseColor("#0F172A")
+            textSize = 16f
+            isFakeBoldText = true
+            isAntiAlias = true
+        }
+        val cellTextPaint = TextPaint().apply {
+            color = Color.parseColor("#0F172A")
+            textSize = 15f
+            isAntiAlias = true
+        }
 
         fun getHeadingPaint(level: Int): TextPaint = TextPaint().apply {
             color = if (level <= 2) themeColor else Color.parseColor("#0F172A")
@@ -1236,6 +1247,8 @@ object NoteExportHelper {
         }
 
         val titleLayout = createStaticLayout(noteTitle.ifBlank { "Sem Título" }, titlePaint, contentWidth)
+
+        // Pass 1: Measure EXACT vertical height without trailing dead space
         var measuredHeight = titleLayout.height + 10f + 32f + 24f
 
         for (block in blocks) {
@@ -1268,11 +1281,11 @@ object NoteExportHelper {
                 }
                 is CodeBlock -> {
                     val layout = createStaticLayout(block.code.ifBlank { " " }, codeTextPaint, contentWidth - 32)
-                    measuredHeight += layout.height + 34f
+                    measuredHeight += layout.height + 24f + 14f
                 }
                 is ImageBlock -> {
                     val bmp = loadedBitmaps[block.url]
-                    if (bmp != null) {
+                    if (bmp != null && bmp.width > 0) {
                         val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
                         if (hasSide) {
                             val imgFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
@@ -1285,35 +1298,63 @@ object NoteExportHelper {
                             val textLayout = createStaticLayout(block.sideText, bodyPaint, textW.toInt().coerceAtLeast(60))
                             measuredHeight += maxOf(drawH, textLayout.height.toFloat()) + 18f
                         } else {
-                            val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
+                            val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceIn(100f, contentWidth.toFloat())
                             val scale = maxW / bmp.width.toFloat()
                             val drawH = bmp.height * scale
                             measuredHeight += drawH + 18f
                         }
+                    } else {
+                        measuredHeight += 28f
                     }
                 }
                 is CalloutBlock -> {
                     val layout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 32)
-                    measuredHeight += layout.height + 42f
-                }
-                is DividerBlock -> {
-                    measuredHeight += 24f
+                    measuredHeight += layout.height + 28f + 14f
                 }
                 is TableBlock -> {
-                    val rowCount = block.rows.size + 1
-                    measuredHeight += (rowCount * 32f) + 16f
+                    val colCount = maxOf(1, block.headers.size)
+                    val colW = contentWidth / colCount.toFloat()
+                    val cellW = (colW - 16f).toInt().coerceAtLeast(30)
+                    var maxHRow = 24f
+                    for (h in block.headers) {
+                        val l = createStaticLayout(h.ifBlank { " " }, headerTextPaint, cellW)
+                        if (l.height > maxHRow) maxHRow = l.height.toFloat()
+                    }
+                    var totalTableH = maxHRow + 16f
+                    for (row in block.rows) {
+                        var maxCellH = 20f
+                        for (c in row) {
+                            val l = createStaticLayout(c.ifBlank { " " }, cellTextPaint, cellW)
+                            if (l.height > maxCellH) maxCellH = l.height.toFloat()
+                        }
+                        totalTableH += maxCellH + 14f
+                    }
+                    measuredHeight += totalTableH + 16f
                 }
                 is ToggleBlock -> {
                     val layout = createStaticLayout(block.title.ifBlank { " " }, bodyPaint, contentWidth - 28)
                     measuredHeight += layout.height + 14f
                 }
+                is AudioBlock -> {
+                    measuredHeight += 68f + 14f
+                }
+                is MathBlock -> {
+                    val layout = createStaticLayout(block.formula.ifBlank { " " }, italicPaint, contentWidth - 32)
+                    measuredHeight += layout.height + 28f + 14f
+                }
+                is DividerBlock -> {
+                    measuredHeight += 24f
+                }
                 else -> {
-                    measuredHeight += 16f
+                    measuredHeight += 14f
                 }
             }
         }
 
-        val totalHeight = (padding + 14f + measuredHeight + padding + 40f).toInt().coerceAtLeast(400)
+        measuredHeight += 36f // Citra branding footer
+        val exactFinalHeight = padding + 14f + measuredHeight + padding
+        val minVerticalHeight = width * 1.25f // ensure more vertical than horizontal
+        val totalHeight = maxOf(exactFinalHeight, minVerticalHeight).toInt()
         val bitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
@@ -1520,33 +1561,47 @@ object NoteExportHelper {
                 is TableBlock -> {
                     val colCount = maxOf(1, block.headers.size)
                     val colW = contentWidth / colCount.toFloat()
+                    val cellW = (colW - 16f).toInt().coerceAtLeast(30)
                     val tBorder = Paint().apply { color = Color.parseColor("#CBD5E1"); strokeWidth = 1.5f; style = Paint.Style.STROKE }
                     val hBg = Paint().apply { color = Color.parseColor("#F1F5F9") }
-                    val cellTextPaint = TextPaint().apply { color = Color.parseColor("#0F172A"); textSize = 16f; isAntiAlias = true }
-                    val headerTextPaint = TextPaint().apply { color = Color.parseColor("#0F172A"); textSize = 16f; isFakeBoldText = true; isAntiAlias = true }
 
-                    // Header row
-                    canvas.drawRect(padding, y, width - padding, y + 32f, hBg)
-                    canvas.drawRect(padding, y, width - padding, y + 32f, tBorder)
-                    block.headers.forEachIndexed { i, h ->
-                        canvas.drawText(h, padding + (i * colW) + 8f, y + 22f, headerTextPaint)
+                    // Header row with wrapped text
+                    var maxHeaderH = 24f
+                    val headerLayouts = block.headers.map { h ->
+                        val l = createStaticLayout(h.ifBlank { " " }, headerTextPaint, cellW)
+                        if (l.height > maxHeaderH) maxHeaderH = l.height.toFloat()
+                        l
                     }
-                    y += 32f
+                    val headerRowH = maxHeaderH + 16f
+                    canvas.drawRect(padding, y, width - padding, y + headerRowH, hBg)
+                    canvas.drawRect(padding, y, width - padding, y + headerRowH, tBorder)
+                    headerLayouts.forEachIndexed { i, l ->
+                        canvas.save()
+                        canvas.translate(padding + (i * colW) + 8f, y + 8f)
+                        l.draw(canvas)
+                        canvas.restore()
+                    }
+                    y += headerRowH
 
-                    // Data rows
+                    // Data rows with wrapped text
                     block.rows.forEach { row ->
-                        canvas.drawRect(padding, y, width - padding, y + 28f, tBorder)
-                        row.forEachIndexed { i, cell ->
-                            canvas.drawText(cell, padding + (i * colW) + 8f, y + 20f, cellTextPaint)
+                        var maxCellH = 20f
+                        val cellLayouts = row.map { c ->
+                            val l = createStaticLayout(c.ifBlank { " " }, cellTextPaint, cellW)
+                            if (l.height > maxCellH) maxCellH = l.height.toFloat()
+                            l
                         }
-                        y += 28f
+                        val rowH = maxCellH + 14f
+                        canvas.drawRect(padding, y, width - padding, y + rowH, tBorder)
+                        cellLayouts.forEachIndexed { i, l ->
+                            canvas.save()
+                            canvas.translate(padding + (i * colW) + 8f, y + 7f)
+                            l.draw(canvas)
+                            canvas.restore()
+                        }
+                        y += rowH
                     }
                     y += 16f
-                }
-                is DividerBlock -> {
-                    val linePaint = Paint().apply { color = Color.parseColor("#E2E8F0"); strokeWidth = 2f }
-                    canvas.drawLine(padding, y + 10f, width - padding, y + 10f, linePaint)
-                    y += 24f
                 }
                 is ToggleBlock -> {
                     val layout = createStaticLayout(block.title.ifBlank { " " }, bodyPaint, contentWidth - 28)
@@ -1558,15 +1613,66 @@ object NoteExportHelper {
                     canvas.restore()
                     y += layout.height + 14f
                 }
+                is AudioBlock -> {
+                    val cardH = 68f
+                    val cardBg = Paint().apply { color = Color.parseColor("#1E293B"); isAntiAlias = true }
+                    val cardBorder = Paint().apply { color = themeColor; strokeWidth = 2f; style = Paint.Style.STROKE; isAntiAlias = true }
+                    val rect = RectF(padding, y, width - padding, y + cardH)
+                    canvas.drawRoundRect(rect, 14f, 14f, cardBg)
+                    canvas.drawRoundRect(rect, 14f, 14f, cardBorder)
+
+                    // Vinyl circle
+                    val vinylPaint = Paint().apply { color = Color.parseColor("#0F172A"); isAntiAlias = true }
+                    canvas.drawCircle(padding + 34f, y + 34f, 20f, vinylPaint)
+                    val noteEmojiPaint = Paint().apply { textSize = 16f; isAntiAlias = true }
+                    canvas.drawText("🎵", padding + 24f, y + 40f, noteEmojiPaint)
+
+                    // Text
+                    val aTitlePaint = TextPaint().apply { color = Color.WHITE; textSize = 17f; isFakeBoldText = true; isAntiAlias = true }
+                    val aSubPaint = TextPaint().apply { color = Color.parseColor("#94A3B8"); textSize = 12f; isAntiAlias = true }
+                    canvas.drawText(block.title.ifBlank { "Áudio Incorporado" }.take(35), padding + 66f, y + 30f, aTitlePaint)
+                    canvas.drawText("Áudio Citra • Reproduzível no app e HTML", padding + 66f, y + 48f, aSubPaint)
+
+                    y += cardH + 14f
+                }
+                is MathBlock -> {
+                    val layout = createStaticLayout(block.formula.ifBlank { " " }, italicPaint, contentWidth - 32)
+                    val boxH = layout.height + 24f
+                    val mBg = Paint().apply { color = Color.parseColor("#F8FAFC"); isAntiAlias = true }
+                    val mBorder = Paint().apply { color = Color.parseColor("#CBD5E1"); strokeWidth = 1.5f; style = Paint.Style.STROKE; isAntiAlias = true; pathEffect = DashPathEffect(floatArrayOf(10f, 10f), 0f) }
+                    val rect = RectF(padding, y, width - padding, y + boxH)
+                    canvas.drawRoundRect(rect, 10f, 10f, mBg)
+                    canvas.drawRoundRect(rect, 10f, 10f, mBorder)
+
+                    canvas.save()
+                    canvas.translate(padding + 16f, y + 12f)
+                    layout.draw(canvas)
+                    canvas.restore()
+                    y += boxH + 14f
+                }
+                is DividerBlock -> {
+                    val linePaint = Paint().apply { color = Color.parseColor("#E2E8F0"); strokeWidth = 2f }
+                    canvas.drawLine(padding, y + 10f, width - padding, y + 10f, linePaint)
+                    y += 24f
+                }
                 else -> y += 12f
             }
         }
 
+        // Citra Footer Branding
+        val footerPaint = TextPaint().apply {
+            color = Color.parseColor("#94A3B8")
+            textSize = 13f
+            isAntiAlias = true
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("🍊 Citra • Gestão Inteligente & Hábitos", width / 2f, y + 20f, footerPaint)
+
         val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.png")
-        val stream = FileOutputStream(file)
-        bitmap.compress(Bitmap.CompressFormat.PNG, 95, stream)
-        stream.flush()
-        stream.close()
+        FileOutputStream(file).use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 95, stream)
+            stream.flush()
+        }
 
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
@@ -1621,6 +1727,10 @@ object NoteExportHelper {
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
+    /**
+     * Streams HTML export directly to disk using chunked buffered writing and Base64OutputStream,
+     * preventing OutOfMemoryError when exporting notes with long/heavy audio files (e.g. 20 MB+).
+     */
     fun exportToHtmlFile(
         context: Context,
         noteTitle: String,
@@ -1628,10 +1738,276 @@ object NoteExportHelper {
         blocks: List<VisualBlock>,
         themeColor: Int = Color.parseColor("#FF6F00")
     ): Uri {
-        val html = exportToHtml(context, noteTitle, noteCategory, blocks, themeColor)
         val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.html")
-        file.writeText(html)
+        streamNoteToHtmlFile(context, file, noteTitle, noteCategory, blocks, themeColor)
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    private fun streamNoteToHtmlFile(
+        context: Context,
+        destFile: File,
+        noteTitle: String,
+        noteCategory: String,
+        blocks: List<VisualBlock>,
+        themeColor: Int
+    ) {
+        val themeHex = colorToHex(themeColor)
+        val title = noteTitle.ifBlank { "Sem Título" }
+        val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+
+        FileOutputStream(destFile).use { fos ->
+            val out = java.io.BufferedOutputStream(fos, 32768)
+            val writer = java.io.BufferedWriter(java.io.OutputStreamWriter(out, Charsets.UTF_8), 32768)
+
+            writer.write("<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n")
+            writer.write("<meta charset=\"utf-8\">\n")
+            writer.write("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+            writer.write("<title>${escapeHtml(title)} - Citra</title>\n")
+            writer.write("<style>\n")
+            writer.write(":root { --primary: #$themeHex; --primary-light: #$themeHex" + "1A; --primary-dark: #$themeHex; }\n")
+            writer.write("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; max-width: 820px; margin: 30px auto; padding: 0 20px; background: #f8fafc; }\n")
+            writer.write(".card { background: #ffffff; padding: 36px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }\n")
+            writer.write("h1 { color: #0f172a; border-bottom: 3px solid var(--primary); padding-bottom: 12px; margin-top: 0; font-size: 2rem; }\n")
+            writer.write(".meta { color: #64748b; font-size: 0.88rem; margin-bottom: 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }\n")
+            writer.write(".badge { background: var(--primary-light); color: var(--primary); padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.82rem; border: 1px solid var(--primary); }\n")
+            writer.write("blockquote { border-left: 4px solid var(--primary); margin: 18px 0; padding: 12px 20px; background: var(--primary-light); border-radius: 0 12px 12px 0; color: #334155; }\n")
+            writer.write("pre { background: #0f172a; color: #f8fafc; padding: 16px; border-radius: 12px; overflow-x: auto; font-family: monospace; font-size: 0.9rem; }\n")
+            writer.write("table { width: 100%; border-collapse: collapse; margin: 20px 0; border-radius: 8px; overflow: hidden; }\n")
+            writer.write("th, td { border: 1px solid #cbd5e1; padding: 10px 14px; text-align: left; }\n")
+            writer.write("th { background: #f1f5f9; border-bottom: 2px solid var(--primary); font-weight: bold; }\n")
+            writer.write(".callout { padding: 14px 18px; border-radius: 12px; margin: 16px 0; border-left: 5px solid; }\n")
+            writer.write(".callout-info { background: #eff6ff; border-color: var(--primary); color: #1e3a8a; }\n")
+            writer.write(".callout-tip { background: #ecfdf5; border-color: #10b981; color: #064e3b; }\n")
+            writer.write(".callout-warning { background: #fffbeb; border-color: #f59e0b; color: #78350f; }\n")
+            writer.write(".callout-important { background: #fef2f2; border-color: #ef4444; color: #7f1d1d; }\n")
+            writer.write(".checklist-item { display: flex; align-items: center; gap: 10px; margin: 8px 0; }\n")
+            writer.write(".checked { text-decoration: line-through; color: #94a3b8; }\n")
+            writer.write("details { background: #f1f5f9; padding: 12px 16px; border-radius: 10px; margin: 12px 0; border-left: 3px solid var(--primary); }\n")
+            writer.write("summary { font-weight: bold; cursor: pointer; color: #0f172a; }\n")
+            writer.write(".math { background: #f8fafc; font-family: 'Times New Roman', serif; font-size: 1.2rem; padding: 14px; border-radius: 10px; border: 1px dashed #cbd5e1; text-align: center; }\n")
+            writer.write("img.note-img { max-width: 100%; height: auto; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); margin: 10px 0; }\n")
+
+            // Advanced Interactive Audio Player Styles
+            writer.write("/* Advanced Citra Audio Player Art */\n")
+            writer.write(".citra-audio-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: #f8fafc; padding: 20px; border-radius: 18px; margin: 20px 0; border: 1px solid var(--primary); box-shadow: 0 8px 24px rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 14px; }\n")
+            writer.write(".audio-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }\n")
+            writer.write(".audio-title-group { display: flex; align-items: center; gap: 10px; }\n")
+            writer.write(".vinyl-art { width: 44px; height: 44px; min-width: 44px; border-radius: 50%; background: radial-gradient(circle, #334155 35%, #0f172a 70%); border: 2px solid var(--primary); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 10px var(--primary); }\n")
+            writer.write(".wave-bars { display: flex; align-items: flex-end; gap: 3px; height: 24px; }\n")
+            writer.write(".wave-bar { width: 4px; border-radius: 2px; background: var(--primary); animation: waveAnim 1.2s infinite ease-in-out; }\n")
+            writer.write("@keyframes waveAnim { 0%, 100% { height: 6px; } 50% { height: 22px; } }\n")
+            writer.write(".audio-controls { display: flex; align-items: center; gap: 14px; width: 100%; }\n")
+            writer.write(".play-btn { width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--primary); color: white; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; }\n")
+            writer.write(".play-btn:hover { transform: scale(1.08); }\n")
+            writer.write(".scrubber { flex: 1; accent-color: var(--primary); height: 6px; border-radius: 3px; cursor: pointer; }\n")
+            writer.write(".time-label { font-size: 0.8rem; font-family: monospace; color: #94a3b8; min-width: 70px; text-align: right; }\n")
+            writer.write(".footer { margin-top: 40px; text-align: center; font-size: 0.82rem; color: #94a3b8; }\n")
+            writer.write("</style>\n</head>\n<body>\n<div class=\"card\">\n")
+            writer.write("<h1>${escapeHtml(title)}</h1>\n")
+            writer.write("<div class=\"meta\"><span class=\"badge\">$noteCategory</span><span>Exportado em $dateStr</span><span>🍊 Citra</span></div>\n")
+
+            var audioIndex = 0
+            for (block in blocks) {
+                when (block) {
+                    is HeadingBlock -> writer.write("<h${block.level}>${renderInlineHtml(block.text, themeHex)}</h${block.level}>\n")
+                    is TextBlock -> if (block.text.isNotBlank()) writer.write("<p>${renderInlineHtml(block.text, themeHex)}</p>\n")
+                    is ChecklistBlock -> {
+                        val chk = if (block.isChecked) "checked" else ""
+                        val cls = if (block.isChecked) "checked" else ""
+                        writer.write("<div class=\"checklist-item\"><input type=\"checkbox\" $chk disabled style=\"accent-color:var(--primary);\"><span class=\"$cls\">${renderInlineHtml(block.text, themeHex)}</span></div>\n")
+                    }
+                    is BulletBlock -> writer.write("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
+                    is QuoteBlock -> writer.write("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
+                    is CodeBlock -> writer.write("<pre><code class=\"language-${block.language}\">${escapeHtml(block.code)}</code></pre>\n")
+                    is MathBlock -> writer.write("<div class=\"math\">$$ ${escapeHtml(block.formula)} $$</div>\n")
+                    is TableBlock -> {
+                        writer.write("<table><thead><tr>")
+                        for (h in block.headers) writer.write("<th>${escapeHtml(h)}</th>")
+                        writer.write("</tr></thead><tbody>\n")
+                        for (row in block.rows) {
+                            writer.write("<tr>")
+                            for (c in row) writer.write("<td>${escapeHtml(c)}</td>")
+                            writer.write("</tr>\n")
+                        }
+                        writer.write("</tbody></table>\n")
+                    }
+                    is CalloutBlock -> writer.write("<div class=\"callout callout-${block.type}\"><strong>${block.type.uppercase()}:</strong> ${renderInlineHtml(block.text, themeHex)}</div>\n")
+                    is ToggleBlock -> writer.write("<details open><summary>${escapeHtml(block.title)}</summary><p>${renderInlineHtml(block.content, themeHex)}</p></details>\n")
+                    is DividerBlock -> writer.write("<hr style=\"border:none; border-top: 2px solid var(--primary); margin: 24px 0;\">\n")
+
+                    is ImageBlock -> {
+                        val bmp = loadBitmapFromUrl(context, block.url)
+                        if (bmp != null) {
+                            val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
+                            if (hasSide) {
+                                val direction = if (block.alignment == "left") "row" else "row-reverse"
+                                val imgPercent = block.widthPercent.coerceIn(25, 75)
+                                val textPercent = 100 - imgPercent
+                                writer.write("<div style=\"display:flex; flex-direction:$direction; align-items:flex-start; gap:16px; margin:16px 0;\">\n")
+                                writer.write("  <div style=\"width:$imgPercent%; flex-shrink:0;\">\n")
+                                writer.write("    <img class=\"note-img\" src=\"data:image/jpeg;base64,")
+                                writer.flush()
+                                val nonClosing = object : java.io.FilterOutputStream(out) { override fun close() { flush() } }
+                                val b64Out = android.util.Base64OutputStream(nonClosing, android.util.Base64.NO_WRAP)
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 85, b64Out)
+                                b64Out.close()
+                                writer.write("\" alt=\"${escapeHtml(block.alt)}\" style=\"width:100%; border-radius:8px; display:block;\">\n")
+                                writer.write("  </div>\n")
+                                writer.write("  <div style=\"width:$textPercent%; flex-grow:1; font-size:0.95rem; line-height:1.6; color:#1e293b;\">\n")
+                                writer.write("    ${renderInlineHtml(block.sideText.replace("\n", "<br>"), themeHex)}\n")
+                                writer.write("  </div>\n")
+                                writer.write("</div>\n")
+                            } else {
+                                writer.write("<div style=\"text-align:${block.alignment}; margin:16px 0;\">\n")
+                                writer.write("  <img class=\"note-img\" src=\"data:image/jpeg;base64,")
+                                writer.flush()
+                                val nonClosing = object : java.io.FilterOutputStream(out) { override fun close() { flush() } }
+                                val b64Out = android.util.Base64OutputStream(nonClosing, android.util.Base64.NO_WRAP)
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 85, b64Out)
+                                b64Out.close()
+                                writer.write("\" alt=\"${escapeHtml(block.alt)}\" style=\"width:${block.widthPercent}%;\">\n")
+                                writer.write("</div>\n")
+                            }
+                        } else if (block.url.startsWith("http://") || block.url.startsWith("https://")) {
+                            writer.write("<div style=\"text-align:${block.alignment}; margin:16px 0;\">\n")
+                            writer.write("  <img class=\"note-img\" src=\"${escapeHtml(block.url)}\" alt=\"${escapeHtml(block.alt)}\" style=\"width:${block.widthPercent}%;\">\n")
+                            writer.write("</div>\n")
+                        } else {
+                            writer.write("<p style=\"color:#64748b; font-style:italic;\">🖼️ [Imagem: ${escapeHtml(block.alt)}]</p>\n")
+                        }
+                    }
+
+                    is AudioBlock -> {
+                        audioIndex++
+                        val playerId = "citra_audio_$audioIndex"
+                        val mime = when {
+                            block.url.endsWith(".mp3", ignoreCase = true) -> "audio/mpeg"
+                            block.url.endsWith(".wav", ignoreCase = true) -> "audio/wav"
+                            block.url.endsWith(".ogg", ignoreCase = true) -> "audio/ogg"
+                            else -> "audio/mp4"
+                        }
+
+                        writer.write("<div class=\"citra-audio-card\">\n")
+                        writer.write("  <div class=\"audio-header\">\n")
+                        writer.write("    <div class=\"audio-title-group\">\n")
+                        writer.write("      <div class=\"vinyl-art\">🎵</div>\n")
+                        writer.write("      <div>\n")
+                        writer.write("        <strong style=\"color:#f8fafc;\">${escapeHtml(block.title)}</strong>\n")
+                        writer.write("        <div style=\"font-size:0.75rem; color:#94a3b8;\">Áudio Incorporado Citra • Arte Interna</div>\n")
+                        writer.write("      </div>\n")
+                        writer.write("    </div>\n")
+                        writer.write("    <div class=\"wave-bars\">\n")
+                        writer.write("      <div class=\"wave-bar\" style=\"animation-delay:0.1s;\"></div>\n")
+                        writer.write("      <div class=\"wave-bar\" style=\"animation-delay:0.3s;\"></div>\n")
+                        writer.write("      <div class=\"wave-bar\" style=\"animation-delay:0.2s;\"></div>\n")
+                        writer.write("      <div class=\"wave-bar\" style=\"animation-delay:0.4s;\"></div>\n")
+                        writer.write("      <div class=\"wave-bar\" style=\"animation-delay:0.15s;\"></div>\n")
+                        writer.write("    </div>\n")
+                        writer.write("  </div>\n")
+
+                        val audioInputStream: java.io.InputStream? = try {
+                            if (block.url.startsWith("content://") || block.url.startsWith("file://")) {
+                                context.contentResolver.openInputStream(Uri.parse(block.url))
+                            } else {
+                                val f = File(block.url)
+                                if (f.exists()) java.io.FileInputStream(f) else null
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+
+                        if (audioInputStream != null) {
+                            writer.write("  <audio id=\"$playerId\" src=\"data:$mime;base64,")
+                            writer.flush()
+                            val nonClosing = object : java.io.FilterOutputStream(out) { override fun close() { flush() } }
+                            val b64Out = android.util.Base64OutputStream(nonClosing, android.util.Base64.NO_WRAP)
+                            val buf = ByteArray(16384)
+                            var readBytes: Int
+                            audioInputStream.use { input ->
+                                while (input.read(buf).also { readBytes = it } != -1) {
+                                    b64Out.write(buf, 0, readBytes)
+                                }
+                                b64Out.flush()
+                            }
+                            b64Out.close()
+                            writer.write("\" preload=\"metadata\"></audio>\n")
+                        } else if (block.url.startsWith("http://") || block.url.startsWith("https://")) {
+                            writer.write("  <audio id=\"$playerId\" src=\"${escapeHtml(block.url)}\" preload=\"metadata\"></audio>\n")
+                        } else {
+                            writer.write("  <p style=\"color:#f87171;\">⚠️ Arquivo de áudio não encontrado</p>\n")
+                        }
+
+                        // Write interactive controls and player script
+                        writer.write("  <div class=\"audio-controls\">\n")
+                        writer.write("    <button class=\"play-btn\" onclick=\"toggleCitraAudio('$playerId', this)\">▶</button>\n")
+                        writer.write("    <input type=\"range\" class=\"scrubber\" id=\"scrub_$playerId\" value=\"0\" min=\"0\" max=\"100\" step=\"0.1\" oninput=\"seekCitraAudio('$playerId', this.value)\">\n")
+                        writer.write("    <span class=\"time-label\" id=\"time_$playerId\">00:00 / --:--</span>\n")
+                        writer.write("  </div>\n")
+                        writer.write("</div>\n")
+                    }
+                }
+            }
+
+            // JavaScript & Footer
+            writer.write("""
+<script>
+function formatTime(s) {
+  if (isNaN(s)) return "00:00";
+  var m = Math.floor(s / 60);
+  var sec = Math.floor(s % 60);
+  return (m < 10 ? "0" + m : m) + ":" + (sec < 10 ? "0" + sec : sec);
+}
+function toggleCitraAudio(id, btn) {
+  var a = document.getElementById(id);
+  if (!a) return;
+  if (a.paused) {
+    a.play();
+    btn.innerHTML = "⏸";
+  } else {
+    a.pause();
+    btn.innerHTML = "▶";
+  }
+}
+function seekCitraAudio(id, val) {
+  var a = document.getElementById(id);
+  if (!a || !a.duration) return;
+  a.currentTime = (val / 100) * a.duration;
+}
+document.addEventListener("DOMContentLoaded", function() {
+  var audios = document.querySelectorAll("audio");
+  audios.forEach(function(a) {
+    var id = a.id;
+    var scrub = document.getElementById("scrub_" + id);
+    var timeLbl = document.getElementById("time_" + id);
+    a.addEventListener("timeupdate", function() {
+      if (a.duration && scrub) {
+        scrub.value = (a.currentTime / a.duration) * 100;
+      }
+      if (timeLbl) {
+        timeLbl.innerText = formatTime(a.currentTime) + " / " + formatTime(a.duration);
+      }
+    });
+    a.addEventListener("loadedmetadata", function() {
+      if (timeLbl) {
+        timeLbl.innerText = "00:00 / " + formatTime(a.duration);
+      }
+    });
+    a.addEventListener("ended", function() {
+      var btn = a.parentElement ? a.parentElement.querySelector(".play-btn") : null;
+      if (btn) btn.innerHTML = "▶";
+      if (scrub) scrub.value = 0;
+    });
+  });
+});
+</script>
+<div class="footer">Gerado por 🍊 Citra • Gestão Inteligente &amp; Hábitos</div>
+</div>
+</body>
+</html>
+""".trimIndent())
+
+            writer.flush()
+        }
     }
 
     fun shareUri(context: Context, uri: Uri, mimeType: String, title: String) {
