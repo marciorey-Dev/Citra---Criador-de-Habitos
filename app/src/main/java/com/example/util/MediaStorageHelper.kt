@@ -58,6 +58,27 @@ object MediaStorageHelper {
     }
 
     /**
+     * Copies a background image to permanent internal storage so it survives reboots and cache clearing.
+     */
+    fun saveNoteBackground(context: Context, sourceUri: Uri): String? {
+        return try {
+            val dir = File(context.filesDir, "note_backgrounds")
+            if (!dir.exists()) dir.mkdirs()
+            val extension = getExtensionFromUri(context, sourceUri) ?: "jpg"
+            val destFile = File(dir, "bg_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            destFile.absolutePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save note background", e)
+            null
+        }
+    }
+
+    /**
      * Copies an imported note image to permanent internal app storage.
      */
     fun saveNoteImage(context: Context, sourceUri: Uri): String? {
@@ -80,7 +101,7 @@ object MediaStorageHelper {
 
     /**
      * Saves an imported note audio file:
-     * - If <= 10MB: saved in internal notes_audios/
+     * - If <= 10MB: saved in internal note_audios/
      * - If > 10MB: saved in a dedicated app folder for easy tracking.
      */
     fun saveNoteAudio(context: Context, sourceUri: Uri): String? {
@@ -90,7 +111,6 @@ object MediaStorageHelper {
             val isLarge = size > (10 * 1024 * 1024) // > 10MB
 
             val targetDir = if (isLarge) {
-                // Dedicated folder for easy tracking
                 File(context.filesDir, "large_audios").apply { if (!exists()) mkdirs() }
             } else {
                 File(context.filesDir, "note_audios").apply { if (!exists()) mkdirs() }
@@ -111,23 +131,100 @@ object MediaStorageHelper {
     }
 
     /**
-     * Prepares an audio recording output file in Environment.DIRECTORY_MUSIC/CitraRecord.
+     * Prepares an audio recording output file in app's permanent private storage
+     * (File(context.filesDir, "CitraRecord")), ensuring it survives device reboot,
+     * app cache clearing, and never depends on temporary media permissions.
      */
     fun createRecordingFile(context: Context): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "CitraRec_$timeStamp.m4a"
+        val dir = File(context.filesDir, "CitraRecord").apply { if (!exists()) mkdirs() }
+        return File(dir, fileName)
+    }
 
+    /**
+     * Verifies if a given media path or URI is accessible, non-empty and exists.
+     * Prevents silent failures by providing a clear indication when media is missing.
+     */
+    fun isMediaFileValid(context: Context, pathOrUri: String?): Boolean {
+        if (pathOrUri.isNullOrBlank()) return false
         return try {
-            val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            val citraRecordDir = File(musicDir, "CitraRecord")
-            if (!citraRecordDir.exists()) {
-                citraRecordDir.mkdirs()
+            if (pathOrUri.startsWith("content://")) {
+                val uri = Uri.parse(pathOrUri)
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    pfd.statSize > 0
+                } ?: false
+            } else {
+                val cleanPath = pathOrUri.removePrefix("file://")
+                val f = File(cleanPath)
+                f.exists() && f.length() > 0
             }
-            File(citraRecordDir, fileName)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Scans an imported Markdown string for media tokens (images and audios).
+     * If any token points to a temporary content URI or accessible external file,
+     * it copies the media into the app's persistent internal storage and updates the link.
+     */
+    fun processAndPersistImportedNoteMedia(context: Context, markdownContent: String): String {
+        var processed = markdownContent
+
+        // 1. Process images: ![alt|...](url)
+        val imgRegex = Regex("!\\[(.*?)\\]\\((.*?)\\)")
+        imgRegex.findAll(markdownContent).forEach { match ->
+            val altAndMeta = match.groupValues[1]
+            val url = match.groupValues[2]
+
+            if (url.isNotBlank() && !url.contains(context.filesDir.absolutePath)) {
+                val persistentPath = tryCopyUriOrFile(context, url, isAudio = false)
+                if (persistentPath != null) {
+                    val oldToken = match.value
+                    val newToken = "![$altAndMeta]($persistentPath)"
+                    processed = processed.replace(oldToken, newToken)
+                }
+            }
+        }
+
+        // 2. Process audios: [audio:title](url) or ![audio:title](url)
+        val audioRegex = Regex("(!?\\[audio:(.*?)\\]\\((.*?)\\))")
+        audioRegex.findAll(markdownContent).forEach { match ->
+            val isExclamation = match.value.startsWith("!")
+            val titleAndMeta = match.groupValues[2]
+            val url = match.groupValues[3]
+
+            if (url.isNotBlank() && !url.contains(context.filesDir.absolutePath)) {
+                val persistentPath = tryCopyUriOrFile(context, url, isAudio = true)
+                if (persistentPath != null) {
+                    val oldToken = match.value
+                    val prefix = if (isExclamation) "!" else ""
+                    val newToken = "$prefix[audio:$titleAndMeta]($persistentPath)"
+                    processed = processed.replace(oldToken, newToken)
+                }
+            }
+        }
+
+        return processed
+    }
+
+    private fun tryCopyUriOrFile(context: Context, source: String, isAudio: Boolean): String? {
+        return try {
+            val uri = if (source.startsWith("content://") || source.startsWith("file://")) {
+                Uri.parse(source)
+            } else {
+                Uri.fromFile(File(source))
+            }
+
+            if (isAudio) {
+                saveNoteAudio(context, uri)
+            } else {
+                saveNoteImage(context, uri)
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create recording file in Music/CitraRecord, falling back to internal", e)
-            val fallbackDir = File(context.filesDir, "CitraRecord").apply { if (!exists()) mkdirs() }
-            File(fallbackDir, fileName)
+            Log.w(TAG, "Could not persist media from: $source", e)
+            null
         }
     }
 

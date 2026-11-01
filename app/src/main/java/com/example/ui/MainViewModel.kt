@@ -810,12 +810,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 updatedAt = System.currentTimeMillis()
             )
             val resultId = if (id == 0L) {
-                val newId = repository.insertNote(note)
-                _userMessage.emit("Anotação salva!")
-                newId
+                repository.insertNote(note)
             } else {
                 repository.updateNote(note)
-                _userMessage.emit("Anotação atualizada!")
                 id
             }
             onSaved?.invoke(resultId)

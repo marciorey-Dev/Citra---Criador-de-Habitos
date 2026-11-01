@@ -39,6 +39,7 @@ import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
+import com.example.ui.screens.organization.notes.NoteEditorMode
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -135,7 +136,8 @@ fun NotesSubTab(
 
     // Full screen note editor overlay when editing or creating
     if (isEditingNote) {
-        FullScreenNoteEditor(
+        key(activeNoteToEdit?.id ?: if (isCreatingNew) -1L else 0L) {
+            FullScreenNoteEditor(
             initialNote = activeNoteToEdit,
             categories = categories,
             allNotes = notes,
@@ -239,6 +241,7 @@ fun NotesSubTab(
                 )
             }
         )
+        }
         return
     }
 

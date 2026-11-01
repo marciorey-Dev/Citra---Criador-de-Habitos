@@ -119,7 +119,8 @@ fun CalendarScreen(
 
     // Full screen smooth note editor if editing or creating note
     if (isCreatingNoteForCalendar || activeNoteForEditor != null) {
-        FullScreenNoteEditor(
+        key(activeNoteForEditor?.id ?: if (isCreatingNoteForCalendar) -1L else 0L) {
+            FullScreenNoteEditor(
             initialNote = activeNoteForEditor,
             categories = categories,
             allNotes = notes,
@@ -189,6 +190,7 @@ fun CalendarScreen(
                 )
             }
         )
+        }
         return
     }
 

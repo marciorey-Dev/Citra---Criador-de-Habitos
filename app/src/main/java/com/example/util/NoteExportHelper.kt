@@ -370,27 +370,72 @@ object NoteExportHelper {
                         bmp.compress(Bitmap.CompressFormat.JPEG, 85, bos)
                         imageEntries.add(relId to bos.toByteArray())
 
-                        // 1 inch = 914400 EMUs. Printable width ~ 5,400,000 EMUs.
-                        val maxEmuW = (5400000L * block.widthPercent / 100).coerceIn(1000000L, 5400000L)
-                        val emuH = ((maxEmuW * bmp.height) / bmp.width.coerceAtLeast(1)).coerceIn(500000L, 6000000L)
+                        val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
+                        if (hasSide) {
+                            val imgFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
+                            val totalEmu = 5400000L
+                            val imgEmu = (totalEmu * imgFraction).toLong()
+                            val textEmu = totalEmu - imgEmu
+                            val emuH = ((imgEmu * bmp.height) / bmp.width.coerceAtLeast(1)).coerceIn(500000L, 6000000L)
 
-                        val jcVal = when (block.alignment) {
-                            "left" -> "left"
-                            "right" -> "right"
-                            else -> "center"
+                            val imgTwips = imgEmu / 635L
+                            val textTwips = textEmu / 635L
+
+                            val drawingXml = buildString {
+                                append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">")
+                                append("<wp:extent cx=\"$imgEmu\" cy=\"$emuH\"/>")
+                                append("<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>")
+                                append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\"/>")
+                                append("<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>")
+                                append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">")
+                                append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"$imageCounter\" name=\"image_$imageCounter.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>")
+                                append("<pic:blipFill><a:blip r:embed=\"$relId\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>")
+                                append("<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$imgEmu\" cy=\"$emuH\"/></a:xfrm>")
+                                append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>")
+                                append("</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>")
+                            }
+
+                            val textCellXml = buildString {
+                                val lines = block.sideText.split("\n")
+                                for (l in lines) {
+                                    append("<w:p><w:pPr><w:spacing w:before=\"40\" w:after=\"40\"/></w:pPr><w:r><w:rPr><w:sz w:val=\"20\"/></w:rPr><w:t xml:space=\"preserve\">${escapeXml(l)}</w:t></w:r></w:p>")
+                                }
+                            }
+
+                            docSb.append("<w:tbl>")
+                            docSb.append("<w:tblPr><w:tblW w:w=\"10000\" w:type=\"pct\"/><w:tblBorders><w:top w:val=\"none\"/><w:left w:val=\"none\"/><w:bottom w:val=\"none\"/><w:right w:val=\"none\"/><w:insideH w:val=\"none\"/><w:insideV w:val=\"none\"/></w:tblBorders></w:tblPr>")
+                            docSb.append("<w:tr>")
+                            if (block.alignment == "left") {
+                                docSb.append("<w:tc><w:tcPr><w:tcW w:w=\"$imgTwips\" w:type=\"dxa\"/><w:vAlign w:val=\"top\"/></w:tcPr><w:p>$drawingXml</w:p></w:tc>")
+                                docSb.append("<w:tc><w:tcPr><w:tcW w:w=\"$textTwips\" w:type=\"dxa\"/><w:vAlign w:val=\"top\"/></w:tcPr>$textCellXml</w:tc>")
+                            } else {
+                                docSb.append("<w:tc><w:tcPr><w:tcW w:w=\"$textTwips\" w:type=\"dxa\"/><w:vAlign w:val=\"top\"/></w:tcPr>$textCellXml</w:tc>")
+                                docSb.append("<w:tc><w:tcPr><w:tcW w:w=\"$imgTwips\" w:type=\"dxa\"/><w:vAlign w:val=\"top\"/></w:tcPr><w:p>$drawingXml</w:p></w:tc>")
+                            }
+                            docSb.append("</w:tr></w:tbl>\n")
+                        } else {
+                            // 1 inch = 914400 EMUs. Printable width ~ 5,400,000 EMUs.
+                            val maxEmuW = (5400000L * block.widthPercent / 100).coerceIn(1000000L, 5400000L)
+                            val emuH = ((maxEmuW * bmp.height) / bmp.width.coerceAtLeast(1)).coerceIn(500000L, 6000000L)
+
+                            val jcVal = when (block.alignment) {
+                                "left" -> "left"
+                                "right" -> "right"
+                                else -> "center"
+                            }
+                            docSb.append("<w:p><w:pPr><w:jc w:val=\"$jcVal\"/><w:spacing w:before=\"120\" w:after=\"120\"/></w:pPr>")
+                            docSb.append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">")
+                            docSb.append("<wp:extent cx=\"$maxEmuW\" cy=\"$emuH\"/>")
+                            docSb.append("<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>")
+                            docSb.append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\"/>")
+                            docSb.append("<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>")
+                            docSb.append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">")
+                            docSb.append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"$imageCounter\" name=\"image_$imageCounter.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>")
+                            docSb.append("<pic:blipFill><a:blip r:embed=\"$relId\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>")
+                            docSb.append("<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$maxEmuW\" cy=\"$emuH\"/></a:xfrm>")
+                            docSb.append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>")
+                            docSb.append("</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>\n")
                         }
-                        docSb.append("<w:p><w:pPr><w:jc w:val=\"$jcVal\"/><w:spacing w:before=\"120\" w:after=\"120\"/></w:pPr>")
-                        docSb.append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">")
-                        docSb.append("<wp:extent cx=\"$maxEmuW\" cy=\"$emuH\"/>")
-                        docSb.append("<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>")
-                        docSb.append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\"/>")
-                        docSb.append("<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>")
-                        docSb.append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">")
-                        docSb.append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"$imageCounter\" name=\"image_$imageCounter.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>")
-                        docSb.append("<pic:blipFill><a:blip r:embed=\"$relId\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>")
-                        docSb.append("<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$maxEmuW\" cy=\"$emuH\"/></a:xfrm>")
-                        docSb.append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>")
-                        docSb.append("</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>\n")
                     } else {
                         docSb.append("<w:p><w:pPr><w:spacing w:before=\"80\" w:after=\"80\"/></w:pPr>")
                         docSb.append("<w:r><w:rPr><w:color w:val=\"64748B\"/><w:i/></w:rPr>")
@@ -838,21 +883,54 @@ object NoteExportHelper {
                 is ImageBlock -> {
                     val bmp = loadBitmapFromUrl(context, block.url)
                     if (bmp != null) {
-                        val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
-                        val scale = (maxW / bmp.width.toFloat()).coerceAtMost(360f / bmp.height.toFloat())
-                        val drawW = bmp.width * scale
-                        val drawH = bmp.height * scale
-                        checkNewPage(drawH + 16f)
+                        val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
+                        if (hasSide) {
+                            val imgFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
+                            val gap = 14f
+                            val totalAvailable = contentWidth - gap
+                            val imgW = totalAvailable * imgFraction
+                            val textW = totalAvailable * (1f - imgFraction)
+                            val scale = (imgW / bmp.width.toFloat()).coerceAtMost(360f / bmp.height.toFloat())
+                            val drawW = bmp.width * scale
+                            val drawH = bmp.height * scale
 
-                        val drawX = when (block.alignment) {
-                            "left" -> margin
-                            "right" -> margin + contentWidth - drawW
-                            else -> margin + (contentWidth - drawW) / 2f
+                            val textLayout = createStaticLayout(block.sideText, bodyPaint, textW.toInt().coerceAtLeast(60))
+                            val rowH = maxOf(drawH, textLayout.height.toFloat())
+                            checkNewPage(rowH + 16f)
+
+                            val (imgX, textX) = if (block.alignment == "left") {
+                                Pair(margin, margin + imgW + gap)
+                            } else {
+                                Pair(margin + textW + gap, margin)
+                            }
+
+                            val rect = RectF(imgX, y, imgX + drawW, y + drawH)
+                            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                            canvas.drawBitmap(bmp, null, rect, paint)
+
+                            canvas.save()
+                            canvas.translate(textX, y)
+                            textLayout.draw(canvas)
+                            canvas.restore()
+
+                            y += rowH + 16f
+                        } else {
+                            val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
+                            val scale = (maxW / bmp.width.toFloat()).coerceAtMost(360f / bmp.height.toFloat())
+                            val drawW = bmp.width * scale
+                            val drawH = bmp.height * scale
+                            checkNewPage(drawH + 16f)
+
+                            val drawX = when (block.alignment) {
+                                "left" -> margin
+                                "right" -> margin + contentWidth - drawW
+                                else -> margin + (contentWidth - drawW) / 2f
+                            }
+                            val rect = RectF(drawX, y, drawX + drawW, y + drawH)
+                            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                            canvas.drawBitmap(bmp, null, rect, paint)
+                            y += drawH + 14f
                         }
-                        val rect = RectF(drawX, y, drawX + drawW, y + drawH)
-                        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-                        canvas.drawBitmap(bmp, null, rect, paint)
-                        y += drawH + 14f
                     } else {
                         checkNewPage(26f)
                         val imgLabel = if (block.alt.isNotBlank()) "🖼️ [Imagem: ${block.alt}]" else "🖼️ [Imagem]"
@@ -986,12 +1064,24 @@ object NoteExportHelper {
                     } else ""
 
                     if (imgSrc.isNotBlank()) {
-                        sb.append("<div style=\"text-align:${block.alignment}; margin:16px 0;\">")
-                        sb.append("<img class=\"note-img\" src=\"$imgSrc\" alt=\"${escapeHtml(block.alt)}\" style=\"width:${block.widthPercent}%;\">")
-                        if (block.sideText.isNotBlank()) {
-                            sb.append("<div style=\"font-size:0.85rem; color:#64748b; margin-top:4px;\">${escapeHtml(block.sideText)}</div>")
+                        val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
+                        if (hasSide) {
+                            val direction = if (block.alignment == "left") "row" else "row-reverse"
+                            val imgPercent = block.widthPercent.coerceIn(25, 75)
+                            val textPercent = 100 - imgPercent
+                            sb.append("<div style=\"display:flex; flex-direction:$direction; align-items:flex-start; gap:16px; margin:16px 0;\">\n")
+                            sb.append("  <div style=\"width:$imgPercent%; flex-shrink:0;\">\n")
+                            sb.append("    <img class=\"note-img\" src=\"$imgSrc\" alt=\"${escapeHtml(block.alt)}\" style=\"width:100%; border-radius:8px; display:block;\">\n")
+                            sb.append("  </div>\n")
+                            sb.append("  <div style=\"width:$textPercent%; flex-grow:1; font-size:0.95rem; line-height:1.6; color:#1e293b;\">\n")
+                            sb.append("    ${renderInlineHtml(block.sideText.replace("\n", "<br>"), themeHex)}\n")
+                            sb.append("  </div>\n")
+                            sb.append("</div>\n")
+                        } else {
+                            sb.append("<div style=\"text-align:${block.alignment}; margin:16px 0;\">\n")
+                            sb.append("  <img class=\"note-img\" src=\"$imgSrc\" alt=\"${escapeHtml(block.alt)}\" style=\"width:${block.widthPercent}%;\">\n")
+                            sb.append("</div>\n")
                         }
-                        sb.append("</div>\n")
                     } else {
                         sb.append("<p style=\"color:#64748b; font-style:italic;\">🖼️ [Imagem: ${escapeHtml(block.alt)}]</p>\n")
                     }
@@ -1183,10 +1273,23 @@ object NoteExportHelper {
                 is ImageBlock -> {
                     val bmp = loadedBitmaps[block.url]
                     if (bmp != null) {
-                        val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
-                        val scale = maxW / bmp.width.toFloat()
-                        val drawH = bmp.height * scale
-                        measuredHeight += drawH + 18f
+                        val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
+                        if (hasSide) {
+                            val imgFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
+                            val gap = 16f
+                            val totalAvailable = contentWidth - gap
+                            val imgW = totalAvailable * imgFraction
+                            val textW = totalAvailable * (1f - imgFraction)
+                            val scale = imgW / bmp.width.toFloat()
+                            val drawH = bmp.height * scale
+                            val textLayout = createStaticLayout(block.sideText, bodyPaint, textW.toInt().coerceAtLeast(60))
+                            measuredHeight += maxOf(drawH, textLayout.height.toFloat()) + 18f
+                        } else {
+                            val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
+                            val scale = maxW / bmp.width.toFloat()
+                            val drawH = bmp.height * scale
+                            measuredHeight += drawH + 18f
+                        }
                     }
                 }
                 is CalloutBlock -> {
@@ -1343,21 +1446,53 @@ object NoteExportHelper {
                 is ImageBlock -> {
                     val bmp = loadedBitmaps[block.url]
                     if (bmp != null) {
-                        val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
-                        val scale = maxW / bmp.width.toFloat()
-                        val drawW = bmp.width * scale
-                        val drawH = bmp.height * scale
+                        val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
+                        if (hasSide) {
+                            val imgFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
+                            val gap = 16f
+                            val totalAvailable = contentWidth - gap
+                            val imgW = totalAvailable * imgFraction
+                            val textW = totalAvailable * (1f - imgFraction)
+                            val scale = imgW / bmp.width.toFloat()
+                            val drawW = bmp.width * scale
+                            val drawH = bmp.height * scale
 
-                        val drawX = when (block.alignment) {
-                            "right" -> width - padding - drawW
-                            "center" -> padding + ((contentWidth - drawW) / 2f)
-                            else -> padding
+                            val textLayout = createStaticLayout(block.sideText, bodyPaint, textW.toInt().coerceAtLeast(60))
+                            val rowH = maxOf(drawH, textLayout.height.toFloat())
+
+                            val (imgX, textX) = if (block.alignment == "left") {
+                                Pair(padding, padding + imgW + gap)
+                            } else {
+                                Pair(padding + textW + gap, padding)
+                            }
+
+                            val rect = RectF(imgX, y, imgX + drawW, y + drawH)
+                            val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                            canvas.drawBitmap(bmp, null, rect, p)
+
+                            canvas.save()
+                            canvas.translate(textX, y)
+                            textLayout.draw(canvas)
+                            canvas.restore()
+
+                            y += rowH + 18f
+                        } else {
+                            val maxW = (contentWidth.toFloat() * (block.widthPercent.toFloat() / 100f)).coerceAtLeast(100f)
+                            val scale = maxW / bmp.width.toFloat()
+                            val drawW = bmp.width * scale
+                            val drawH = bmp.height * scale
+
+                            val drawX = when (block.alignment) {
+                                "right" -> width - padding - drawW
+                                "center" -> padding + ((contentWidth - drawW) / 2f)
+                                else -> padding
+                            }
+
+                            val rect = RectF(drawX, y, drawX + drawW, y + drawH)
+                            val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                            canvas.drawBitmap(bmp, null, rect, p)
+                            y += drawH + 18f
                         }
-
-                        val rect = RectF(drawX, y, drawX + drawW, y + drawH)
-                        val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-                        canvas.drawBitmap(bmp, null, rect, p)
-                        y += drawH + 18f
                     }
                 }
                 is CalloutBlock -> {

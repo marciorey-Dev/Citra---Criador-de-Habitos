@@ -675,3 +675,63 @@ fun EditHabitDialog(
         shape = RoundedCornerShape(20.dp)
     )
 }
+
+@Composable
+private fun HabitEmojiSection(
+    selectedEmoji: String,
+    onSelectEmoji: (String) -> Unit
+) {
+    val suggestedEmojis = listOf(
+        "💧", "🏃", "📖", "🧘", "🍏", "💪", "🎯", "✍️",
+        "🌿", "🚶", "🚴", "💤", "🧼", "💊", "☕", "✨"
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Escolha ou digite um Emoji:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .background(OrangeContainer, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(selectedEmoji, fontSize = 22.sp)
+            }
+
+            OutlinedTextField(
+                value = selectedEmoji,
+                onValueChange = { if (it.length <= 4) onSelectEmoji(it) },
+                label = { Text("Emoji") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        suggestedEmojis.chunked(8).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                row.forEach { emoji ->
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(
+                                color = if (selectedEmoji == emoji) OrangeContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onSelectEmoji(emoji) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = emoji, fontSize = 18.sp)
+                    }
+                }
+            }
+        }
+    }
+}

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.model.Category
 import com.example.data.model.Habit
 import com.example.data.model.Note
 import com.example.data.model.Task
@@ -545,7 +546,7 @@ fun ConvertChecklistToTaskDialog(
                         expanded = showCategoryDropdown,
                         onDismissRequest = { showCategoryDropdown = false }
                     ) {
-                        val allCats = if (categories.isEmpty()) listOf(Category(name = "Geral", colorHex = "#FF9800", icon = "📁")) else categories
+                        val allCats = if (categories.isEmpty()) listOf(Category(name = "Geral", emoji = "📁")) else categories
                         allCats.forEach { cat ->
                             DropdownMenuItem(
                                 text = { Text(cat.name) },

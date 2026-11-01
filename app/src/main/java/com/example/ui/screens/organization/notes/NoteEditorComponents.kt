@@ -1,6 +1,9 @@
 package com.example.ui.screens.organization.notes
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.widget.Toast
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
@@ -15,6 +18,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
@@ -70,6 +75,7 @@ fun VisualBlockItem(
     onUpdate: (VisualBlock) -> Unit,
     onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
     val textColor = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface
     var showLangPicker by remember { mutableStateOf(false) }
     var isImageFullscreen by remember { mutableStateOf(false) }
@@ -545,13 +551,41 @@ fun VisualBlockItem(
                             }
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Fullscreen, contentDescription = "Tela Cheia", tint = Color(0xFF38BDF8), modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.LightGray, modifier = Modifier.size(14.dp))
-                            }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Copiar código diretamente sem abrir tela cheia
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copiar Código",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable {
+                                        val clip = ClipData.newPlainText("Código", block.code)
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        cm.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Código copiado!", Toast.LENGTH_SHORT).show()
+                                    }
+                            )
+                            // Botão de tela cheia sem área circular, apenas ícone com espaçamento confortável
+                            Icon(
+                                imageVector = Icons.Default.Fullscreen,
+                                contentDescription = "Tela Cheia",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier
+                                    .size(19.dp)
+                                    .clickable { onToggleFullscreen() }
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remover",
+                                tint = Color.LightGray,
+                                modifier = Modifier
+                                    .size(15.dp)
+                                    .clickable { onDelete() }
+                            )
                         }
                     }
 
@@ -603,13 +637,41 @@ fun VisualBlockItem(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("📐 Equação Matemática", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(onClick = onToggleFullscreen, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Fullscreen, contentDescription = "Tela Cheia", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.Gray, modifier = Modifier.size(14.dp))
-                            }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Copiar fórmula matemática diretamente sem abrir tela cheia
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copiar Fórmula",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable {
+                                        val clip = ClipData.newPlainText("Fórmula", block.formula)
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        cm.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Fórmula copiada!", Toast.LENGTH_SHORT).show()
+                                    }
+                            )
+                            // Botão de tela cheia sem área circular, apenas ícone com espaçamento confortável
+                            Icon(
+                                imageVector = Icons.Default.Fullscreen,
+                                contentDescription = "Tela Cheia",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .size(19.dp)
+                                    .clickable { onToggleFullscreen() }
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remover",
+                                tint = Color.Gray,
+                                modifier = Modifier
+                                    .size(15.dp)
+                                    .clickable { onDelete() }
+                            )
                         }
                     }
 
@@ -734,8 +796,32 @@ fun VisualBlockItem(
                         }
                     }
 
+                    val isMediaValid = remember(block.url) {
+                        block.url.isBlank() || com.example.util.MediaStorageHelper.isMediaFileValid(context, block.url)
+                    }
+
+                    if (!isMediaValid) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.BrokenImage, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Imagem não encontrada ou inacessível", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    Text(block.url.substringAfterLast('/'), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f))
+                                }
+                            }
+                        }
+                    }
+
                     // Side-by-side or Centered image preview
-                    if (block.url.isNotBlank()) {
+                    if (block.url.isNotBlank() && isMediaValid) {
                         val hasSideText = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right")
                         val imageFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
 
@@ -763,6 +849,9 @@ fun VisualBlockItem(
                                         onValueChange = { onUpdate(block.copy(sideText = it)) },
                                         placeholder = { Text("Texto ao lado da imagem...", fontSize = 12.sp) },
                                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                        singleLine = false,
+                                        maxLines = 15,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                                         modifier = Modifier.weight(1f - imageFraction)
                                     )
                                 } else {
@@ -771,6 +860,9 @@ fun VisualBlockItem(
                                         onValueChange = { onUpdate(block.copy(sideText = it)) },
                                         placeholder = { Text("Texto ao lado da imagem...", fontSize = 12.sp) },
                                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                                        singleLine = false,
+                                        maxLines = 15,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                                         modifier = Modifier.weight(1f - imageFraction)
                                     )
                                     Box(modifier = Modifier.weight(imageFraction)) {
@@ -1003,6 +1095,34 @@ private fun AudioBlockPlayer(
         return "%02d:%02d".format(mins, secs)
     }
 
+    val isMediaValid = remember(block.url) {
+        block.url.isBlank() || com.example.util.MediaStorageHelper.isMediaFileValid(context, block.url)
+    }
+
+    if (!isMediaValid && block.url.isNotBlank()) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Áudio não encontrado ou inacessível", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
+                    Text(block.url.substringAfterLast('/'), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f))
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Remover", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+        return
+    }
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
@@ -1202,9 +1322,6 @@ private fun AudioBlockPlayer(
                             localVolume = newVol
                             NoteAudioPlaybackManager.setVolume(newVol)
                         },
-                        onValueChangeFinished = {
-                            onUpdate(block.copy(volume = localVolume))
-                        },
                         valueRange = 0f..1f,
                         modifier = Modifier.weight(1f).height(20.dp),
                         colors = SliderDefaults.colors(
@@ -1357,7 +1474,7 @@ fun ExcelTableEditor(
                         Box(
                             modifier = Modifier
                                 .width(colWidth)
-                                .height(38.dp)
+                                .defaultMinSize(minHeight = 38.dp)
                                 .border(width = 0.5.dp, color = gridBorderColor)
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             contentAlignment = Alignment.CenterStart
@@ -1368,7 +1485,9 @@ fun ExcelTableEditor(
                                     val newHeaders = block.headers.toMutableList().apply { set(colIdx, newH) }
                                     onUpdate(block.copy(headers = newHeaders))
                                 },
-                                singleLine = true,
+                                singleLine = false,
+                                maxLines = 6,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                                 textStyle = MaterialTheme.typography.bodySmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp,
@@ -1403,7 +1522,7 @@ fun ExcelTableEditor(
                             Box(
                                 modifier = Modifier
                                     .width(colWidth)
-                                    .height(38.dp)
+                                    .defaultMinSize(minHeight = 38.dp)
                                     .border(width = 0.5.dp, color = gridBorderColor)
                                     .padding(horizontal = 8.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.CenterStart
@@ -1421,7 +1540,9 @@ fun ExcelTableEditor(
                                         newRows[rowIdx][colIdx] = newCell
                                         onUpdate(block.copy(rows = newRows))
                                     },
-                                    singleLine = true,
+                                    singleLine = false,
+                                    maxLines = 8,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                                     textStyle = MaterialTheme.typography.bodySmall.copy(
                                         fontSize = 12.sp,
                                         color = cellTextColor

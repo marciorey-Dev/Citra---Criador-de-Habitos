@@ -25,6 +25,7 @@ data class MediaTokenInfo(
     val url: String,
     val widthPercent: Int = 100,
     val alignment: String = "center",
+    val sideText: String = "",
     val startOffset: Int = 0,
     val endOffset: Int = 0
 )
@@ -435,23 +436,29 @@ object ObsidianMarkdownEngine {
             )
         }
 
-        // 2. Images: ![alt|size|align](url) or ![align|size](url) or ![alt](url)
+        // 2. Images: ![alt|size|align|side:text](url) or ![align|size](url) or ![alt](url)
         val imgRegex = Regex("(!\\[(?!audio:)(.*?)\\]\\((.*?)\\))")
         imgRegex.findAll(markdown).forEach { match ->
             val raw = match.value
             val meta = match.groupValues[2]
             val url = match.groupValues[3]
-            val parts = meta.split("|").map { it.trim() }
+            val parts = meta.split("|")
 
             var width = 100
             var align = "center"
             var alt = ""
+            var side = ""
 
-            for (part in parts) {
+            for (rawPart in parts) {
+                val part = rawPart.trim()
                 when {
                     part.endsWith("%") -> width = part.removeSuffix("%").toIntOrNull() ?: 100
                     part.toIntOrNull() != null -> width = part.toInt()
                     part.equals("left", ignoreCase = true) || part.equals("right", ignoreCase = true) || part.equals("center", ignoreCase = true) -> align = part.lowercase()
+                    rawPart.startsWith("side:") || part.startsWith("side:") -> {
+                        val rawSide = if (rawPart.startsWith("side:")) rawPart.removePrefix("side:") else part.removePrefix("side:")
+                        side = rawSide.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").replace("&#124;", "|")
+                    }
                     else -> alt = part
                 }
             }
@@ -464,6 +471,7 @@ object ObsidianMarkdownEngine {
                     url = url,
                     widthPercent = width.coerceIn(25, 100),
                     alignment = align,
+                    sideText = side,
                     startOffset = match.range.first,
                     endOffset = match.range.last + 1
                 )

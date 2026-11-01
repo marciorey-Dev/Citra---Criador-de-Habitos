@@ -34,9 +34,18 @@ object NoteAudioPlaybackManager {
     private val _playbackState = MutableStateFlow(NoteAudioState())
     val playbackState: StateFlow<NoteAudioState> = _playbackState.asStateFlow()
 
+    private fun normalizeUrl(url: String): String {
+        return url.trim()
+            .removePrefix("file://")
+            .removeSuffix("/")
+    }
+
     fun isCurrentAudio(blockId: String, url: String): Boolean {
         val s = _playbackState.value
-        return s.playingBlockId == blockId || (s.currentUrl.isNotBlank() && s.currentUrl == url)
+        if (s.playingBlockId == blockId) return true
+        val cleanUrl = normalizeUrl(url)
+        val cleanCurrentUrl = normalizeUrl(s.currentUrl)
+        return cleanCurrentUrl.isNotBlank() && (cleanCurrentUrl == cleanUrl || cleanCurrentUrl.equals(cleanUrl, ignoreCase = true))
     }
 
     fun isPlayingAudio(blockId: String, url: String): Boolean {
@@ -45,7 +54,9 @@ object NoteAudioPlaybackManager {
 
     fun playOrPause(context: Context, blockId: String, url: String, volume: Float, isLoop: Boolean) {
         val currentState = _playbackState.value
-        val isSameAudio = currentState.playingBlockId == blockId || (currentState.currentUrl.isNotBlank() && currentState.currentUrl == url)
+        val cleanUrl = normalizeUrl(url)
+        val cleanCurrentUrl = normalizeUrl(currentState.currentUrl)
+        val isSameAudio = currentState.playingBlockId == blockId || (cleanCurrentUrl.isNotBlank() && (cleanCurrentUrl == cleanUrl || cleanCurrentUrl.equals(cleanUrl, ignoreCase = true)))
 
         // If clicking the same block that is currently playing -> pause it
         if (isSameAudio && currentState.isPlaying) {

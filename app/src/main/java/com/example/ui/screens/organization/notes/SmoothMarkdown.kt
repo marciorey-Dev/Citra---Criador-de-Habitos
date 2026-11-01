@@ -64,11 +64,11 @@ data class ImageBlock(
 ) : VisualBlock
 
 data class AudioBlock(
-    override val id: String = UUID.randomUUID().toString(),
     val title: String = "Áudio Gravado/Importado",
     val url: String = "",
     val volume: Float = 1.0f,
-    val isLoop: Boolean = false
+    val isLoop: Boolean = false,
+    override val id: String = if (url.isNotBlank()) "audio_${url.hashCode()}" else UUID.randomUUID().toString()
 ) : VisualBlock
 
 data class CalloutBlock(
@@ -91,7 +91,7 @@ object SmoothMarkdownConverter {
      * (Hiding raw syntax like ###, |---| etc.)
      */
     fun markdownToBlocks(content: String): List<VisualBlock> {
-        if (content.isBlank()) {
+        if (content.isEmpty()) {
             return listOf(TextBlock(text = ""))
         }
 
@@ -186,17 +186,21 @@ object SmoothMarkdownConverter {
                     val match = Regex("^!\\[(.*?)\\]\\((.*?)\\)$").find(trimmed)
                     if (match != null) {
                         val rawAlt = match.groupValues[1]
-                        val parts = rawAlt.split("|").map { it.trim() }
+                        val parts = rawAlt.split("|")
                         var alt = ""
                         var width = 100
                         var align = "center"
                         var side = ""
-                        for (part in parts) {
+                        for (rawPart in parts) {
+                            val part = rawPart.trim()
                             when {
                                 part.endsWith("%") -> width = part.removeSuffix("%").toIntOrNull() ?: 100
                                 part.toIntOrNull() != null -> width = part.toInt()
                                 part.equals("left", ignoreCase = true) || part.equals("right", ignoreCase = true) || part.equals("center", ignoreCase = true) -> align = part.lowercase()
-                                part.startsWith("side:") -> side = part.removePrefix("side:")
+                                rawPart.startsWith("side:") || part.startsWith("side:") -> {
+                                    val rawSide = if (rawPart.startsWith("side:")) rawPart.removePrefix("side:") else part.removePrefix("side:")
+                                    side = rawSide.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").replace("&#124;", "|")
+                                }
                                 else -> alt = part
                             }
                         }
@@ -296,35 +300,15 @@ object SmoothMarkdownConverter {
                     continue
                 }
 
-                // Normal paragraph / text
+                // Normal paragraph / text (preserves empty lines and text lines faithfully)
                 else -> {
-                    if (trimmed.isNotBlank()) {
-                        blocks.add(TextBlock(text = line))
-                    } else if (i > 0 && lines[i - 1].trim().isBlank() && blocks.isNotEmpty() && blocks.last() !is TextBlock) {
-                        // Only add explicit blank block if multiple empty lines exist intentionally
-                        blocks.add(TextBlock(text = ""))
-                    }
+                    blocks.add(TextBlock(text = line))
                     i++
                 }
             }
         }
 
-        // Clean up redundant consecutive empty text blocks to guarantee no compounding spaces
-        val cleanBlocks = mutableListOf<VisualBlock>()
-        for (b in blocks) {
-            if (b is TextBlock && b.text.isBlank()) {
-                if (cleanBlocks.isNotEmpty() && cleanBlocks.last() is TextBlock && (cleanBlocks.last() as TextBlock).text.isBlank()) {
-                    continue // Skip consecutive empty blocks
-                }
-            }
-            cleanBlocks.add(b)
-        }
-
-        if (cleanBlocks.isEmpty()) {
-            cleanBlocks.add(TextBlock(text = ""))
-        }
-
-        return cleanBlocks
+        return if (blocks.isEmpty()) listOf(TextBlock(text = "")) else blocks
     }
 
     /**
@@ -337,10 +321,10 @@ object SmoothMarkdownConverter {
             when (block) {
                 is HeadingBlock -> {
                     val prefix = "#".repeat(block.level.coerceIn(1, 5))
-                    sb.append("$prefix ${block.text}\n\n")
+                    sb.append("$prefix ${block.text}\n")
                 }
                 is TextBlock -> {
-                    sb.append("${block.text}\n\n")
+                    sb.append("${block.text}\n")
                 }
                 is ChecklistBlock -> {
                     val mark = if (block.isChecked) "x" else " "
@@ -350,51 +334,59 @@ object SmoothMarkdownConverter {
                     sb.append("- ${block.text}\n")
                 }
                 is TableBlock -> {
-                    sb.append("| ${block.headers.joinToString(" | ")} |\n")
+                    val safeHeaders = block.headers.map { it.replace("\n", "<br>").replace("|", "&#124;") }
+                    sb.append("| ${safeHeaders.joinToString(" | ")} |\n")
                     sb.append("| ${block.headers.map { "---" }.joinToString(" | ")} |\n")
                     for (row in block.rows) {
-                        sb.append("| ${row.joinToString(" | ")} |\n")
+                        val safeRow = row.map { it.replace("\n", "<br>").replace("|", "&#124;") }
+                        sb.append("| ${safeRow.joinToString(" | ")} |\n")
                     }
-                    sb.append("\n")
                 }
                 is QuoteBlock -> {
-                    sb.append("> ${block.text}\n\n")
+                    sb.append("> ${block.text}\n")
                 }
                 is CodeBlock -> {
-                    sb.append("```${block.language}\n${block.code}\n```\n\n")
+                    sb.append("```${block.language}\n${block.code}\n```\n")
                 }
                 is MathBlock -> {
-                    sb.append("$$ ${block.formula} $$\n\n")
+                    sb.append("$$ ${block.formula} $$\n")
                 }
                 is DividerBlock -> {
-                    sb.append("---\n\n")
+                    sb.append("---\n")
                 }
                 is ImageBlock -> {
-                    val sidePart = if (block.sideText.isNotBlank()) "|side:${block.sideText}" else ""
-                    sb.append("![${block.alt}|${block.widthPercent}%|${block.alignment}$sidePart](${block.url})\n\n")
+                    val encodedSide = block.sideText.replace("\n", "<br>").replace("|", "&#124;")
+                    val sidePart = if (block.sideText.isNotEmpty()) "|side:$encodedSide" else ""
+                    val altPart = if (block.alt.isNotEmpty()) "${block.alt}|" else ""
+                    sb.append("![$altPart${block.widthPercent}%|${block.alignment}$sidePart](${block.url})\n")
                 }
                 is AudioBlock -> {
                     val volPart = if (block.volume < 0.99f || block.volume > 1.01f) "|vol:${(block.volume * 100).toInt()}" else ""
                     val loopPart = if (block.isLoop) "|loop" else ""
-                    sb.append("![audio:${block.title}$volPart$loopPart](${block.url})\n\n")
+                    sb.append("![audio:${block.title}$volPart$loopPart](${block.url})\n")
                 }
                 is CalloutBlock -> {
-                    sb.append("> [!${block.type.uppercase()}] ${block.text}\n\n")
+                    sb.append("> [!${block.type.uppercase()}] ${block.text}\n")
                 }
                 is ToggleBlock -> {
-                    sb.append("<details><summary>${block.title}</summary>\n${block.content}\n</details>\n\n")
+                    sb.append("<details><summary>${block.title}</summary>\n${block.content}\n</details>\n")
                 }
             }
         }
-        return sb.toString().trimEnd()
+        return sb.toString().removeSuffix("\n")
     }
 
     private fun parseTableLines(lines: List<String>): TableBlock? {
         val nonDelimiterRows = lines.mapNotNull { row ->
-            val cells = row.split("|")
-                .map { it.trim() }
-                .filterIndexed { index, _ -> index > 0 && index < row.split("|").size - 1 }
-            if (cells.all { it.matches(Regex("^-+$")) }) null else cells
+            val rawCells = row.split("|")
+            if (rawCells.size < 2) return@mapNotNull null
+            val cells = rawCells.subList(1, rawCells.size - 1).map { rawCell ->
+                var c = rawCell
+                if (c.startsWith(" ")) c = c.substring(1)
+                if (c.endsWith(" ")) c = c.substring(0, c.length - 1)
+                c.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").replace("&#124;", "|")
+            }
+            if (cells.all { it.trim().matches(Regex("^-+$")) }) null else cells
         }
         if (nonDelimiterRows.isEmpty()) return null
         val headers = nonDelimiterRows.first()

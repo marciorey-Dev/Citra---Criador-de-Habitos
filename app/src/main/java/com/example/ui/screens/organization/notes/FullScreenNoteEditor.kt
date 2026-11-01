@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.data.local.PreferencesManager
 import com.example.data.model.Category
 import com.example.data.model.Habit
 import com.example.data.model.Note
@@ -145,29 +146,25 @@ fun FullScreenNoteEditor(
     var editorValue by remember {
         mutableStateOf(TextFieldValue(initialNote?.content ?: ""))
     }
-    // Saved mode (Live Preview or Modo Leitura)
-    var editorMode by remember { mutableStateOf(initialMode) }
+    val prefsManager = remember { PreferencesManager(context) }
+    // Saved mode (Live Preview or Modo Leitura) - persists across all notes
+    var editorMode by remember {
+        val saved = prefsManager.getLastNoteEditorMode()
+        mutableStateOf(if (saved == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW)
+    }
+
+    fun switchEditorMode(newMode: NoteEditorMode) {
+        editorMode = newMode
+        prefsManager.setLastNoteEditorMode(newMode.name)
+        onModeChanged?.invoke(newMode)
+    }
 
     val bodyFocusRequester = remember { FocusRequester() }
     val isDarkBg = bgUri != null
     val textColor = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    // Auto-center screen to cursor location on selection change / click
-    var lastSelectionOffset by remember { mutableStateOf(-1) }
-    LaunchedEffect(editorValue.selection) {
-        val selStart = editorValue.selection.start
-        if (selStart >= 0 && selStart != lastSelectionOffset && editorValue.text.isNotEmpty()) {
-            lastSelectionOffset = selStart
-            val textLen = editorValue.text.length
-            if (textLen > 0 && noteScrollState.maxValue > 0) {
-                val ratio = selStart.toFloat() / textLen.toFloat()
-                val target = ((ratio * noteScrollState.maxValue) - (noteScrollState.viewportSize / 3)).toInt()
-                    .coerceIn(0, noteScrollState.maxValue)
-                noteScrollState.animateScrollTo(target)
-            }
-        }
-    }
+    // Auto-scroll on typing removed: screen remains stationary while user types.
 
     // Loaded blurred background bitmap cache
     var processedBackgroundBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -213,6 +210,81 @@ fun FullScreenNoteEditor(
             val next = redoStack.removeAt(redoStack.lastIndex)
             undoStack.add(editorValue)
             editorValue = next
+        }
+    }
+
+    LaunchedEffect(initialNote?.id) {
+        if (initialNote != null) {
+            title = initialNote.title
+            category = initialNote.category
+            isPinned = initialNote.isPinned
+            bgUri = initialNote.backgroundImageUri
+            bgBlur = initialNote.backgroundBlur
+            bgBrightness = initialNote.backgroundBrightness
+            editorValue = TextFieldValue(initialNote.content)
+            undoStack.clear()
+            redoStack.clear()
+        }
+    }
+
+    val readingBlocks = remember(editorValue.text) {
+        SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
+    }
+
+    fun findBlockCharOffset(blockIdx: Int): Int {
+        if (readingBlocks.isEmpty() || blockIdx < 0) return 0
+        if (blockIdx >= readingBlocks.size) return editorValue.text.length
+        val targetBlock = readingBlocks[blockIdx]
+        val searchSnippet = when (targetBlock) {
+            is HeadingBlock -> targetBlock.text.trim().take(40)
+            is TextBlock -> targetBlock.text.trim().take(40)
+            is ChecklistBlock -> targetBlock.text.trim().take(40)
+            is BulletBlock -> targetBlock.text.trim().take(40)
+            is QuoteBlock -> targetBlock.text.trim().take(40)
+            is CodeBlock -> targetBlock.code.trim().take(30)
+            is MathBlock -> targetBlock.formula.trim().take(30)
+            is ImageBlock -> targetBlock.url.trim()
+            is AudioBlock -> targetBlock.url.trim()
+            is ToggleBlock -> targetBlock.title.trim()
+            is CalloutBlock -> targetBlock.text.trim().take(30)
+            is TableBlock -> targetBlock.headers.firstOrNull()?.trim() ?: ""
+            else -> ""
+        }
+        if (searchSnippet.isNotEmpty()) {
+            val idx = editorValue.text.indexOf(searchSnippet)
+            if (idx != -1) return idx
+        }
+        val ratio = blockIdx.toFloat() / readingBlocks.size.toFloat()
+        return (ratio * editorValue.text.length).toInt().coerceIn(0, editorValue.text.length)
+    }
+
+    var lastTapTimestamp by remember { mutableLongStateOf(0L) }
+    var tapCounter by remember { mutableIntStateOf(0) }
+
+    fun onReadingAreaTapped(blockIdx: Int, textOffset: Int = -1) {
+        val now = System.currentTimeMillis()
+        if (now - lastTapTimestamp < 500L) {
+            tapCounter++
+        } else {
+            tapCounter = 1
+        }
+        lastTapTimestamp = now
+
+        if (tapCounter >= 3) {
+            tapCounter = 0
+            val baseOffset = findBlockCharOffset(blockIdx)
+            val targetChar = if (textOffset >= 0) {
+                (baseOffset + textOffset).coerceIn(0, editorValue.text.length)
+            } else {
+                baseOffset
+            }
+            editorValue = editorValue.copy(selection = TextRange(targetChar))
+            switchEditorMode(NoteEditorMode.LIVE_PREVIEW)
+            coroutineScope.launch {
+                try {
+                    bodyFocusRequester.requestFocus()
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -269,17 +341,15 @@ fun FullScreenNoteEditor(
                     bgBrightness
                 )
             }
-            coroutineScope.launch {
-                snackbarHostState.showSnackbar("Nota salva com sucesso! ✓")
-            }
         }
     }
 
-    // Auto-save when app is put to background, user switches apps or exits
+    // Auto-save and pause audio when app is put to background, user switches apps or exits
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                NoteAudioPlaybackManager.pause()
                 saveCurrent(close = false)
             }
         }
@@ -296,27 +366,41 @@ fun FullScreenNoteEditor(
 
     // Link navigation handler
     fun handleLinkClick(target: String) {
-        val clean = target.trim()
-        val matchedNote = allNotes.firstOrNull { it.title.equals(clean, ignoreCase = true) }
+        val clean = target.trim().removeSurrounding("[[", "]]").trim()
+        val noteTitle = if (clean.startsWith("note:")) clean.removePrefix("note:").trim() else clean
+
+        // 1. Link interno: salvar e fechar a nota atual, abrir a nota ligada
+        val matchedNote = allNotes.firstOrNull {
+            it.title.equals(noteTitle, ignoreCase = true) ||
+            it.id.toString() == noteTitle ||
+            it.title.equals(clean, ignoreCase = true)
+        } ?: allNotes.firstOrNull { it.title.contains(noteTitle, ignoreCase = true) }
+
         if (matchedNote != null) {
+            saveCurrent(close = false)
             onOpenLinkedNote?.invoke(matchedNote)
             return
         }
-        if (clean.startsWith("http://") || clean.startsWith("https://") || clean.startsWith("www.")) {
+
+        // 2. Link externo: abrir no navegador do Android
+        val isWeb = clean.startsWith("http://", ignoreCase = true) ||
+                clean.startsWith("https://", ignoreCase = true) ||
+                clean.startsWith("www.", ignoreCase = true) ||
+                (clean.contains(".") && !clean.contains(" "))
+
+        if (isWeb) {
             try {
-                val url = if (clean.startsWith("www.")) "https://$clean" else clean
+                val url = if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+                    clean
+                } else {
+                    "https://$clean"
+                }
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 context.startActivity(intent)
                 return
             } catch (_: Exception) {}
-        }
-        coroutineScope.launch {
-            snackbarHostState.showSnackbar(
-                message = "Link '$clean' acionado.",
-                duration = SnackbarDuration.Short
-            )
         }
     }
 
@@ -439,7 +523,8 @@ fun FullScreenNoteEditor(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            bgUri = uri.toString()
+            val permanentBg = MediaStorageHelper.saveNoteBackground(context, uri)
+            bgUri = permanentBg ?: uri.toString()
         }
     }
 
@@ -470,8 +555,9 @@ fun FullScreenNoteEditor(
             try {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
                     val importedText = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val persistedText = MediaStorageHelper.processAndPersistImportedNoteMedia(context, importedText)
                     pushHistory()
-                    editorValue = TextFieldValue(importedText, selection = TextRange(importedText.length))
+                    editorValue = TextFieldValue(persistedText, selection = TextRange(persistedText.length))
                     coroutineScope.launch {
                         snackbarHostState.showSnackbar("Nota Markdown importada com sucesso!")
                     }
@@ -513,8 +599,7 @@ fun FullScreenNoteEditor(
                                 } else {
                                     NoteEditorMode.LIVE_PREVIEW
                                 }
-                                editorMode = newMode
-                                onModeChanged?.invoke(newMode)
+                                switchEditorMode(newMode)
                             }
                         ) {
                             Row(
@@ -869,13 +954,34 @@ fun FullScreenNoteEditor(
                                     onClickFullscreen = { fullscreenImageUrl = token.url },
                                     onChangeWidth = { newWidth ->
                                         pushHistory()
-                                        val newToken = "![${token.alignment}|$newWidth%](${token.url})"
+                                        val sidePart = if (token.sideText.isNotEmpty()) {
+                                            val enc = token.sideText.replace("\n", "<br>").replace("|", "&#124;")
+                                            "|side:$enc"
+                                        } else ""
+                                        val altPrefix = if (token.titleOrAlt.isNotEmpty()) "${token.titleOrAlt}|" else ""
+                                        val newToken = "![$altPrefix${token.alignment}|$newWidth%$sidePart](${token.url})"
                                         val newText = editorValue.text.replace(token.rawMatch, newToken)
                                         editorValue = editorValue.copy(text = newText)
                                     },
                                     onChangeAlign = { newAlign ->
                                         pushHistory()
-                                        val newToken = "![$newAlign|${token.widthPercent}%](${token.url})"
+                                        val sidePart = if (token.sideText.isNotEmpty()) {
+                                            val enc = token.sideText.replace("\n", "<br>").replace("|", "&#124;")
+                                            "|side:$enc"
+                                        } else ""
+                                        val altPrefix = if (token.titleOrAlt.isNotEmpty()) "${token.titleOrAlt}|" else ""
+                                        val newToken = "![$altPrefix$newAlign|${token.widthPercent}%$sidePart](${token.url})"
+                                        val newText = editorValue.text.replace(token.rawMatch, newToken)
+                                        editorValue = editorValue.copy(text = newText)
+                                    },
+                                    onChangeSideText = { newSideText ->
+                                        pushHistory()
+                                        val sidePart = if (newSideText.isNotEmpty()) {
+                                            val enc = newSideText.replace("\n", "<br>").replace("|", "&#124;")
+                                            "|side:$enc"
+                                        } else ""
+                                        val altPrefix = if (token.titleOrAlt.isNotEmpty()) "${token.titleOrAlt}|" else ""
+                                        val newToken = "![$altPrefix${token.alignment}|${token.widthPercent}%$sidePart](${token.url})"
                                         val newText = editorValue.text.replace(token.rawMatch, newToken)
                                         editorValue = editorValue.copy(text = newText)
                                     },
@@ -946,10 +1052,6 @@ fun FullScreenNoteEditor(
                         // 1. Imagem: texto ao lado da imagem, controles de largura/alinhamento e tela cheia
                         // 2. Áudio: player estilo WhatsApp com controle de volume interativo
                         // 3. Bloco de código e matemática: edição e diálogo de tela cheia (com desfazer, refazer, copiar, colar)
-                        val readingBlocks = remember(editorValue.text) {
-                            SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                        }
-
                         fun updateBlocksAndMarkdown(newBlocks: List<VisualBlock>) {
                             pushHistory()
                             val md = SmoothMarkdownConverter.blocksToMarkdown(newBlocks)
@@ -970,7 +1072,14 @@ fun FullScreenNoteEditor(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .defaultMinSize(minHeight = 400.dp),
+                                .defaultMinSize(minHeight = 400.dp)
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onTap = {
+                                            onReadingAreaTapped(readingBlocks.size)
+                                        }
+                                    )
+                                },
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             readingBlocks.forEachIndexed { idx, block ->
@@ -997,44 +1106,64 @@ fun FullScreenNoteEditor(
                                             color = headingColor,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .clickable { centerBlockOnScreen(idx) }
+                                                .pointerInput(block.text) {
+                                                    detectTapGestures(
+                                                        onTap = {
+                                                            onReadingAreaTapped(idx)
+                                                            centerBlockOnScreen(idx)
+                                                        }
+                                                    )
+                                                }
                                                 .padding(vertical = 4.dp)
                                         )
                                     }
 
                                     is TextBlock -> {
-                                        var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-                                        val annotated = remember(block.text, isDarkBg) {
-                                            InlineMarkdownHelper.parseInlineFormatting(block.text, isDark = isDarkBg)
-                                        }
-                                        Text(
-                                            text = annotated,
-                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                color = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface,
-                                                lineHeight = 22.sp
-                                            ),
-                                            onTextLayout = { layoutResult = it },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 2.dp)
-                                                .pointerInput(block.text) {
-                                                    detectTapGestures(
-                                                        onTap = { pos ->
-                                                            val offset = layoutResult?.getOffsetForPosition(pos) ?: -1
-                                                            if (offset != -1) {
-                                                                val links = annotated.getStringAnnotations("LINK", offset, offset)
-                                                                if (links.isNotEmpty()) {
-                                                                    handleLinkClick(links.first().item)
-                                                                } else {
-                                                                    centerBlockOnScreen(idx)
-                                                                }
-                                                            } else {
+                                        if (block.text.isEmpty()) {
+                                            Spacer(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(18.dp)
+                                                    .pointerInput(Unit) {
+                                                        detectTapGestures(
+                                                            onTap = {
+                                                                onReadingAreaTapped(idx)
                                                                 centerBlockOnScreen(idx)
                                                             }
-                                                        }
-                                                    )
-                                                }
-                                        )
+                                                        )
+                                                    }
+                                            )
+                                        } else {
+                                            var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+                                            val annotated = remember(block.text, isDarkBg) {
+                                                InlineMarkdownHelper.parseInlineFormatting(block.text, isDark = isDarkBg)
+                                            }
+                                            Text(
+                                                text = annotated,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    color = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface,
+                                                    lineHeight = 22.sp
+                                                ),
+                                                onTextLayout = { layoutResult = it },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 2.dp)
+                                                    .pointerInput(block.text) {
+                                                        detectTapGestures(
+                                                            onTap = { pos ->
+                                                                val offset = layoutResult?.getOffsetForPosition(pos) ?: -1
+                                                                val links = if (offset != -1) annotated.getStringAnnotations("LINK", offset, offset) else emptyList()
+                                                                if (links.isNotEmpty() && tapCounter == 0) {
+                                                                    handleLinkClick(links.first().item)
+                                                                } else {
+                                                                    onReadingAreaTapped(idx, offset)
+                                                                    centerBlockOnScreen(idx)
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                            )
+                                        }
                                     }
 
                                     is ChecklistBlock -> {
@@ -1268,6 +1397,23 @@ fun FullScreenNoteEditor(
                         }
                     }
                 }
+
+                // Espaço vazio equivalente a 13 parágrafos para facilitar a rolagem até o final
+                // (Não editável, não tem conteúdo, não recebe cursor, não é salvo e não é exportado)
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(550.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = {
+                                    if (editorMode == NoteEditorMode.READING) {
+                                        onReadingAreaTapped(readingBlocks.size)
+                                    }
+                                }
+                            )
+                        }
+                )
             }
 
             // Floating Obsidian Formatting Toolbar (Docked at top/center of screen, auto-hides on scroll down)
@@ -1961,6 +2107,7 @@ private fun ObsidianSideBySideImageWidget(
     onClickFullscreen: () -> Unit,
     onChangeWidth: (Int) -> Unit,
     onChangeAlign: (String) -> Unit,
+    onChangeSideText: (String) -> Unit,
     onDelete: () -> Unit
 ) {
     Surface(
@@ -1999,6 +2146,25 @@ private fun ObsidianSideBySideImageWidget(
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    listOf("left" to "Esq", "center" to "Meio", "right" to "Dir").forEach { (alignKey, label) ->
+                        val isSelected = token.alignment == alignKey
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                            modifier = Modifier.clickable { onChangeAlign(alignKey) }
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 Row(
@@ -2014,28 +2180,85 @@ private fun ObsidianSideBySideImageWidget(
                 }
             }
 
-            // Image display aligned according to width and alignment
-            val fraction = (token.widthPercent / 100f).coerceIn(0.25f, 1f)
-            val alignment = when (token.alignment) {
-                "left" -> Alignment.CenterStart
-                "right" -> Alignment.CenterEnd
-                else -> Alignment.Center
-            }
+            // Image display: side-by-side with text when width < 100% and aligned left or right
+            val hasSideText = token.widthPercent < 100 && (token.alignment == "left" || token.alignment == "right")
+            val fraction = (token.widthPercent / 100f).coerceIn(0.25f, 0.75f)
 
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = alignment
-            ) {
-                AsyncImage(
-                    model = token.url,
-                    contentDescription = token.titleOrAlt,
-                    modifier = Modifier
-                        .fillMaxWidth(fraction)
-                        .heightIn(max = 300.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onClickFullscreen() },
-                    contentScale = ContentScale.Crop
-                )
+            if (hasSideText) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    if (token.alignment == "left") {
+                        Box(modifier = Modifier.weight(fraction)) {
+                            AsyncImage(
+                                model = token.url,
+                                contentDescription = token.titleOrAlt,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onClickFullscreen() },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        OutlinedTextField(
+                            value = token.sideText,
+                            onValueChange = onChangeSideText,
+                            placeholder = { Text("Texto ao lado da imagem...", fontSize = 12.sp) },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                            singleLine = false,
+                            maxLines = 15,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                            modifier = Modifier.weight(1f - fraction)
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = token.sideText,
+                            onValueChange = onChangeSideText,
+                            placeholder = { Text("Texto ao lado da imagem...", fontSize = 12.sp) },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
+                            singleLine = false,
+                            maxLines = 15,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                            modifier = Modifier.weight(1f - fraction)
+                        )
+                        Box(modifier = Modifier.weight(fraction)) {
+                            AsyncImage(
+                                model = token.url,
+                                contentDescription = token.titleOrAlt,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 240.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onClickFullscreen() },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+            } else {
+                val alignment = when (token.alignment) {
+                    "left" -> Alignment.CenterStart
+                    "right" -> Alignment.CenterEnd
+                    else -> Alignment.Center
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = alignment
+                ) {
+                    AsyncImage(
+                        model = token.url,
+                        contentDescription = token.titleOrAlt,
+                        modifier = Modifier
+                            .fillMaxWidth((token.widthPercent / 100f).coerceIn(0.25f, 1f))
+                            .heightIn(max = 300.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onClickFullscreen() },
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
         }
     }
