@@ -18,5 +18,14 @@ data class Note(
     val backgroundBrightness: Float = 0.5f,
     val isDeleted: Boolean = false,
     val deletedAt: Long? = null,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val isShared: Boolean = false,
+    val sharedGroupId: Long? = null,
+    val sharedGroupName: String? = null,
+    val sharedOwnerId: String? = "me",
+    val sharedOwnerName: String? = null,
+    val sharedGroupType: String = "LIBERAL", // "UNILATERAL" or "LIBERAL"
+    val hasUnsyncedChanges: Boolean = false,
+    val syncNotificationPending: Boolean = false,
+    val autoAcceptSync: Boolean = false
 )

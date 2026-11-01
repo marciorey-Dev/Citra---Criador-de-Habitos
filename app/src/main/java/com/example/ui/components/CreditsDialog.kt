@@ -21,6 +21,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.ui.theme.RedAction
 
 @Composable
@@ -42,14 +47,14 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(
+                Image(
+                    painter = painterResource(id = R.drawable.citra_logo),
+                    contentDescription = "Logo Citra",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(64.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "🍊", fontSize = 34.sp)
-                }
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                )
 
                 Spacer(modifier = Modifier.height(14.dp))
 

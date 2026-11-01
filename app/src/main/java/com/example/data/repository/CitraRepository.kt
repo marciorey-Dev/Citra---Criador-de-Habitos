@@ -20,6 +20,9 @@ class CitraRepository(
     private val focusSessionDao = database.focusSessionDao()
     private val categoryDao = database.categoryDao()
     private val achievementDao = database.achievementDao()
+    private val friendDao = database.friendDao()
+    private val groupDao = database.groupDao()
+    private val noteVersionDao = database.noteVersionDao()
     private val preferencesManager = PreferencesManager(context)
 
     // Categories
@@ -466,6 +469,300 @@ Seu companheiro de produtividade, estudos e organização.
                     category = "Estudos",
                     iconEmoji = "📘",
                     associatedDate = todayStr
+                )
+            )
+        }
+    }
+
+    // --- Social / Friends (100% Local) ---
+    val allFriends: Flow<List<Friend>> = friendDao.getAllFriends()
+    val pendingFriendRequests: Flow<List<Friend>> = friendDao.getPendingRequests()
+    val suggestedFriends: Flow<List<Friend>> = friendDao.getSuggestedFriends()
+    val blockedFriends: Flow<List<Friend>> = friendDao.getBlockedFriends()
+    val pendingRequestsCount: Flow<Int> = friendDao.getPendingRequestsCount()
+
+    suspend fun acceptFriendRequest(friend: Friend) {
+        friendDao.updateFriendStatus(friend.id, "FRIEND")
+    }
+
+    suspend fun removeFriendRequest(friend: Friend) {
+        friendDao.deleteFriend(friend)
+    }
+
+    suspend fun blockFriend(friend: Friend) {
+        friendDao.updateFriendStatus(friend.id, "BLOCKED")
+    }
+
+    suspend fun unblockFriend(friend: Friend) {
+        friendDao.updateFriendStatus(friend.id, "FRIEND")
+    }
+
+    suspend fun sendFriendRequest(friend: Friend) {
+        friendDao.updateFriendStatus(friend.id, "PENDING_OUTGOING")
+    }
+
+    suspend fun removeFriend(friend: Friend) {
+        friendDao.deleteFriend(friend)
+    }
+
+    suspend fun addCustomFriend(name: String, username: String): Long {
+        val cleanUser = if (username.startsWith("@")) username else "@$username"
+        return friendDao.insertFriend(
+            Friend(
+                name = name.trim(),
+                username = cleanUser,
+                status = "FRIEND",
+                subtitleTag = "unknown"
+            )
+        )
+    }
+
+    // --- Groups (100% Local) ---
+    val allGroups: Flow<List<CitraGroup>> = groupDao.getAllGroups()
+    val pendingGroupInvites: Flow<List<CitraGroup>> = groupDao.getPendingGroupInvites()
+
+    fun getGroupMembers(groupId: Long): Flow<List<GroupMember>> = groupDao.getMembersForGroup(groupId)
+
+    suspend fun createGroup(
+        name: String,
+        imageUri: String?,
+        groupType: String,
+        invitedFriends: List<Friend>
+    ): Long {
+        val groupId = groupDao.insertGroup(
+            CitraGroup(
+                name = name.trim(),
+                imageUri = imageUri,
+                avatarInitials = name.take(2).uppercase(),
+                ownerId = "me",
+                groupType = groupType,
+                memberCount = 1 + invitedFriends.size,
+                status = "ACTIVE"
+            )
+        )
+        // Add current user as admin
+        groupDao.insertMember(
+            GroupMember(
+                groupId = groupId,
+                friendId = 0L,
+                name = "Você",
+                username = "@viajante",
+                isAdmin = true,
+                status = "ACCEPTED"
+            )
+        )
+        // Add invited members
+        for (friend in invitedFriends) {
+            groupDao.insertMember(
+                GroupMember(
+                    groupId = groupId,
+                    friendId = friend.id,
+                    name = friend.name,
+                    username = friend.username,
+                    avatarUri = friend.avatarUri,
+                    isAdmin = false,
+                    status = "ACCEPTED"
+                )
+            )
+        }
+        return groupId
+    }
+
+    suspend fun deleteGroup(group: CitraGroup) {
+        groupDao.deleteAllMembersForGroup(group.id)
+        groupDao.deleteGroup(group)
+    }
+
+    suspend fun removeGroupMember(groupId: Long, memberId: Long, friendId: Long) {
+        groupDao.removeMember(groupId, friendId, memberId)
+        val group = groupDao.getGroupById(groupId)
+        if (group != null) {
+            groupDao.updateGroup(group.copy(memberCount = (group.memberCount - 1).coerceAtLeast(1)))
+        }
+    }
+
+    suspend fun leaveGroup(groupId: Long) {
+        groupDao.removeMember(groupId, 0L, 0L)
+        val group = groupDao.getGroupById(groupId)
+        if (group != null) {
+            groupDao.updateGroup(group.copy(memberCount = (group.memberCount - 1).coerceAtLeast(1)))
+        }
+    }
+
+    // --- Shared Notes & Version History ---
+    val sharedNotes: Flow<List<Note>> = noteDao.getSharedNotes()
+    val pendingSyncNotes: Flow<List<Note>> = noteDao.getPendingSyncNotes()
+
+    fun getNotesForGroup(groupId: Long): Flow<List<Note>> = noteDao.getNotesForGroup(groupId)
+    fun getVersionsForNote(noteId: Long): Flow<List<NoteVersion>> = noteVersionDao.getVersionsForNote(noteId)
+
+    suspend fun shareNoteWithGroup(note: Note, group: CitraGroup) {
+        val updated = note.copy(
+            isShared = true,
+            sharedGroupId = group.id,
+            sharedGroupName = group.name,
+            sharedOwnerId = "me",
+            sharedOwnerName = "Você",
+            sharedGroupType = group.groupType,
+            hasUnsyncedChanges = false,
+            syncNotificationPending = false,
+            updatedAt = System.currentTimeMillis()
+        )
+        noteDao.updateNote(updated)
+
+        // Save initial version
+        val existingVersions = noteVersionDao.getVersionsForNoteSync(note.id)
+        val nextVersionNum = (existingVersions.maxOfOrNull { it.versionNumber } ?: 0) + 1
+        noteVersionDao.insertVersion(
+            NoteVersion(
+                noteId = note.id,
+                versionNumber = nextVersionNum,
+                title = note.title,
+                content = note.content,
+                authorName = "Você (Compartilhamento inicial)",
+                timestamp = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun unshareNoteFromGroup(note: Note) {
+        noteDao.unshareNote(note.id)
+    }
+
+    suspend fun sendNoteSync(note: Note, newContent: String, authorName: String) {
+        val existingVersions = noteVersionDao.getVersionsForNoteSync(note.id)
+        val nextVersionNum = (existingVersions.maxOfOrNull { it.versionNumber } ?: 0) + 1
+        noteVersionDao.insertVersion(
+            NoteVersion(
+                noteId = note.id,
+                versionNumber = nextVersionNum,
+                title = note.title,
+                content = newContent,
+                authorName = authorName,
+                timestamp = System.currentTimeMillis()
+            )
+        )
+        val updated = note.copy(
+            content = newContent,
+            hasUnsyncedChanges = false,
+            syncNotificationPending = false,
+            updatedAt = System.currentTimeMillis()
+        )
+        noteDao.updateNote(updated)
+    }
+
+    suspend fun acceptNoteSync(note: Note) {
+        val latest = noteVersionDao.getVersionsForNoteSync(note.id).firstOrNull()
+        if (latest != null) {
+            val updated = note.copy(
+                title = latest.title,
+                content = latest.content,
+                syncNotificationPending = false,
+                hasUnsyncedChanges = false,
+                updatedAt = System.currentTimeMillis()
+            )
+            noteDao.updateNote(updated)
+        } else {
+            noteDao.updateNote(note.copy(syncNotificationPending = false))
+        }
+    }
+
+    suspend fun restoreNoteVersion(note: Note, version: NoteVersion) {
+        val updated = note.copy(
+            title = version.title,
+            content = version.content,
+            updatedAt = System.currentTimeMillis()
+        )
+        noteDao.updateNote(updated)
+    }
+
+    suspend fun createLocalCopyOfVersion(version: NoteVersion): Long {
+        return noteDao.insertNote(
+            Note(
+                title = "${version.title} (Cópia Local)",
+                content = version.content,
+                category = "Geral",
+                isShared = false,
+                sharedGroupId = null,
+                sharedGroupName = null,
+                sharedOwnerId = null,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    // Seeding mockups data
+    suspend fun seedInitialSocialDataIfNeeded() {
+        if (friendDao.countAll() == 0) {
+            // Seed Friends from Image 1
+            friendDao.insertFriends(
+                listOf(
+                    Friend(name = "EiK", username = "@eik", subtitleTag = "unknown"),
+                    Friend(name = "Kenny do Usuário", username = "@kenny", subtitleTag = "unknown"),
+                    Friend(name = "Steven do Usuário", username = "@steven", subtitleTag = "unknown"),
+                    Friend(name = "Náme do Usuário", username = "@name", subtitleTag = "unknown"),
+                    Friend(name = "Júlia do Usuário", username = "@julia", subtitleTag = "unknown"),
+                    Friend(name = "Arthur do Usuário", username = "@arthur", subtitleTag = "unknown")
+                )
+            )
+
+            // Seed Requests from Image 3
+            friendDao.insertFriends(
+                listOf(
+                    Friend(name = "Kevin", username = "@kevin", status = "PENDING_INCOMING", subtitleTag = "<Enviado via GDD>"),
+                    Friend(name = "Hetan", username = "@hetan", status = "PENDING_INCOMING", subtitleTag = "<Sugerido por Citra>"),
+                    Friend(name = "Brooklyn", username = "@brooklyn", status = "PENDING_INCOMING", subtitleTag = "<Vibe Code>")
+                )
+            )
+
+            // Seed Suggestions from Image 3
+            friendDao.insertFriends(
+                listOf(
+                    Friend(name = "Joseph", username = "@joseph", status = "SUGGESTION", subtitleTag = "<Prism.js>"),
+                    Friend(name = "Félix", username = "@felix", status = "SUGGESTION", subtitleTag = "<Markdown>"),
+                    Friend(name = "Kaleb", username = "@kaleb", status = "SUGGESTION", subtitleTag = "unknown"),
+                    Friend(name = "Jenny", username = "@jenny", status = "SUGGESTION", subtitleTag = "unknown"),
+                    Friend(name = "Simon", username = "@simon", status = "SUGGESTION", subtitleTag = "unknown"),
+                    Friend(name = "John", username = "@john", status = "SUGGESTION", subtitleTag = "unknown")
+                )
+            )
+        }
+
+        if (groupDao.countAll() == 0) {
+            // Seed Groups from Image 2
+            val g1 = groupDao.insertGroup(CitraGroup(name = "Faculdade", groupType = "LIBERAL", memberCount = 4, avatarInitials = "FA"))
+            val g2 = groupDao.insertGroup(CitraGroup(name = "Igreja", groupType = "UNILATERAL", memberCount = 8, avatarInitials = "IG"))
+            val g3 = groupDao.insertGroup(CitraGroup(name = "BB", groupType = "LIBERAL", memberCount = 2, avatarInitials = "BB"))
+            val g4 = groupDao.insertGroup(CitraGroup(name = "Gravenhil", groupType = "UNILATERAL", memberCount = 5, avatarInitials = "GR"))
+            val g5 = groupDao.insertGroup(CitraGroup(name = "No Way Home", groupType = "LIBERAL", memberCount = 6, avatarInitials = "NW"))
+
+            // Seed sample shared note in Faculdade group
+            val noteId = noteDao.insertNote(
+                Note(
+                    title = "Anotações de Grupo - Faculdade",
+                    content = """# Grupo Faculdade 🎓
+Material e tarefas compartilhadas para o semestre.
+
+### Tarefas da Semana:
+- [ ] Ler capítulo 4 de Sistemas Distribuídos
+- [ ] Revisar anotações de aula
+- [x] Enviar relatório do laboratório""",
+                    category = "Estudos",
+                    isShared = true,
+                    sharedGroupId = g1,
+                    sharedGroupName = "Faculdade",
+                    sharedOwnerId = "me",
+                    sharedOwnerName = "Você",
+                    sharedGroupType = "LIBERAL"
+                )
+            )
+            noteVersionDao.insertVersion(
+                NoteVersion(
+                    noteId = noteId,
+                    versionNumber = 1,
+                    title = "Anotações de Grupo - Faculdade",
+                    content = "# Grupo Faculdade 🎓\nMaterial e tarefas compartilhadas para o semestre.",
+                    authorName = "Você"
                 )
             )
         }

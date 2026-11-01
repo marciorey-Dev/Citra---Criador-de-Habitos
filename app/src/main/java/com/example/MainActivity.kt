@@ -42,6 +42,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
 import com.example.data.auth.AuthRepository
@@ -128,6 +129,7 @@ class MainActivity : ComponentActivity() {
             val lastSyncTimestamp by viewModel.lastSyncTimestamp.collectAsState()
 
             val activeAlarm by ActiveAlarmManager.activeAlarm.collectAsState()
+            val hasSocialNotifications by viewModel.hasSocialNotifications.collectAsState()
 
             LaunchedEffect(Unit) {
                 ActiveAlarmManager.checkAndRestore(this@MainActivity)
@@ -324,61 +326,113 @@ class MainActivity : ComponentActivity() {
                     topBar = {
                         if (!isNoteEditorOpen) {
                             TopAppBar(
-                            title = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    // App title ONLY on Início screen per user request; other tabs remove title to save space
+                                navigationIcon = {
                                     if (screens[pagerState.currentPage] == Screen.Home) {
-                                        Text(
-                                            text = "🍊 Citra",
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 20.sp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                                        Spacer(modifier = Modifier.width(48.dp))
                                     }
-
-                                    // Floating Top Mini-timer counter when timer is active outside the Timer tab
+                                },
+                                title = {
                                     val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
-                                    if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
-                                        val mins = pomodoroState.remainingSeconds / 60
-                                        val secs = pomodoroState.remainingSeconds % 60
-                                        val formatted = String.format("%02d:%02d", mins, secs)
-
-                                        Surface(
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                            modifier = Modifier
-                                                .clickable {
-                                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
-                                                }
-                                                .testTag("top_floating_timer_pill")
+                                    if (screens[pagerState.currentPage] == Screen.Home) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            contentAlignment = Alignment.Center
                                         ) {
                                             Row(
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
                                             ) {
-                                                Text(text = "🍊", fontSize = 12.sp)
-                                                Spacer(modifier = Modifier.width(4.dp))
                                                 Text(
-                                                    text = formatted,
-                                                    fontSize = 12.sp,
+                                                    text = "🍊 Citra",
                                                     fontWeight = FontWeight.ExtraBold,
-                                                    color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    fontSize = 20.sp,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    textAlign = TextAlign.Center
                                                 )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Icon(
-                                                    imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(14.dp),
-                                                    tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                                if (isTimerActive) {
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    val mins = pomodoroState.remainingSeconds / 60
+                                                    val secs = pomodoroState.remainingSeconds % 60
+                                                    val formatted = String.format("%02d:%02d", mins, secs)
+
+                                                    Surface(
+                                                        shape = RoundedCornerShape(16.dp),
+                                                        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                                        modifier = Modifier
+                                                            .clickable {
+                                                                coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                                            }
+                                                            .testTag("top_floating_timer_pill")
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(text = "🍊", fontSize = 12.sp)
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text(
+                                                                text = formatted,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Icon(
+                                                                imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(14.dp),
+                                                                tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Floating Top Mini-timer counter when timer is active outside the Timer tab
+                                            if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
+                                                val mins = pomodoroState.remainingSeconds / 60
+                                                val secs = pomodoroState.remainingSeconds % 60
+                                                val formatted = String.format("%02d:%02d", mins, secs)
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(16.dp),
+                                                    color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                                    modifier = Modifier
+                                                        .clickable {
+                                                            coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                                        }
+                                                        .testTag("top_floating_timer_pill")
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(text = "🍊", fontSize = 12.sp)
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text(
+                                                            text = formatted,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Icon(
+                                                            imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(14.dp),
+                                                            tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-                                }
-                            },
+                                },
                             actions = {
                                 // Settings and QR buttons ONLY on "Eu" screen (page 4) per request
                                 if (pagerState.currentPage == 4) {
@@ -553,10 +607,21 @@ class MainActivity : ComponentActivity() {
                                 val selected = pagerState.currentPage == index
                                 NavigationBarItem(
                                     icon = {
-                                        Icon(
-                                            imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
-                                            contentDescription = screen.title
-                                        )
+                                        BadgedBox(
+                                            badge = {
+                                                if (screen == Screen.Profile && hasSocialNotifications) {
+                                                    Badge(
+                                                        containerColor = Color(0xFFE53935),
+                                                        modifier = Modifier.size(8.dp)
+                                                    )
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                                contentDescription = screen.title
+                                            )
+                                        }
                                     },
                                     label = {
                                         Text(
@@ -607,7 +672,10 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onQuickAddNote = {
                                     viewModel.triggerCreateNote()
-                                    coroutineScope.launch { pagerState.animateScrollToPage(3) }
+                                    val notesPageIndex = screens.indexOf(Screen.Notes)
+                                    if (notesPageIndex >= 0) {
+                                        coroutineScope.launch { pagerState.animateScrollToPage(notesPageIndex) }
+                                    }
                                 }
                             )
                             Screen.Timer -> TimerScreen(
@@ -855,9 +923,12 @@ fun CitraLoadingScreen(loadingText: String = "Carregando...") {
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Image(
-                        painter = painterResource(id = R.drawable.app_icon_fg),
+                        painter = painterResource(id = R.drawable.citra_logo),
                         contentDescription = "Citra Logo",
-                        modifier = Modifier.size(68.dp)
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(96.dp)
+                            .clip(CircleShape)
                     )
                 }
             }

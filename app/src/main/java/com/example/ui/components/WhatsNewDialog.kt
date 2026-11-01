@@ -23,6 +23,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.Image
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.ui.theme.GreenAccent
 
 @Composable
@@ -52,26 +57,26 @@ fun WhatsNewDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Header Icon
-                Box(
+                Image(
+                    painter = painterResource(id = R.drawable.citra_logo),
+                    contentDescription = "Logo Citra",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(56.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "🚀", fontSize = 28.sp)
-                }
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Citra Versão 0.7.10",
+                    text = "Citra Versão 0.10.3",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 Text(
-                    text = "Exportação .docx, Fidelidade Cromática de Tema, HTML Avançado & Salvamento Fluido",
+                    text = "Novo Design de Ícone com Bordas Arredondadas, Sons Aprimorados & Barra Flutuante",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

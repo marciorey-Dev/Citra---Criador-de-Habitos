@@ -48,6 +48,18 @@ interface NoteDao {
     @Query("DELETE FROM notes WHERE isDeleted = 1 AND deletedAt < :cutoffTimestamp")
     suspend fun cleanOldTrash(cutoffTimestamp: Long)
 
+    @Query("SELECT * FROM notes WHERE isDeleted = 0 AND isShared = 1 ORDER BY isPinned DESC, updatedAt DESC")
+    fun getSharedNotes(): Flow<List<Note>>
+
+    @Query("SELECT * FROM notes WHERE isDeleted = 0 AND sharedGroupId = :groupId ORDER BY isPinned DESC, updatedAt DESC")
+    fun getNotesForGroup(groupId: Long): Flow<List<Note>>
+
+    @Query("SELECT * FROM notes WHERE isDeleted = 0 AND syncNotificationPending = 1")
+    fun getPendingSyncNotes(): Flow<List<Note>>
+
+    @Query("UPDATE notes SET isShared = 0, sharedGroupId = NULL, sharedGroupName = NULL, sharedOwnerId = NULL, hasUnsyncedChanges = 0, syncNotificationPending = 0 WHERE id = :id")
+    suspend fun unshareNote(id: Long)
+
     @Query("SELECT * FROM notes WHERE isDeleted = 0")
     suspend fun getAllNotesSync(): List<Note>
 

@@ -18,29 +18,30 @@ object SoundEffectsManager {
     private var previewPlayer: MediaPlayer? = null
     private var activeAlarmPlayer: MediaPlayer? = null
 
-    const val DEFAULT_TASK_SOUND_ID = "sound_tarefa_concluida_default"
-    const val DEFAULT_HABIT_SOUND_ID = "sound_checkin_habito_default"
+    const val DEFAULT_TASK_SOUND_ID = "sound_analog_warm_2"
+    const val DEFAULT_HABIT_SOUND_ID = "sound_analog_warm_4"
     const val DEFAULT_ACHIEVEMENT_SOUND_ID = "sound_conquistas_default"
-    const val DEFAULT_POMODORO_SOUND_ID = "sound_deep_warm_1"
+    const val DEFAULT_POMODORO_SOUND_ID = "sound_upbeat_4"
     const val DEFAULT_NOTIFICATION_SOUND_ID = "sound_light_chime_1"
 
     val allSounds = listOf(
-        SoundItem("sound_tarefa_concluida_default", "Digital Satisfatório (Padrão Tarefa)", R.raw.sound_tarefa_concluida_default, "tarefa"),
-        SoundItem("sound_checkin_habito_default", "Digital Suave (Padrão Hábito)", R.raw.sound_checkin_habito_default, "habito"),
+        SoundItem("sound_analog_warm_2", "Analógico Suave 2 (Padrão Tarefa)", R.raw.sound_analog_warm_2, "tarefa"),
+        SoundItem("sound_analog_warm_4", "Analógico Suave 4 (Padrão Hábito)", R.raw.sound_analog_warm_4, "habito"),
+        SoundItem("sound_upbeat_4", "Recompensa Animada 4 (Padrão Pomodoro)", R.raw.sound_upbeat_4, "pomodoro"),
         SoundItem("sound_conquistas_default", "Brilho Festivo (Padrão Conquistas)", R.raw.sound_conquistas_default, "conquistas"),
-        SoundItem("sound_deep_warm_1", "Ressonante Profundo 1 (Padrão Pomodoro)", R.raw.sound_deep_warm_1, "pomodoro"),
         SoundItem("sound_light_chime_1", "Sino Leve e Arejado 1 (Padrão Alertas)", R.raw.sound_light_chime_1, "alerta"),
 
+        SoundItem("sound_tarefa_concluida_default", "Digital Satisfatório", R.raw.sound_tarefa_concluida_default),
+        SoundItem("sound_checkin_habito_default", "Digital Suave", R.raw.sound_checkin_habito_default),
         SoundItem("sound_fundo_dyven_clade", "Música de Fundo Citra (Dyven Clade)", R.raw.sound_fundo_dyven_clade, "fundo"),
         SoundItem("sound_analog_warm_1", "Analógico Suave 1", R.raw.sound_analog_warm_1),
-        SoundItem("sound_analog_warm_2", "Analógico Suave 2", R.raw.sound_analog_warm_2),
         SoundItem("sound_analog_warm_3", "Analógico Suave 3", R.raw.sound_analog_warm_3),
-        SoundItem("sound_analog_warm_4", "Analógico Suave 4", R.raw.sound_analog_warm_4),
 
         SoundItem("sound_celebration_1", "Celebração Radiante 1", R.raw.sound_celebration_1),
         SoundItem("sound_celebration_2", "Celebração Radiante 2", R.raw.sound_celebration_2),
         SoundItem("sound_celebration_3", "Celebração Radiante 3", R.raw.sound_celebration_3),
 
+        SoundItem("sound_deep_warm_1", "Ressonante Profundo 1", R.raw.sound_deep_warm_1),
         SoundItem("sound_deep_warm_2", "Ressonante Profundo 2", R.raw.sound_deep_warm_2),
         SoundItem("sound_deep_warm_3", "Ressonante Profundo 3", R.raw.sound_deep_warm_3),
         SoundItem("sound_deep_warm_4", "Ressonante Profundo 4", R.raw.sound_deep_warm_4),
@@ -51,8 +52,7 @@ object SoundEffectsManager {
 
         SoundItem("sound_upbeat_1", "Recompensa Animada 1", R.raw.sound_upbeat_1),
         SoundItem("sound_upbeat_2", "Recompensa Animada 2", R.raw.sound_upbeat_2),
-        SoundItem("sound_upbeat_3", "Recompensa Animada 3", R.raw.sound_upbeat_3),
-        SoundItem("sound_upbeat_4", "Recompensa Animada 4", R.raw.sound_upbeat_4)
+        SoundItem("sound_upbeat_3", "Recompensa Animada 3", R.raw.sound_upbeat_3)
     )
 
     fun getSoundById(id: String): SoundItem {

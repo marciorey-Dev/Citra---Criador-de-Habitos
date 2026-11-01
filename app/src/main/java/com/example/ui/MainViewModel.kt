@@ -145,6 +145,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val unlockedAchievementsCount: StateFlow<Int> = repository.unlockedAchievementsCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    // Social Flows (100% Local)
+    val allFriends: StateFlow<List<Friend>> = repository.allFriends
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingFriendRequests: StateFlow<List<Friend>> = repository.pendingFriendRequests
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val suggestedFriends: StateFlow<List<Friend>> = repository.suggestedFriends
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val blockedFriends: StateFlow<List<Friend>> = repository.blockedFriends
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingRequestsCount: StateFlow<Int> = repository.pendingRequestsCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val allGroups: StateFlow<List<CitraGroup>> = repository.allGroups
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingGroupInvites: StateFlow<List<CitraGroup>> = repository.pendingGroupInvites
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val sharedNotes: StateFlow<List<Note>> = repository.sharedNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingSyncNotes: StateFlow<List<Note>> = repository.pendingSyncNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Discrete red dot indicator on "Eu" navigation icon when there are new requests, invites, or shared notes updates
+    val hasSocialNotifications: StateFlow<Boolean> = combine(
+        pendingRequestsCount,
+        pendingGroupInvites,
+        pendingSyncNotes
+    ) { reqCount, invites, syncNotes ->
+        reqCount > 0 || invites.isNotEmpty() || syncNotes.isNotEmpty()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     // Flexible Pomodoro State
     private val _pomodoroState = MutableStateFlow(FlexiblePomodoroState())
     val pomodoroState: StateFlow<FlexiblePomodoroState> = _pomodoroState.asStateFlow()
@@ -177,7 +214,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerCreateNote() {
-        _organizationSubTab.value = 2
         _openCreateNoteTrigger.value = true
     }
 
@@ -224,6 +260,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             repository.seedInitialDataIfNeeded()
+            repository.seedInitialSocialDataIfNeeded()
         }
     }
 
@@ -1066,6 +1103,135 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 _userMessage.emit("Erro ao importar anotações.")
             }
+        }
+    }
+
+    // --- Social / Friends & Groups Operations (100% Local) ---
+    fun acceptFriendRequest(friend: Friend) {
+        viewModelScope.launch {
+            repository.acceptFriendRequest(friend)
+            _userMessage.emit("Pedido de amizade de ${friend.name} aceito!")
+        }
+    }
+
+    fun removeFriendRequest(friend: Friend) {
+        viewModelScope.launch {
+            repository.removeFriendRequest(friend)
+            _userMessage.emit("Pedido de amizade removido.")
+        }
+    }
+
+    fun blockFriend(friend: Friend) {
+        viewModelScope.launch {
+            repository.blockFriend(friend)
+            _userMessage.emit("${friend.name} foi bloqueado(a).")
+        }
+    }
+
+    fun unblockFriend(friend: Friend) {
+        viewModelScope.launch {
+            repository.unblockFriend(friend)
+            _userMessage.emit("${friend.name} foi desbloqueado(a).")
+        }
+    }
+
+    fun sendFriendRequest(friend: Friend) {
+        viewModelScope.launch {
+            repository.sendFriendRequest(friend)
+            _userMessage.emit("Pedido de amizade enviado para ${friend.name}!")
+        }
+    }
+
+    fun removeFriend(friend: Friend) {
+        viewModelScope.launch {
+            repository.removeFriend(friend)
+            _userMessage.emit("${friend.name} foi removido(a) dos amigos.")
+        }
+    }
+
+    fun addCustomFriend(name: String, username: String) {
+        viewModelScope.launch {
+            repository.addCustomFriend(name, username)
+            _userMessage.emit("Amigo '$name' adicionado com sucesso!")
+        }
+    }
+
+    fun createGroup(
+        name: String,
+        imageUri: String?,
+        groupType: String,
+        invitedFriends: List<Friend>
+    ) {
+        viewModelScope.launch {
+            repository.createGroup(name, imageUri, groupType, invitedFriends)
+            _userMessage.emit("Grupo '$name' criado com sucesso!")
+        }
+    }
+
+    fun deleteGroup(group: CitraGroup) {
+        viewModelScope.launch {
+            repository.deleteGroup(group)
+            _userMessage.emit("Grupo '${group.name}' excluído.")
+        }
+    }
+
+    fun removeGroupMember(groupId: Long, memberId: Long, friendId: Long) {
+        viewModelScope.launch {
+            repository.removeGroupMember(groupId, memberId, friendId)
+            _userMessage.emit("Membro removido do grupo.")
+        }
+    }
+
+    fun leaveGroup(groupId: Long) {
+        viewModelScope.launch {
+            repository.leaveGroup(groupId)
+            _userMessage.emit("Você saiu do grupo.")
+        }
+    }
+
+    fun getGroupMembers(groupId: Long): Flow<List<GroupMember>> = repository.getGroupMembers(groupId)
+    fun getNotesForGroup(groupId: Long): Flow<List<Note>> = repository.getNotesForGroup(groupId)
+    fun getVersionsForNote(noteId: Long): Flow<List<NoteVersion>> = repository.getVersionsForNote(noteId)
+
+    fun shareNoteWithGroup(note: Note, group: CitraGroup) {
+        viewModelScope.launch {
+            repository.shareNoteWithGroup(note, group)
+            _userMessage.emit("Nota compartilhada com o grupo '${group.name}'!")
+        }
+    }
+
+    fun unshareNoteFromGroup(note: Note) {
+        viewModelScope.launch {
+            repository.unshareNoteFromGroup(note)
+            _userMessage.emit("Nota removida do grupo e sincronização encerrada.")
+        }
+    }
+
+    fun sendNoteSync(note: Note, newContent: String, authorName: String) {
+        viewModelScope.launch {
+            repository.sendNoteSync(note, newContent, authorName)
+            _userMessage.emit("Alterações sincronizadas e enviadas ao grupo!")
+        }
+    }
+
+    fun acceptNoteSync(note: Note) {
+        viewModelScope.launch {
+            repository.acceptNoteSync(note)
+            _userMessage.emit("Versão sincronizada aceita!")
+        }
+    }
+
+    fun restoreNoteVersion(note: Note, version: NoteVersion) {
+        viewModelScope.launch {
+            repository.restoreNoteVersion(note, version)
+            _userMessage.emit("Versão #${version.versionNumber} restaurada!")
+        }
+    }
+
+    fun createLocalCopyOfVersion(version: NoteVersion) {
+        viewModelScope.launch {
+            val newId = repository.createLocalCopyOfVersion(version)
+            _userMessage.emit("Cópia local criada com sucesso (não compartilhada)!")
         }
     }
 

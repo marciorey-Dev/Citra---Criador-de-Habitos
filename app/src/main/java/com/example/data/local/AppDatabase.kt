@@ -13,9 +13,13 @@ import com.example.data.model.*
         Note::class,
         FocusSession::class,
         Category::class,
-        Achievement::class
+        Achievement::class,
+        Friend::class,
+        CitraGroup::class,
+        GroupMember::class,
+        NoteVersion::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,6 +29,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun focusSessionDao(): FocusSessionDao
     abstract fun categoryDao(): CategoryDao
     abstract fun achievementDao(): AchievementDao
+    abstract fun friendDao(): FriendDao
+    abstract fun groupDao(): GroupDao
+    abstract fun noteVersionDao(): NoteVersionDao
 
     companion object {
         @Volatile
