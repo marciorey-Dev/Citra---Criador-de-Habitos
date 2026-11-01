@@ -10,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.OffsetMapping
@@ -75,8 +78,11 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.local.PreferencesManager
 import com.example.data.model.Category
+import com.example.data.model.CitraGroup
+import com.example.data.model.Friend
 import com.example.data.model.Habit
 import com.example.data.model.Note
+import com.example.data.model.NoteVersion
 import com.example.data.model.Task
 import com.example.ui.FlexiblePomodoroState
 import com.example.ui.theme.GreenAccent
@@ -118,7 +124,18 @@ fun FullScreenNoteEditor(
     initialMode: NoteEditorMode = NoteEditorMode.LIVE_PREVIEW,
     onModeChanged: ((NoteEditorMode) -> Unit)? = null,
     onToggleChecklistTaskSync: ((checklistText: String, isChecked: Boolean) -> Unit)? = null,
-    onConvertChecklistToDirectTask: ((title: String, category: String, priority: String, dueDate: String) -> Unit)? = null
+    onConvertChecklistToDirectTask: ((title: String, category: String, priority: String, dueDate: String) -> Unit)? = null,
+    groups: List<CitraGroup> = emptyList(),
+    friends: List<Friend> = emptyList(),
+    onShareWithGroup: ((group: CitraGroup) -> Unit)? = null,
+    onCreateGroupAndShare: ((name: String, groupType: String, friends: List<Friend>) -> Unit)? = null,
+    onSendSync: ((newContent: String) -> Unit)? = null,
+    onAcceptSync: (() -> Unit)? = null,
+    onToggleAutoAcceptSync: ((Boolean) -> Unit)? = null,
+    onUnshareNote: (() -> Unit)? = null,
+    noteVersions: List<NoteVersion> = emptyList(),
+    onRestoreVersion: ((NoteVersion) -> Unit)? = null,
+    onCreateLocalCopy: ((NoteVersion) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -589,6 +606,18 @@ fun FullScreenNoteEditor(
     var showFindReplaceDialog by remember { mutableStateOf(false) }
     var showLinkToEntityDialog by remember { mutableStateOf(false) }
     var showBgSettingsSheet by remember { mutableStateOf(false) }
+    var showShareDialog by remember { mutableStateOf(false) }
+    var showVersionHistoryDialog by remember { mutableStateOf(false) }
+    var autoAcceptSync by remember { mutableStateOf(initialNote?.autoAcceptSync ?: false) }
+    val isUnilateralMemberOnly = remember(initialNote) {
+        initialNote?.isShared == true && initialNote.sharedGroupType == "UNILATERAL" && initialNote.sharedOwnerId != "me"
+    }
+
+    LaunchedEffect(isUnilateralMemberOnly) {
+        if (isUnilateralMemberOnly) {
+            editorMode = NoteEditorMode.READING
+        }
+    }
     var showAdvancedToolbar by remember { mutableStateOf(false) }
     var checklistItemToConvert by remember { mutableStateOf<String?>(null) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
@@ -663,12 +692,18 @@ fun FullScreenNoteEditor(
                             shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                             modifier = Modifier.clickable {
-                                val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
-                                    NoteEditorMode.READING
+                                if (isUnilateralMemberOnly) {
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Nota compartilhada em grupo unilateral: modo leitura protegido para membros.")
+                                    }
                                 } else {
-                                    NoteEditorMode.LIVE_PREVIEW
+                                    val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
+                                        NoteEditorMode.READING
+                                    } else {
+                                        NoteEditorMode.LIVE_PREVIEW
+                                    }
+                                    switchEditorMode(newMode)
                                 }
-                                switchEditorMode(newMode)
                             }
                         ) {
                             Row(
@@ -730,6 +765,49 @@ fun FullScreenNoteEditor(
                         )
                     }
 
+                    if (initialNote?.isShared == true) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E88E5).copy(alpha = 0.15f),
+                            modifier = Modifier
+                                .clickable { showShareDialog = true }
+                                .padding(end = 4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Public, contentDescription = "Compartilhada", tint = Color(0xFF1E88E5), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = initialNote.sharedGroupName ?: "Grupo",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E88E5)
+                                )
+                            }
+                        }
+
+                        // Enviar button: Sincronização per user requirement
+                        if (!isUnilateralMemberOnly) {
+                            IconButton(
+                                onClick = {
+                                    saveCurrent(close = false)
+                                    onSendSync?.invoke(editorValue.text)
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("Alterações enviadas e sincronizadas com o grupo!")
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Send,
+                                    contentDescription = "Enviar Sincronização",
+                                    tint = Color(0xFF1E88E5)
+                                )
+                            }
+                        }
+                    }
+
                     Box {
                         IconButton(onClick = { showMenu = true }) {
                             Icon(
@@ -766,6 +844,54 @@ fun FullScreenNoteEditor(
                                     }
                                 }
                             )
+
+                            HorizontalDivider()
+
+                            // Compartilhar (ícone de globo azul) per user requirement
+                            DropdownMenuItem(
+                                text = { Text("Compartilhar...", color = Color(0xFF1E88E5), fontWeight = FontWeight.Bold) },
+                                leadingIcon = { Icon(Icons.Default.Public, contentDescription = null, tint = Color(0xFF1E88E5)) },
+                                onClick = {
+                                    showMenu = false
+                                    showShareDialog = true
+                                }
+                            )
+
+                            if (initialNote?.isShared == true) {
+                                DropdownMenuItem(
+                                    text = { Text("Histórico de Versões") },
+                                    leadingIcon = { Icon(Icons.Default.History, contentDescription = null, tint = primaryColor) },
+                                    onClick = {
+                                        showMenu = false
+                                        showVersionHistoryDialog = true
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = { Text(if (autoAcceptSync) "Recebimento Auto: Ativado" else "Recebimento Auto: Manual") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (autoAcceptSync) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                                            contentDescription = null,
+                                            tint = if (autoAcceptSync) GreenAccent else Color.Gray
+                                        )
+                                    },
+                                    onClick = {
+                                        autoAcceptSync = !autoAcceptSync
+                                        onToggleAutoAcceptSync?.invoke(autoAcceptSync)
+                                        showMenu = false
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = { Text("Remover do Grupo (Manter Cópia)", color = RedAction) },
+                                    leadingIcon = { Icon(Icons.Default.LinkOff, contentDescription = null, tint = RedAction) },
+                                    onClick = {
+                                        showMenu = false
+                                        onUnshareNote?.invoke()
+                                    }
+                                )
+                            }
 
                             HorizontalDivider()
 
@@ -902,15 +1028,49 @@ fun FullScreenNoteEditor(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
+                // 0. Unilateral Group member mode banner
+                if (isUnilateralMemberOnly) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E88E5).copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, Color(0xFF1E88E5).copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFF1E88E5),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Modo Leitura (Grupo Unilateral): Você pode interagir com checklists e mídias, mas a edição de texto é reservada ao criador.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF1565C0),
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
                 // 1. Note Title Input
                 OutlinedTextField(
                     value = title,
+                    readOnly = isUnilateralMemberOnly,
                     onValueChange = { input ->
-                        if (input.contains("\n")) {
-                            title = input.replace("\n", "")
-                            try { bodyFocusRequester.requestFocus() } catch (_: Exception) {}
-                        } else {
-                            title = input
+                        if (!isUnilateralMemberOnly) {
+                            if (input.contains("\n")) {
+                                title = input.replace("\n", "")
+                                try { bodyFocusRequester.requestFocus() } catch (_: Exception) {}
+                            } else {
+                                title = input
+                            }
                         }
                     },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
@@ -1086,8 +1246,11 @@ fun FullScreenNoteEditor(
                         // OBSIDIAN LIVE PREVIEW: Unified Continuous Text with active line syntax reveal & rich styling
                         BasicTextField(
                             value = editorValue,
+                            readOnly = isUnilateralMemberOnly,
                             onValueChange = { newVal ->
-                                editorValue = newVal
+                                if (!isUnilateralMemberOnly) {
+                                    editorValue = newVal
+                                }
                             },
                             textStyle = MaterialTheme.typography.bodyLarge.copy(
                                 color = textColor,
@@ -2103,6 +2266,435 @@ fun FullScreenNoteEditor(
             }
         }
     }
+
+    // Dialog for sharing note with existing or new group
+    if (showShareDialog) {
+        ShareNoteDialog(
+            groups = groups,
+            friends = friends,
+            onDismiss = { showShareDialog = false },
+            onShareWithGroup = { group ->
+                showShareDialog = false
+                onShareWithGroup?.invoke(group)
+            },
+            onCreateGroupAndShare = { groupName, groupType, invitedFriends ->
+                showShareDialog = false
+                onCreateGroupAndShare?.invoke(groupName, groupType, invitedFriends)
+            }
+        )
+    }
+
+    // Dialog for version history (Restore or Create local unshared copy)
+    if (showVersionHistoryDialog) {
+        VersionHistoryDialog(
+            versions = noteVersions,
+            onDismiss = { showVersionHistoryDialog = false },
+            onRestore = { version ->
+                showVersionHistoryDialog = false
+                pushHistory()
+                title = version.title
+                editorValue = TextFieldValue(version.content)
+                onRestoreVersion?.invoke(version)
+            },
+            onCreateLocalCopy = { version ->
+                showVersionHistoryDialog = false
+                onCreateLocalCopy?.invoke(version)
+            }
+        )
+    }
+}
+
+@Composable
+private fun ShareNoteDialog(
+    groups: List<CitraGroup>,
+    friends: List<Friend>,
+    onDismiss: () -> Unit,
+    onShareWithGroup: (CitraGroup) -> Unit,
+    onCreateGroupAndShare: (name: String, type: String, friends: List<Friend>) -> Unit
+) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var newGroupName by remember { mutableStateOf("") }
+    var newGroupType by remember { mutableStateOf("LIBERAL") }
+    val selectedFriends = remember { mutableStateListOf<Friend>() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Public,
+                    contentDescription = null,
+                    tint = Color(0xFF1E88E5),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Compartilhar Nota",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { selectedTab = 0 },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selectedTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent
+                    ) {
+                        Text(
+                            text = "Grupo Existente",
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (selectedTab == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { selectedTab = 1 },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selectedTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent
+                    ) {
+                        Text(
+                            text = "Criar Novo Grupo",
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (selectedTab == 1) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (selectedTab == 0) {
+                    if (groups.isEmpty()) {
+                        Text(
+                            text = "Nenhum grupo encontrado. Mude para a aba 'Criar Novo Grupo' acima para iniciar um grupo!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "Toque em um grupo para vincular:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            groups.forEach { group ->
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onShareWithGroup(group) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = group.name.take(2).uppercase(),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = group.name,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = if (group.groupType == "UNILATERAL") "Unilateral (Modo Leitura)" else "Liberal (Live Preview)",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF1E88E5)
+                                            )
+                                        }
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = newGroupName,
+                        onValueChange = { newGroupName = it },
+                        label = { Text("Nome do Grupo") },
+                        placeholder = { Text("Ex: Faculdade, Igreja, Projeto...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Text(
+                        text = "Tipo de Grupo:",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { newGroupType = "LIBERAL" },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (newGroupType == "LIBERAL") Color(0xFF1E88E5).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(if (newGroupType == "LIBERAL") 1.5.dp else 1.dp, if (newGroupType == "LIBERAL") Color(0xFF1E88E5) else Color.Transparent)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = newGroupType == "LIBERAL",
+                                onClick = { newGroupType = "LIBERAL" }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("Liberal", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Todos editam em Live Preview.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { newGroupType = "UNILATERAL" },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (newGroupType == "UNILATERAL") Color(0xFF1E88E5).copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        border = BorderStroke(if (newGroupType == "UNILATERAL") 1.5.dp else 1.dp, if (newGroupType == "UNILATERAL") Color(0xFF1E88E5) else Color.Transparent)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = newGroupType == "UNILATERAL",
+                                onClick = { newGroupType = "UNILATERAL" }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text("Unilateral", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Membros enviam notas que ficam em modo leitura.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Convidar Amigos (devem aceitar para entrar):",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+
+                    val activeFriends = friends.filter { it.status == "FRIEND" || it.status == "ACCEPTED" }
+                    if (activeFriends.isEmpty()) {
+                        Text(
+                            "Nenhum amigo ativo. Você pode criar o grupo agora e adicionar amigos depois.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            activeFriends.forEach { friend ->
+                                val isChecked = selectedFriends.contains(friend)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (isChecked) selectedFriends.remove(friend)
+                                            else selectedFriends.add(friend)
+                                        }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            if (checked) selectedFriends.add(friend)
+                                            else selectedFriends.remove(friend)
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(friend.name, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (selectedTab == 1) {
+                Button(
+                    onClick = {
+                        if (newGroupName.isNotBlank()) {
+                            onCreateGroupAndShare(newGroupName.trim(), newGroupType, selectedFriends.toList())
+                        }
+                    },
+                    enabled = newGroupName.isNotBlank(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Criar e Compartilhar")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
+}
+
+@Composable
+private fun VersionHistoryDialog(
+    versions: List<NoteVersion>,
+    onDismiss: () -> Unit,
+    onRestore: (NoteVersion) -> Unit,
+    onCreateLocalCopy: (NoteVersion) -> Unit
+) {
+    val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Histórico de Versões", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            if (versions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Nenhuma versão anterior registrada para esta nota.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(versions.sortedByDescending { it.versionNumber }) { v ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Versão #${v.versionNumber}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = dateFormat.format(Date(v.timestamp)),
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    text = "Por: ${v.authorName}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = v.content.take(120).replace("\n", " ") + if (v.content.length > 120) "..." else "",
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { onCreateLocalCopy(v) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Criar cópia local", fontSize = 11.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { onRestore(v) },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Restaurar", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Fechar")
+            }
+        }
+    )
 }
 
 /**

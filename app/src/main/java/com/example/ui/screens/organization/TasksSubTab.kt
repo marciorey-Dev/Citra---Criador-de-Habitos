@@ -54,63 +54,64 @@ fun TasksSubTab(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Filter Pills
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = filterMode == "PENDING",
-                    onClick = { filterMode = "PENDING" },
-                    label = { Text("Pendentes (${tasks.count { !it.isCompleted }})") }
-                )
-                FilterChip(
-                    selected = filterMode == "ALL",
-                    onClick = { filterMode = "ALL" },
-                    label = { Text("Todas (${tasks.size})") }
-                )
-                FilterChip(
-                    selected = filterMode == "COMPLETED",
-                    onClick = { filterMode = "COMPLETED" },
-                    label = { Text("Concluídas (${tasks.count { it.isCompleted }})") }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (filteredTasks.isEmpty()) {
-                Box(
+            // Filter Pills (Scrolls with the content)
+            item {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .padding(bottom = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (filterMode == "COMPLETED") "Nenhuma tarefa concluída ainda." else "Tudo em dia! Nenhuma tarefa pendente.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Toque no '+' para criação rápida de tarefas.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.outline
-                        )
+                    FilterChip(
+                        selected = filterMode == "PENDING",
+                        onClick = { filterMode = "PENDING" },
+                        label = { Text("Pendentes (${tasks.count { !it.isCompleted }})") }
+                    )
+                    FilterChip(
+                        selected = filterMode == "ALL",
+                        onClick = { filterMode = "ALL" },
+                        label = { Text("Todas (${tasks.size})") }
+                    )
+                    FilterChip(
+                        selected = filterMode == "COMPLETED",
+                        onClick = { filterMode = "COMPLETED" },
+                        label = { Text("Concluídas (${tasks.count { it.isCompleted }})") }
+                    )
+                }
+            }
+
+            if (filteredTasks.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = if (filterMode == "COMPLETED") "Nenhuma tarefa concluída ainda." else "Tudo em dia! Nenhuma tarefa pendente.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Toque no '+' para criação rápida de tarefas.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
                     }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    items(filteredTasks, key = { it.id }) { task ->
+                items(filteredTasks, key = { it.id }) { task ->
                         TaskItemCard(
                             task = task,
                             onToggle = { viewModel.toggleTask(task) },
@@ -121,7 +122,6 @@ fun TasksSubTab(
                     }
                 }
             }
-        }
 
         // Floating Action Button
         FloatingActionButton(

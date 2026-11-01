@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
@@ -87,11 +88,22 @@ fun NotesSubTab(
         }
     }
 
+    val noteToOpen by viewModel.noteToOpen.collectAsState()
+
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
         if (openCreateTrigger) {
             isCreatingNew = true
             viewModel.resetCreateNoteTrigger()
+        }
+    }
+
+    // Respond to notification / social click to open specific note
+    LaunchedEffect(noteToOpen) {
+        noteToOpen?.let { note ->
+            activeNoteToEdit = note
+            isCreatingNew = false
+            viewModel.clearNoteToOpen()
         }
     }
 
@@ -141,6 +153,13 @@ fun NotesSubTab(
 
     val allTasks by viewModel.tasks.collectAsState()
     val allHabits by viewModel.habits.collectAsState()
+    val allGroups by viewModel.allGroups.collectAsState()
+    val allFriends by viewModel.allFriends.collectAsState()
+    val currentNoteVersions by if (activeNoteToEdit != null) {
+        viewModel.getVersionsForNote(activeNoteToEdit!!.id).collectAsState(initial = emptyList())
+    } else {
+        remember { mutableStateOf<List<com.example.data.model.NoteVersion>>(emptyList()) }
+    }
 
     // Full screen note editor overlay when editing or creating
     if (isEditingNote) {
@@ -153,6 +172,75 @@ fun NotesSubTab(
             habits = allHabits,
             pomodoroState = pomodoroState,
             onNavigateToTimer = null,
+            groups = allGroups,
+            friends = allFriends,
+            onShareWithGroup = { group ->
+                activeNoteToEdit?.let { note ->
+                    viewModel.shareNoteWithGroup(note, group)
+                    activeNoteToEdit = note.copy(
+                        isShared = true,
+                        sharedGroupId = group.id,
+                        sharedGroupName = group.name,
+                        sharedGroupType = group.groupType
+                    )
+                }
+            },
+            onCreateGroupAndShare = { groupName, groupType, invitedFriends ->
+                activeNoteToEdit?.let { note ->
+                    viewModel.createGroup(groupName, null, groupType, invitedFriends)
+                    val dummyGroup = com.example.data.model.CitraGroup(
+                        name = groupName,
+                        groupType = groupType,
+                        imageUri = null,
+                        ownerId = "me"
+                    )
+                    viewModel.shareNoteWithGroup(note, dummyGroup)
+                    activeNoteToEdit = note.copy(
+                        isShared = true,
+                        sharedGroupName = groupName,
+                        sharedGroupType = groupType
+                    )
+                }
+            },
+            onSendSync = { newContent ->
+                activeNoteToEdit?.let { note ->
+                    viewModel.sendNoteSync(note, newContent, "Você")
+                }
+            },
+            onAcceptSync = {
+                activeNoteToEdit?.let { note ->
+                    viewModel.acceptNoteSync(note)
+                }
+            },
+            onToggleAutoAcceptSync = { enabled ->
+                activeNoteToEdit?.let { note ->
+                    viewModel.toggleAutoAcceptSync(note, enabled)
+                    activeNoteToEdit = note.copy(autoAcceptSync = enabled)
+                }
+            },
+            onUnshareNote = {
+                activeNoteToEdit?.let { note ->
+                    viewModel.unshareNoteFromGroup(note)
+                    activeNoteToEdit = note.copy(
+                        isShared = false,
+                        sharedGroupId = null,
+                        sharedGroupName = null
+                    )
+                }
+            },
+            noteVersions = currentNoteVersions,
+            onRestoreVersion = { version ->
+                activeNoteToEdit?.let { note ->
+                    viewModel.restoreNoteVersion(note, version)
+                    activeNoteToEdit = note.copy(
+                        title = version.title,
+                        content = version.content
+                    )
+                }
+            },
+            onCreateLocalCopy = { version ->
+                viewModel.createLocalCopyOfVersion(version)
+            },
             onClose = {
                 isCreatingNew = false
                 activeNoteToEdit = null
@@ -251,11 +339,11 @@ fun NotesSubTab(
         return
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    val topBarHeaderItem = @Composable {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
         ) {
             // Search Bar + Trash Shortcut
             Row(
@@ -450,118 +538,150 @@ fun NotesSubTab(
                     }
                 }
             }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(8.dp))
+    val emptyNotesItem = @Composable {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 40.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.NoteAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = if (searchQuery.isNotEmpty()) "Nenhuma anotação nesta busca." else "Nenhuma anotação nesta categoria.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Toque no '+' para criar sua primeira nota com Markdown Suave.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+        }
+    }
 
-            if (sortedNotes.isEmpty()) {
-                Box(
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (currentLayout) {
+            NoteLayoutMode.GRID_2 -> {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .fillMaxSize()
+                        .testTag("notes_grid")
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.NoteAlt,
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = if (searchQuery.isNotEmpty()) "Nenhuma anotação nesta busca." else "Nenhuma anotação nesta categoria.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Toque no '+' para criar sua primeira nota com Markdown Suave.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.outline
-                        )
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        topBarHeaderItem()
+                    }
+                    if (sortedNotes.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            emptyNotesItem()
+                        }
+                    } else {
+                        items(sortedNotes, key = { it.id }) { note ->
+                            SquareNoteCard(
+                                note = note,
+                                onClick = { activeNoteToEdit = note },
+                                onTogglePin = { viewModel.togglePinNote(note) },
+                                onDelete = { noteToDelete = note }
+                            )
+                        }
                     }
                 }
-            } else {
-                when (currentLayout) {
-                    NoteLayoutMode.GRID_2 -> {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(2),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(bottom = 88.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .testTag("notes_grid")
-                        ) {
-                            items(sortedNotes, key = { it.id }) { note ->
-                                SquareNoteCard(
-                                    note = note,
-                                    onClick = { activeNoteToEdit = note },
-                                    onTogglePin = { viewModel.togglePinNote(note) },
-                                    onDelete = { noteToDelete = note }
-                                )
-                            }
+            }
+            NoteLayoutMode.GRID_3 -> {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("notes_grid_small")
+                ) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        topBarHeaderItem()
+                    }
+                    if (sortedNotes.isEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            emptyNotesItem()
+                        }
+                    } else {
+                        items(sortedNotes, key = { it.id }) { note ->
+                            SmallSquareNoteCard(
+                                note = note,
+                                onClick = { activeNoteToEdit = note },
+                                onTogglePin = { viewModel.togglePinNote(note) },
+                                onDelete = { noteToDelete = note }
+                            )
                         }
                     }
-                    NoteLayoutMode.GRID_3 -> {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(bottom = 88.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .testTag("notes_grid_small")
-                        ) {
-                            items(sortedNotes, key = { it.id }) { note ->
-                                SmallSquareNoteCard(
-                                    note = note,
-                                    onClick = { activeNoteToEdit = note },
-                                    onTogglePin = { viewModel.togglePinNote(note) },
-                                    onDelete = { noteToDelete = note }
-                                )
-                            }
+                }
+            }
+            NoteLayoutMode.DETAILS -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("notes_details_list")
+                ) {
+                    item {
+                        topBarHeaderItem()
+                    }
+                    if (sortedNotes.isEmpty()) {
+                        item {
+                            emptyNotesItem()
+                        }
+                    } else {
+                        items(sortedNotes, key = { it.id }) { note ->
+                            DetailNoteCard(
+                                note = note,
+                                onClick = { activeNoteToEdit = note },
+                                onTogglePin = { viewModel.togglePinNote(note) },
+                                onDelete = { noteToDelete = note }
+                            )
                         }
                     }
-                    NoteLayoutMode.DETAILS -> {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(bottom = 88.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .testTag("notes_details_list")
-                        ) {
-                            items(sortedNotes, key = { it.id }) { note ->
-                                DetailNoteCard(
-                                    note = note,
-                                    onClick = { activeNoteToEdit = note },
-                                    onTogglePin = { viewModel.togglePinNote(note) },
-                                    onDelete = { noteToDelete = note }
-                                )
-                            }
-                        }
+                }
+            }
+            NoteLayoutMode.LIST -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("notes_simple_list")
+                ) {
+                    item {
+                        topBarHeaderItem()
                     }
-                    NoteLayoutMode.LIST -> {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            contentPadding = PaddingValues(bottom = 88.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .testTag("notes_simple_list")
-                        ) {
-                            items(sortedNotes, key = { it.id }) { note ->
-                                ListNoteCard(
-                                    note = note,
-                                    onClick = { activeNoteToEdit = note },
-                                    onTogglePin = { viewModel.togglePinNote(note) },
-                                    onDelete = { noteToDelete = note }
-                                )
-                            }
+                    if (sortedNotes.isEmpty()) {
+                        item {
+                            emptyNotesItem()
+                        }
+                    } else {
+                        items(sortedNotes, key = { it.id }) { note ->
+                            ListNoteCard(
+                                note = note,
+                                onClick = { activeNoteToEdit = note },
+                                onTogglePin = { viewModel.togglePinNote(note) },
+                                onDelete = { noteToDelete = note }
+                            )
                         }
                     }
                 }
@@ -686,35 +806,70 @@ fun SquareNoteCard(
                 .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top row: Minimalist Category tag + Pin / Menu button
+            // Top row: Minimalist Category tag + Blue globe badge + Pin / Menu button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Label,
-                            contentDescription = null,
-                            tint = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = note.category,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Label,
+                                contentDescription = null,
+                                tint = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = note.category,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (note.isShared) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF1E88E5).copy(alpha = 0.15f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Public,
+                                    contentDescription = "Nota Compartilhada em Grupo",
+                                    tint = Color(0xFF1E88E5),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                if (!note.sharedGroupName.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = note.sharedGroupName,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E88E5),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -868,17 +1023,28 @@ fun SmallSquareNoteCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                ) {
-                    Text(
-                        text = note.category.take(6),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    ) {
+                        Text(
+                            text = note.category.take(6),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+
+                    if (note.isShared) {
+                        Icon(
+                            imageVector = Icons.Default.Public,
+                            contentDescription = "Nota Compartilhada em Grupo",
+                            tint = Color(0xFF1E88E5),
+                            modifier = Modifier.size(11.dp)
+                        )
+                    }
                 }
 
                 if (note.isPinned) {
@@ -973,17 +1139,50 @@ fun DetailNoteCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Text(
-                        text = note.category,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (note.isPinned) categoryColor.copy(alpha = 0.16f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    ) {
+                        Text(
+                            text = note.category,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    if (note.isShared) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF1E88E5).copy(alpha = 0.15f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Public,
+                                    contentDescription = "Nota Compartilhada em Grupo",
+                                    tint = Color(0xFF1E88E5),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                if (!note.sharedGroupName.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = note.sharedGroupName,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E88E5)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1091,7 +1290,17 @@ fun ListNoteCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
+                if (note.isShared) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.Public,
+                        contentDescription = "Nota Compartilhada em Grupo",
+                        tint = Color(0xFF1E88E5),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Text(
                     text = note.title,

@@ -434,6 +434,66 @@ fun SocialView(
             }
         } else {
             // --- GRUPOS LIST (Mockup 2) ---
+            if (pendingGroupInvites.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF1E88E5).copy(alpha = 0.08f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E88E5).copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Mail, contentDescription = null, tint = Color(0xFF1E88E5), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Convites de Grupos Pendentes (${pendingGroupInvites.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Color(0xFF1E88E5)
+                            )
+                        }
+                        pendingGroupInvites.forEach { inviteGroup ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(inviteGroup.name.take(2).uppercase(), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(inviteGroup.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text(
+                                        if (inviteGroup.groupType == "UNILATERAL") "Unilateral (Modo Leitura)" else "Liberal (Live Preview)",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = Color(0xFFC75B5B),
+                                        modifier = Modifier.clickable { viewModel.declineGroupInvite(inviteGroup) }
+                                    ) {
+                                        Text("Recusar", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp))
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { viewModel.acceptGroupInvite(inviteGroup) }
+                                    ) {
+                                        Text("Aceitar", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (filteredGroups.isEmpty()) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
@@ -667,7 +727,7 @@ fun SocialView(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 6.dp),
-                                horizontalAlignment = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
@@ -682,6 +742,100 @@ fun SocialView(
                                 }
                             }
                             Spacer(modifier = Modifier.height(10.dp))
+                        }
+
+                        // SECTION 0: CONVITES DE GRUPO
+                        if (pendingGroupInvites.isNotEmpty()) {
+                            item {
+                                Text(
+                                    text = "Convites de Grupos",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E88E5),
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+
+                            items(pendingGroupInvites) { group ->
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = Color(0xFF1E88E5).copy(alpha = 0.08f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E88E5).copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 5.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            modifier = Modifier.size(46.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = group.name.take(2).uppercase(),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 15.sp,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.width(10.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = group.name,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (group.groupType == "UNILATERAL") "Unilateral (Modo Leitura)" else "Liberal (Live Preview)",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF1E88E5)
+                                            )
+                                        }
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = Color(0xFFC75B5B),
+                                                modifier = Modifier.clickable { viewModel.declineGroupInvite(group) }
+                                            ) {
+                                                Text(
+                                                    text = "Recusar",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 6.dp)
+                                                )
+                                            }
+
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.clickable { viewModel.acceptGroupInvite(group) }
+                                            ) {
+                                                Text(
+                                                    text = "Aceitar",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
                         }
 
                         // SECTION 1: PEDIDOS DE AMIZADE (Mockup 3)
@@ -899,8 +1053,15 @@ fun SocialView(
     // --- DIALOG: CRIAR NOVO GRUPO ---
     if (showCreateGroupDialog) {
         var groupName by remember { mutableStateOf("") }
+        var groupImageUri by remember { mutableStateOf<String?>(null) }
         var selectedType by remember { mutableStateOf("LIBERAL") } // "UNILATERAL" or "LIBERAL"
         val selectedFriends = remember { mutableStateListOf<Friend>() }
+
+        val groupPhotoPicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.PickVisualMedia()
+        ) { uri ->
+            groupImageUri = uri?.toString()
+        }
 
         AlertDialog(
             onDismissRequest = { showCreateGroupDialog = false },
@@ -916,6 +1077,46 @@ fun SocialView(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Group Image Avatar Picker
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clickable {
+                                    groupPhotoPicker.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (!groupImageUri.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = groupImageUri,
+                                        contentDescription = "Foto do Grupo",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Default.AddAPhoto,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Text("Foto", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = groupName,
                         onValueChange = { groupName = it },
@@ -1012,7 +1213,7 @@ fun SocialView(
                         if (groupName.isNotBlank()) {
                             viewModel.createGroup(
                                 name = groupName,
-                                imageUri = null,
+                                imageUri = groupImageUri,
                                 groupType = selectedType,
                                 invitedFriends = selectedFriends.toList()
                             )

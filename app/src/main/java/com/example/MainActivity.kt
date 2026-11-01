@@ -697,7 +697,13 @@ class MainActivity : ComponentActivity() {
                                 viewModel = viewModel,
                                 authRepository = authRepository,
                                 onOpenSettings = { showSettingsDialog = true },
-                                onOpenAuthGate = { showAuthDialog = true }
+                                onOpenAuthGate = { showAuthDialog = true },
+                                onNavigateToNotes = {
+                                    val notesIndex = screens.indexOf(Screen.Notes)
+                                    if (notesIndex >= 0) {
+                                        coroutineScope.launch { pagerState.animateScrollToPage(notesIndex) }
+                                    }
+                                }
                             )
                             Screen.Calendar -> CalendarScreen(
                                 viewModel = viewModel,

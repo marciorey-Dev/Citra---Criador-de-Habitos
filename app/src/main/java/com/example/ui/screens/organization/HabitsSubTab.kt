@@ -45,87 +45,85 @@ fun HabitsSubTab(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Clean Header
-            val totalStreak = habits.sumOf { it.currentStreak }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Seus Hábitos",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
+            // Clean Header (Scrolls with the content)
+            item {
+                val totalStreak = habits.sumOf { it.currentStreak }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Text(
+                        text = "Seus Hábitos",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
                     ) {
-                        Text(text = "🔥", fontSize = 14.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "$totalStreak dias de sequência",
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontSize = 12.sp
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "🔥", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "$totalStreak dias de sequência",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-
             if (habits.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Nenhum hábito cadastrado.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Toque no '+' para definir um hábito com horário fixo.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.outline
-                        )
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Nenhum hábito cadastrado.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Toque no '+' para definir um hábito com horário fixo.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
                     }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
-                    items(habits, key = { it.id }) { habit ->
-                        val isDoneToday = habit.completedDatesCsv.split(",")
-                            .any { it.trim() == todayStr }
+                items(habits, key = { it.id }) { habit ->
+                    val isDoneToday = habit.completedDatesCsv.split(",")
+                        .any { it.trim() == todayStr }
 
-                        HabitItemCard(
-                            habit = habit,
-                            isDoneToday = isDoneToday,
-                            onToggleToday = { viewModel.toggleHabitToday(habit) },
-                            onEdit = { habitToEdit = habit },
-                            onDelete = { habitToDelete = habit }
-                        )
-                    }
+                    HabitItemCard(
+                        habit = habit,
+                        isDoneToday = isDoneToday,
+                        onToggleToday = { viewModel.toggleHabitToday(habit) },
+                        onEdit = { habitToEdit = habit },
+                        onDelete = { habitToDelete = habit }
+                    )
                 }
             }
         }

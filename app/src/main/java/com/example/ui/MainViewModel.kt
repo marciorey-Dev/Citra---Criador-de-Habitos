@@ -252,6 +252,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _isNoteEditorOpen.value = open
     }
 
+    private val _noteToOpen = MutableStateFlow<Note?>(null)
+    val noteToOpen: StateFlow<Note?> = _noteToOpen.asStateFlow()
+
+    fun openNote(note: Note) {
+        _noteToOpen.value = note
+    }
+
+    fun clearNoteToOpen() {
+        _noteToOpen.value = null
+    }
+
     init {
         NotificationHelper.initNotificationChannels(application)
         restoreTimerSnapshotOnStartup()
@@ -1168,6 +1179,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun acceptGroupInvite(group: CitraGroup) {
+        viewModelScope.launch {
+            repository.acceptGroupInvite(group)
+            _userMessage.emit("Você entrou no grupo '${group.name}'!")
+        }
+    }
+
+    fun declineGroupInvite(group: CitraGroup) {
+        viewModelScope.launch {
+            repository.declineGroupInvite(group)
+            _userMessage.emit("Convite do grupo '${group.name}' recusado.")
+        }
+    }
+
     fun deleteGroup(group: CitraGroup) {
         viewModelScope.launch {
             repository.deleteGroup(group)
@@ -1232,6 +1257,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val newId = repository.createLocalCopyOfVersion(version)
             _userMessage.emit("Cópia local criada com sucesso (não compartilhada)!")
+        }
+    }
+
+    fun toggleAutoAcceptSync(note: Note, enabled: Boolean) {
+        viewModelScope.launch {
+            repository.updateNote(note.copy(autoAcceptSync = enabled))
+            _userMessage.emit(if (enabled) "Recebimento automático ativado." else "Recebimento automático desativado.")
         }
     }
 

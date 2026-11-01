@@ -568,6 +568,14 @@ Seu companheiro de produtividade, estudos e organização.
         return groupId
     }
 
+    suspend fun acceptGroupInvite(group: CitraGroup) {
+        groupDao.updateGroup(group.copy(status = "ACTIVE"))
+    }
+
+    suspend fun declineGroupInvite(group: CitraGroup) {
+        groupDao.deleteGroup(group)
+    }
+
     suspend fun deleteGroup(group: CitraGroup) {
         groupDao.deleteAllMembersForGroup(group.id)
         groupDao.deleteGroup(group)
