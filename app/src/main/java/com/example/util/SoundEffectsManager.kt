@@ -178,6 +178,15 @@ object SoundEffectsManager {
         activeAlarmPlayer = null
     }
 
+    @Synchronized
+    fun isAlarmPlaying(): Boolean {
+        return try {
+            activeAlarmPlayer?.isPlaying == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /**
      * Plays sound preview in settings dialog, stopping previous preview if running.
      */

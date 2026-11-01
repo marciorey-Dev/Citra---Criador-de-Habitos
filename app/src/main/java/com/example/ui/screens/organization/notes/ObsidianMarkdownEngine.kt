@@ -303,7 +303,45 @@ object ObsidianMarkdownEngine {
             )
         }
 
-        // 8. Audio or Image token
+        // 8. LaTeX Display Math ($$...$$)
+        Regex("\\$\\$(.*?)\\$\\$").findAll(chunk).forEach { match ->
+            val s = start + match.range.first
+            val e = start + match.range.last + 1
+            val mathBg = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFFEF3C7)
+            val mathFg = if (isDarkBg) Color(0xFFFDE68A) else Color(0xFF78350F)
+            builder.addStyle(
+                SpanStyle(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontStyle = FontStyle.Italic,
+                    background = mathBg,
+                    color = mathFg
+                ),
+                s,
+                e
+            )
+        }
+
+        // 9. LaTeX Inline Math ($...$)
+        Regex("(?<!\\$)\\$(?!\\$)([^\\$\\n]+?)(?<!\\$)\\$(?!\\$)").findAll(chunk).forEach { match ->
+            val s = start + match.range.first
+            val e = start + match.range.last + 1
+            val mathBg = if (isDarkBg) Color(0xFF334155).copy(alpha = 0.5f) else Color(0xFFF1F5F9)
+            val mathFg = if (isDarkBg) Color(0xFF93C5FD) else Color(0xFF0F172A)
+            builder.addStyle(
+                SpanStyle(
+                    fontFamily = FontFamily.Serif,
+                    fontStyle = FontStyle.Italic,
+                    fontWeight = FontWeight.SemiBold,
+                    background = mathBg,
+                    color = mathFg
+                ),
+                s,
+                e
+            )
+        }
+
+        // 10. Audio or Image token
         Regex("(!?\\[(audio:)?(.*?)\\]\\(.*?\\))").findAll(chunk).forEach { match ->
             val s = start + match.range.first
             val e = start + match.range.last + 1

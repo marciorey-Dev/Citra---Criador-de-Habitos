@@ -58,10 +58,13 @@ import com.example.ui.screens.organization.OrganizationScreen
 import com.example.ui.screens.organization.QuickAddTaskDialog
 import com.example.ui.screens.profile.ProfileScreen
 import com.example.ui.screens.settings.SettingsDialog
+import com.example.util.QrCodeGenerator
 import com.example.ui.screens.timer.TimerScreen
 import com.example.ui.theme.CitraTheme
 import com.example.util.AmbientBreakMusicManager
-import com.example.util.QrCodeGenerator
+import com.example.notifications.ActiveAlarmData
+import com.example.notifications.ActiveAlarmManager
+import com.example.ui.screens.alarm.AlarmScreen
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -69,10 +72,41 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val authRepository by lazy { AuthRepository(this) }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        checkAlarmIntent(intent)
+    }
+
+    private fun checkAlarmIntent(intent: android.content.Intent?) {
+        ActiveAlarmManager.checkAndRestore(this)
+        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_LOOP_ALARM, false) == true) {
+            val id = intent.getIntExtra(NotificationHelper.EXTRA_ID, -1)
+            val type = intent.getStringExtra(NotificationHelper.EXTRA_TYPE) ?: NotificationHelper.TYPE_TASK
+            val title = intent.getStringExtra(NotificationHelper.EXTRA_TITLE) ?: "Citra"
+            val taskId = intent.getLongExtra(NotificationHelper.EXTRA_TASK_ID, -1L)
+            val habitId = intent.getLongExtra(NotificationHelper.EXTRA_HABIT_ID, -1L)
+            val soundUri = intent.getStringExtra(NotificationHelper.EXTRA_SOUND_URI) ?: ""
+            ActiveAlarmManager.onAlarmTriggered(
+                this,
+                ActiveAlarmData(
+                    notificationId = id,
+                    type = type,
+                    title = title,
+                    taskId = taskId,
+                    habitId = habitId,
+                    soundUri = soundUri,
+                    loopAlarm = true
+                )
+            )
+        }
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        checkAlarmIntent(intent)
 
         setContent {
             val isDarkThemeSetting by viewModel.isDarkTheme.collectAsState()
@@ -90,6 +124,12 @@ class MainActivity : ComponentActivity() {
             val isAuthReady by authRepository.isAuthReady.collectAsState()
             val syncFrequency by viewModel.syncFrequency.collectAsState()
             val lastSyncTimestamp by viewModel.lastSyncTimestamp.collectAsState()
+
+            val activeAlarm by ActiveAlarmManager.activeAlarm.collectAsState()
+
+            LaunchedEffect(Unit) {
+                ActiveAlarmManager.checkAndRestore(this@MainActivity)
+            }
 
             val systemDark = isSystemInDarkTheme()
             val effectiveDark = isDarkThemeSetting ?: systemDark
@@ -121,9 +161,39 @@ class MainActivity : ComponentActivity() {
             }
 
             CitraTheme(darkTheme = effectiveDark, accent = themeAccent) {
-                // Organic Loading Screen: Wait until auth state is resolved to prevent flashing the login screen
-                if (!isAuthReady) {
-                    CitraLoadingScreen()
+                // If active alarm loop is ringing, display AlarmScreen immediately
+                activeAlarm?.let { currentAlarm ->
+                    AlarmScreen(
+                        alarmData = currentAlarm,
+                        onDismiss = {
+                            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                            if (currentAlarm.notificationId > 0) nm.cancel(currentAlarm.notificationId)
+                            ActiveAlarmManager.dismissAlarm(this@MainActivity)
+                        },
+                        onSnooze = {
+                            val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                            if (currentAlarm.notificationId > 0) nm.cancel(currentAlarm.notificationId)
+                            val snoozeTime = System.currentTimeMillis() + 10 * 60 * 1000L
+                            if (currentAlarm.type == NotificationHelper.TYPE_HABIT) {
+                                NotificationHelper.scheduleHabitSnooze(this@MainActivity, currentAlarm.habitId, currentAlarm.title, snoozeTime, currentAlarm.soundUri)
+                            } else {
+                                NotificationHelper.scheduleTaskSnooze(this@MainActivity, currentAlarm.taskId, currentAlarm.title, snoozeTime, currentAlarm.soundUri)
+                            }
+                            ActiveAlarmManager.dismissAlarm(this@MainActivity)
+                        }
+                    )
+                    return@CitraTheme
+                }
+
+                val isStartupScanDone by viewModel.isStartupScanDone.collectAsState()
+
+                LaunchedEffect(Unit) {
+                    viewModel.performStartupFolderScan()
+                }
+
+                // Organic Loading Screen: Wait until auth state and resources are resolved
+                if (!isAuthReady || !isStartupScanDone) {
+                    CitraLoadingScreen(loadingText = "Carregando recursos do Citra...")
                     return@CitraTheme
                 }
 
@@ -413,11 +483,38 @@ class MainActivity : ComponentActivity() {
                         hostState = snackbarHostState,
                         modifier = Modifier.padding(16.dp)
                     ) { data ->
+                        var offsetX by remember { mutableFloatStateOf(0f) }
+                        var offsetY by remember { mutableFloatStateOf(0f) }
+
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.inverseSurface,
                             shadowElevation = 6.dp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .offset {
+                                    androidx.compose.ui.unit.IntOffset(
+                                        offsetX.toInt(),
+                                        offsetY.coerceAtLeast(0f).toInt()
+                                    )
+                                }
+                                .pointerInput(data) {
+                                    androidx.compose.foundation.gestures.detectDragGestures(
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            offsetX += dragAmount.x
+                                            offsetY += dragAmount.y
+                                        },
+                                        onDragEnd = {
+                                            if (kotlin.math.abs(offsetX) > 180f || offsetY > 120f) {
+                                                data.dismiss()
+                                            } else {
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                            }
+                                        }
+                                    )
+                                }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -452,39 +549,18 @@ class MainActivity : ComponentActivity() {
                         ) {
                             screens.forEachIndexed { index, screen ->
                                 val selected = pagerState.currentPage == index
-                                val isNotes = screen == Screen.Notes
                                 NavigationBarItem(
                                     icon = {
-                                        if (isNotes) {
-                                            // Prominent highlight styling for Notes tab per user request
-                                            Surface(
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                                                shadowElevation = if (selected) 4.dp else 1.dp,
-                                                modifier = Modifier.size(34.dp)
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
-                                                        contentDescription = screen.title,
-                                                        tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-                                            }
-                                        } else {
-                                            Icon(
-                                                imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
-                                                contentDescription = screen.title
-                                            )
-                                        }
+                                        Icon(
+                                            imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                            contentDescription = screen.title
+                                        )
                                     },
                                     label = {
                                         Text(
                                             text = screen.title,
-                                            fontSize = if (isNotes) 11.5.sp else 11.sp,
-                                            fontWeight = if (isNotes) FontWeight.ExtraBold else if (selected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isNotes && !selected) MaterialTheme.colorScheme.primary else Color.Unspecified
+                                            fontSize = 11.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
                                         )
                                     },
                                     selected = selected,
@@ -496,7 +572,7 @@ class MainActivity : ComponentActivity() {
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = MaterialTheme.colorScheme.primary,
                                         selectedTextColor = MaterialTheme.colorScheme.primary,
-                                        indicatorColor = if (isNotes) Color.Transparent else MaterialTheme.colorScheme.primaryContainer,
+                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                                         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
@@ -736,7 +812,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun CitraLoadingScreen() {
+fun CitraLoadingScreen(loadingText: String = "Carregando...") {
     val infiniteTransition = rememberInfiniteTransition(label = "citra_loading_pulse")
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.45f,
@@ -806,7 +882,7 @@ fun CitraLoadingScreen() {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Carregando...",
+                text = loadingText,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
                 )

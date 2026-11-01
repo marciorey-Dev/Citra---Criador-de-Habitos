@@ -66,6 +66,9 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                 else -> NotificationHelper.CHANNEL_TASKS
             }
 
+            val taskId = intent.getLongExtra(NotificationHelper.EXTRA_TASK_ID, -1L)
+            val habitIdExtra = intent.getLongExtra(NotificationHelper.EXTRA_HABIT_ID, -1L)
+
             NotificationHelper.showInstantNotification(
                 context = context,
                 id = id,
@@ -74,7 +77,9 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                 message = message,
                 customSoundUriString = effectiveSound,
                 vibratePhone = settings.vibrate,
-                loopAlarm = loopAlarm
+                loopAlarm = loopAlarm,
+                taskId = taskId,
+                habitId = habitIdExtra
             )
 
             // For habits: reschedule for the exact same time tomorrow

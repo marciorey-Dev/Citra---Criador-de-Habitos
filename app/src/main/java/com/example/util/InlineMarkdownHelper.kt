@@ -88,6 +88,29 @@ object InlineMarkdownHelper {
             val textLen = rawText.length
 
             while (cursor < textLen) {
+                // LaTeX Block Math: $$formula$$
+                if (rawText.startsWith("$$", cursor)) {
+                    val end = rawText.indexOf("$$", cursor + 2)
+                    if (end != -1) {
+                        val inner = rawText.substring(cursor + 2, end)
+                        append(LatexFormulaRenderer.formatAnnotatedBlock(inner, isDark, linkColor))
+                        cursor = end + 2
+                        continue
+                    }
+                }
+
+                // LaTeX Inline Math: $formula$
+                if (rawText.startsWith("$", cursor) && !rawText.startsWith("$$", cursor)) {
+                    val end = rawText.indexOf("$", cursor + 1)
+                    // Ensure it's not a lonely single dollar or currency like $5
+                    if (end != -1 && end > cursor + 1 && !rawText.substring(cursor + 1, end).contains("\n")) {
+                        val inner = rawText.substring(cursor + 1, end)
+                        append(LatexFormulaRenderer.formatAnnotatedInline(inner, isDark))
+                        cursor = end + 1
+                        continue
+                    }
+                }
+
                 // 1. Link format: url|label or [label](url)
                 if (rawText.startsWith("[", cursor) && rawText.indexOf("](", cursor) != -1) {
                     val closeLabel = rawText.indexOf("](", cursor)

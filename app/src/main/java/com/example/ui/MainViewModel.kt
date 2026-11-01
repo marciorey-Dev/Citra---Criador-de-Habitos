@@ -660,18 +660,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         var updated = false
                         var newContent = note.content
                         if (isDone) {
-                            // Replace - [ ] TaskTitle with - [x] TaskTitle
-                            val regex = Regex("(?m)^(\\s*-\\s*\\[\\s*\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\s*)$")
+                            // Replace - [ ] TaskTitle with - [x] TaskTitle (flexible matching at start of item)
+                            val regex = Regex("(?m)^(\\s*-\\s*\\[\\s*\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\b.*)$", RegexOption.IGNORE_CASE)
                             if (regex.containsMatchIn(newContent)) {
                                 newContent = regex.replace(newContent) { m ->
-                                    val prefix = m.groupValues[1].replace("[ ]", "[x]")
+                                    val prefix = m.groupValues[1].replace(Regex("\\[\\s*\\]"), "[x]")
                                     "$prefix${m.groupValues[2]}${m.groupValues[3]}"
                                 }
                                 updated = true
                             }
                         } else {
-                            // Replace - [x] TaskTitle or - [X] TaskTitle with - [ ] TaskTitle
-                            val regex = Regex("(?m)^(\\s*-\\s*\\[[xX]\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\s*)$")
+                            // Replace - [x] TaskTitle with - [ ] TaskTitle
+                            val regex = Regex("(?m)^(\\s*-\\s*\\[[xX]\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\b.*)$", RegexOption.IGNORE_CASE)
                             if (regex.containsMatchIn(newContent)) {
                                 newContent = regex.replace(newContent) { m ->
                                     val prefix = m.groupValues[1].replace(Regex("\\[[xX]\\]"), "[ ]")
@@ -692,13 +692,150 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun syncChecklistToTask(checklistText: String, isChecked: Boolean) {
         val clean = checklistText.trim()
+            .removePrefix("- [ ]").removePrefix("- [x]").removePrefix("- [X]")
+            .trim()
         if (clean.isBlank()) return
-        val matchingTask = tasks.value.firstOrNull { it.title.trim().equals(clean, ignoreCase = true) }
+        val matchingTask = tasks.value.firstOrNull {
+            val tTitle = it.title.trim()
+            tTitle.equals(clean, ignoreCase = true) ||
+            clean.startsWith(tTitle, ignoreCase = true) ||
+            tTitle.startsWith(clean, ignoreCase = true)
+        }
         if (matchingTask != null && matchingTask.isCompleted != isChecked) {
             viewModelScope.launch {
                 repository.toggleTaskCompleted(matchingTask)
             }
         }
+    }
+
+    private val _isStartupScanDone = MutableStateFlow(false)
+    val isStartupScanDone: StateFlow<Boolean> = _isStartupScanDone.asStateFlow()
+
+    fun performStartupFolderScan() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            var docsImportCount = 0
+            var docsError: String? = null
+            var recordsError: String? = null
+
+            // 1. Verificar pasta "Citra Docs" e importar automaticamente novas notas sem duplicar
+            try {
+                val docsFolder = com.example.util.CitraDocsFileManager.getDocsFolder(context)
+                if (docsFolder.exists()) {
+                    val mdFiles = com.example.util.CitraDocsFileManager.listAllMarkdownNotes(context)
+                    val existingNotes = repository.getAllNotesSync()
+                    val existingTitles = existingNotes.map { it.title.trim().lowercase() }.toSet()
+
+                    for (file in mdFiles) {
+                        val title = file.nameWithoutExtension.trim()
+                        if (title.isNotEmpty() && !existingTitles.contains(title.lowercase())) {
+                            val content = com.example.util.CitraDocsFileManager.readNoteMarkdown(file) ?: ""
+                            repository.insertNote(
+                                Note(
+                                    title = title,
+                                    content = content,
+                                    category = "Geral",
+                                    createdAt = file.lastModified(),
+                                    updatedAt = file.lastModified()
+                                )
+                            )
+                            docsImportCount++
+                        }
+                    }
+                } else {
+                    docsError = "Pasta 'Citra Docs' não encontrada."
+                }
+            } catch (e: Exception) {
+                docsError = "Erro ao acessar 'Citra Docs': ${e.message}"
+            }
+
+            // 2. Verificar pasta "Citra Records"
+            try {
+                val recFolder = File(context.filesDir, "CitraRecord")
+                if (!recFolder.exists()) {
+                    recFolder.mkdirs()
+                }
+            } catch (e: Exception) {
+                recordsError = "Erro na pasta Citra Records: ${e.message}"
+            }
+
+            // Aguarda leve transição para tela de loading
+            kotlinx.coroutines.delay(350)
+            _isStartupScanDone.value = true
+
+            if (docsImportCount > 0) {
+                _userMessage.emit("$docsImportCount novas notas importadas de 'Citra Docs'.")
+            } else if (docsError != null) {
+                _userMessage.emit(docsError)
+            } else if (recordsError != null) {
+                _userMessage.emit(recordsError)
+            }
+        }
+    }
+
+    fun importMultipleMarkdownFiles(uris: List<Uri>, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var successCount = 0
+            var errorCount = 0
+
+            val existingTitles = repository.getAllNotesSync().map { it.title.trim().lowercase() }.toSet()
+
+            for (uri in uris) {
+                try {
+                    val filename = queryFileName(context, uri) ?: "Nota_${System.currentTimeMillis()}"
+                    val title = filename.removeSuffix(".md").removeSuffix(".markdown").removeSuffix(".txt").trim()
+
+                    val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.bufferedReader(Charsets.UTF_8).readText()
+                    }
+
+                    if (content != null) {
+                        val finalTitle = if (existingTitles.contains(title.lowercase())) {
+                            "$title (${System.currentTimeMillis().toString().takeLast(4)})"
+                        } else {
+                            title
+                        }
+                        repository.insertNote(
+                            Note(
+                                title = finalTitle,
+                                content = content,
+                                category = "Geral",
+                                createdAt = System.currentTimeMillis(),
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, content)
+                        successCount++
+                    } else {
+                        errorCount++
+                    }
+                } catch (e: Exception) {
+                    errorCount++
+                }
+            }
+
+            val msg = if (errorCount > 0) {
+                "$successCount importadas, $errorCount com erro"
+            } else {
+                "$successCount notas importadas com sucesso!"
+            }
+            _userMessage.emit(msg)
+        }
+    }
+
+    private fun queryFileName(context: Context, uri: Uri): String? {
+        var name: String? = null
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index != -1 && cursor.moveToFirst()) {
+                        name = cursor.getString(index)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return name ?: uri.path?.substringAfterLast('/')
     }
 
     fun deleteTask(task: Task) {

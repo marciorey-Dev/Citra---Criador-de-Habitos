@@ -319,11 +319,13 @@ fun TaskItemCard(
 @Composable
 fun QuickAddTaskDialog(
     categories: List<Category>,
+    initialTitle: String = "",
     onDismiss: () -> Unit,
     onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int) -> Unit
 ) {
     QuickAddTaskDialog(
         categories = categories,
+        initialTitle = initialTitle,
         onDismiss = onDismiss,
         onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, _, _ ->
             onConfirm(title, category, priority, dueText, dueTimestamp, minutesBefore)
@@ -334,11 +336,12 @@ fun QuickAddTaskDialog(
 @Composable
 fun QuickAddTaskDialog(
     categories: List<Category>,
+    initialTitle: String = "",
     onDismiss: () -> Unit,
     onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int, customSoundUri: String, loopAlarm: Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    var title by remember { mutableStateOf("") }
+    var title by remember(initialTitle) { mutableStateOf(initialTitle) }
     var category by remember { mutableStateOf(categories.firstOrNull()?.name ?: "Geral") }
     var priority by remember { mutableStateOf(TaskPriority.MEDIA) }
 

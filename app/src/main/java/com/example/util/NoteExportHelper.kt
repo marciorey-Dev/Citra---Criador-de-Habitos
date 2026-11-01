@@ -7,8 +7,12 @@ import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
 import android.text.Layout
+import android.text.SpannableString
+import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.style.*
 import android.util.Base64
 import androidx.core.content.FileProvider
 import com.example.ui.screens.organization.notes.*
@@ -32,6 +36,160 @@ object NoteExportHelper {
         val dir = File(context.cacheDir, "exports")
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    private fun cleanTextLen(text: String): Int {
+        return text.replace(Regex("<[^>]+>|\\*\\*|\\*|~~|==|`|\\$|\\\\ce\\{|\\}"), "").length
+    }
+
+    fun formatSpannable(rawText: String, baseColor: Int = Color.parseColor("#0F172A"), themeColor: Int = Color.parseColor("#F97316"), defaultBold: Boolean = false): CharSequence {
+        if (rawText.isEmpty()) return ""
+        val sb = SpannableStringBuilder()
+        var cursor = 0
+        val len = rawText.length
+
+        while (cursor < len) {
+            // LaTeX Block: $$...$$
+            if (rawText.startsWith("$$", cursor)) {
+                val end = rawText.indexOf("$$", cursor + 2)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 2, end)
+                    val rendered = LatexFormulaRenderer.renderFormulaToText(inner)
+                    val startPos = sb.length
+                    sb.append("  $rendered  ")
+                    sb.setSpan(StyleSpan(Typeface.BOLD_ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 2
+                    continue
+                }
+            }
+
+            // LaTeX Inline: $...$
+            if (rawText.startsWith("$", cursor) && !rawText.startsWith("$$", cursor)) {
+                val end = rawText.indexOf("$", cursor + 1)
+                if (end != -1 && end > cursor + 1 && !rawText.substring(cursor + 1, end).contains("\n")) {
+                    val inner = rawText.substring(cursor + 1, end)
+                    val rendered = LatexFormulaRenderer.renderFormulaToText(inner)
+                    val startPos = sb.length
+                    sb.append(rendered)
+                    sb.setSpan(StyleSpan(Typeface.ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 1
+                    continue
+                }
+            }
+
+            // Bold: **text**
+            if (rawText.startsWith("**", cursor)) {
+                val end = rawText.indexOf("**", cursor + 2)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 2, end)
+                    val startPos = sb.length
+                    sb.append(inner)
+                    sb.setSpan(StyleSpan(Typeface.BOLD), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 2
+                    continue
+                }
+            }
+
+            // Strikethrough: ~~text~~
+            if (rawText.startsWith("~~", cursor)) {
+                val end = rawText.indexOf("~~", cursor + 2)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 2, end)
+                    val startPos = sb.length
+                    sb.append(inner)
+                    sb.setSpan(StrikethroughSpan(), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 2
+                    continue
+                }
+            }
+
+            // Highlight: ==text==
+            if (rawText.startsWith("==", cursor)) {
+                val end = rawText.indexOf("==", cursor + 2)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 2, end)
+                    val startPos = sb.length
+                    sb.append(inner)
+                    sb.setSpan(BackgroundColorSpan(Color.parseColor("#FEF08A")), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    sb.setSpan(ForegroundColorSpan(Color.parseColor("#713F12")), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 2
+                    continue
+                }
+            }
+
+            // Underline: <u>text</u>
+            if (rawText.startsWith("<u>", cursor)) {
+                val end = rawText.indexOf("</u>", cursor + 3)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 3, end)
+                    val startPos = sb.length
+                    sb.append(inner)
+                    sb.setSpan(UnderlineSpan(), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 4
+                    continue
+                }
+            }
+
+            // Inline code: `text`
+            if (rawText.startsWith("`", cursor) && !rawText.startsWith("```", cursor)) {
+                val end = rawText.indexOf("`", cursor + 1)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 1, end)
+                    val startPos = sb.length
+                    sb.append(" $inner ")
+                    sb.setSpan(TypefaceSpan("monospace"), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    sb.setSpan(BackgroundColorSpan(Color.parseColor("#E2E8F0")), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 1
+                    continue
+                }
+            }
+
+            // Italic: *text* or _text_
+            if (rawText.startsWith("*", cursor)) {
+                val end = rawText.indexOf("*", cursor + 1)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 1, end)
+                    val startPos = sb.length
+                    sb.append(inner)
+                    sb.setSpan(StyleSpan(Typeface.ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 1
+                    continue
+                }
+            }
+            if (rawText.startsWith("_", cursor)) {
+                val end = rawText.indexOf("_", cursor + 1)
+                if (end != -1) {
+                    val inner = rawText.substring(cursor + 1, end)
+                    val startPos = sb.length
+                    sb.append(inner)
+                    sb.setSpan(StyleSpan(Typeface.ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 1
+                    continue
+                }
+            }
+
+            // Links: [label](url)
+            if (rawText.startsWith("[", cursor) && rawText.indexOf("](", cursor) != -1) {
+                val closeLabel = rawText.indexOf("](", cursor)
+                val closeUrl = rawText.indexOf(")", closeLabel)
+                if (closeUrl != -1) {
+                    val label = rawText.substring(cursor + 1, closeLabel)
+                    val startPos = sb.length
+                    sb.append(label)
+                    sb.setSpan(ForegroundColorSpan(themeColor), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    sb.setSpan(UnderlineSpan(), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = closeUrl + 1
+                    continue
+                }
+            }
+
+            sb.append(rawText[cursor])
+            cursor++
+        }
+        if (defaultBold && sb.isNotEmpty()) {
+            sb.setSpan(StyleSpan(Typeface.BOLD), 0, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return sb
     }
 
     fun loadBitmapFromUrl(context: Context, url: String): Bitmap? {
@@ -98,6 +256,22 @@ object NoteExportHelper {
 
     private fun renderInlineHtml(text: String, themeColorHex: String): String {
         var result = escapeHtml(text)
+        // LaTeX block $$...$$
+        result = result.replace(Regex("\\$\\$(.*?)\\$\\$")) { m ->
+            val formula = m.groupValues[1]
+            val unescaped = formula.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+            val rendered = escapeHtml(LatexFormulaRenderer.renderFormulaToText(unescaped))
+            "<span class=\"math\" style=\"font-family:'Times New Roman',serif; font-style:italic; font-size:1.05rem; padding:2px 8px; background:#f1f5f9; border-radius:4px; font-weight:600;\">$rendered</span>"
+        }
+        // LaTeX inline $...$
+        result = result.replace(Regex("(?<!\\$)\\$([^\\$\\n]+)\\$(?!\\$)")) { m ->
+            val formula = m.groupValues[1]
+            val unescaped = formula.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+            val rendered = escapeHtml(LatexFormulaRenderer.renderFormulaToText(unescaped))
+            "<span style=\"font-family:'Times New Roman',serif; font-style:italic; font-weight:600; padding:1px 5px; background:#f1f5f9; border-radius:4px;\">$rendered</span>"
+        }
+        result = result.replace(Regex("==(.*?)=="), "<mark style=\"background:#fef08a; color:#713f12; padding:1px 4px; border-radius:3px;\">$1</mark>")
+        result = result.replace(Regex("&lt;u&gt;(.*?)&lt;/u&gt;"), "<u>$1</u>")
         result = result.replace(Regex("\\*\\*(.*?)\\*\\*"), "<strong>$1</strong>")
         result = result.replace(Regex("(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)"), "<em>$1</em>")
         result = result.replace(Regex("_(.*?)_"), "<em>$1</em>")
@@ -627,7 +801,8 @@ object NoteExportHelper {
                         isFakeBoldText = true
                         isAntiAlias = true
                     }
-                    val layout = createStaticLayout(block.text.ifBlank { " " }, hPaint, contentWidth)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, if (block.level == 1) themeColor else Color.parseColor("#1E293B"), themeColor, defaultBold = true)
+                    val layout = createStaticLayout(formatted, hPaint, contentWidth)
                     checkNewPage(layout.height + 14f)
                     canvas.save()
                     canvas.translate(margin, y)
@@ -638,7 +813,8 @@ object NoteExportHelper {
 
                 is TextBlock -> {
                     if (block.text.isNotBlank()) {
-                        val layout = createStaticLayout(block.text, bodyPaint, contentWidth)
+                        val formatted = formatSpannable(block.text, Color.parseColor("#334155"), themeColor)
+                        val layout = createStaticLayout(formatted, bodyPaint, contentWidth)
                         checkNewPage(layout.height + 8f)
                         canvas.save()
                         canvas.translate(margin, y)
@@ -651,7 +827,8 @@ object NoteExportHelper {
                 }
 
                 is ChecklistBlock -> {
-                    val textLayout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 24)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, Color.parseColor("#334155"), themeColor)
+                    val textLayout = createStaticLayout(formatted, bodyPaint, contentWidth - 24)
                     checkNewPage(max(16f, textLayout.height.toFloat()) + 6f)
 
                     val boxPaint = Paint().apply {
@@ -682,7 +859,8 @@ object NoteExportHelper {
                 }
 
                 is BulletBlock -> {
-                    val textLayout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 28)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, Color.parseColor("#334155"), themeColor)
+                    val textLayout = createStaticLayout(formatted, bodyPaint, contentWidth - 28)
                     checkNewPage(max(14f, textLayout.height.toFloat()) + 6f)
 
                     val bulletPaint = Paint().apply {
@@ -700,7 +878,8 @@ object NoteExportHelper {
                 }
 
                 is QuoteBlock -> {
-                    val textLayout = createStaticLayout(block.text.ifBlank { " " }, quotePaint, contentWidth - 24)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, Color.parseColor("#475569"), themeColor)
+                    val textLayout = createStaticLayout(formatted, quotePaint, contentWidth - 24)
                     val qHeight = textLayout.height + 8f
                     checkNewPage(qHeight + 8f)
 
@@ -752,17 +931,25 @@ object NoteExportHelper {
                         typeface = Typeface.SERIF
                         isAntiAlias = true
                     }
-                    val mathLayout = createStaticLayout(block.formula, mathTextPaint, contentWidth - 24)
+                    val renderedMath = LatexFormulaRenderer.renderFormulaToText(block.formula)
+                    val formatted = formatSpannable("$$ $renderedMath $$", Color.parseColor("#0F172A"), themeColor)
+                    val mathLayout = createStaticLayout(formatted, mathTextPaint, contentWidth - 24)
                     val bgHeight = mathLayout.height + 16f
                     checkNewPage(bgHeight + 8f)
 
                     val bgPaint = Paint().apply {
-                        color = Color.parseColor("#EFF6FF")
+                        color = Color.parseColor("#FEF3C7")
                         style = Paint.Style.FILL
                         isAntiAlias = true
                     }
+                    val borderPaint = Paint().apply {
+                        color = Color.parseColor("#FDE68A")
+                        style = Paint.Style.STROKE
+                        strokeWidth = 1f
+                    }
                     val rect = RectF(margin, y, margin + contentWidth, y + bgHeight)
                     canvas.drawRoundRect(rect, 8f, 8f, bgPaint)
+                    canvas.drawRoundRect(rect, 8f, 8f, borderPaint)
 
                     canvas.save()
                     canvas.translate(margin + 12f, y + 8f)
@@ -772,11 +959,18 @@ object NoteExportHelper {
                 }
 
                 is TableBlock -> {
-                    val cols = block.headers.size.coerceAtLeast(1)
-                    val colWidth = contentWidth / cols
-                    val rowHeight = 22f
-                    val totalHeight = (block.rows.size + 1) * rowHeight + 10f
-                    checkNewPage(totalHeight)
+                    val numCols = block.headers.size.coerceAtLeast(1)
+                    val colWeights = FloatArray(numCols) { cIdx ->
+                        val headerLen = (block.headers.getOrNull(cIdx) ?: "").replace(Regex("(?s)<[^>]*>|\\*\\*|\\*|~~|==|`|\\$"), "").trim().length
+                        var maxRowLen = 0
+                        for (r in block.rows) {
+                            val cell = (r.getOrNull(cIdx) ?: "").replace(Regex("(?s)<[^>]*>|\\*\\*|\\*|~~|==|`|\\$"), "").trim().length
+                            if (cell > maxRowLen) maxRowLen = cell
+                        }
+                        maxOf(headerLen, maxRowLen).coerceAtLeast(4).toFloat()
+                    }
+                    val totalWeight = colWeights.sum().coerceAtLeast(1f)
+                    val colWidths = colWeights.map { (it / totalWeight) * contentWidth }
 
                     val tableHeaderPaint = Paint().apply {
                         color = Color.parseColor("#F8FAFC")
@@ -789,26 +983,61 @@ object NoteExportHelper {
                     }
                     val tableTextPaint = TextPaint().apply {
                         color = Color.parseColor("#0F172A")
-                        textSize = 10f
+                        textSize = 9.5f
                         isAntiAlias = true
                     }
 
-                    canvas.drawRect(margin, y, margin + contentWidth, y + rowHeight, tableHeaderPaint)
-                    canvas.drawRect(margin, y, margin + contentWidth, y + rowHeight, cellBorderPaint)
-                    for ((cIdx, header) in block.headers.withIndex()) {
-                        val cx = margin + (cIdx * colWidth) + 6f
-                        canvas.drawText(header, cx, y + 15f, tableTextPaint)
+                    // Render header row
+                    val headerLayouts = block.headers.mapIndexed { cIdx, header ->
+                        val cWidth = (colWidths[cIdx] - 8f).toInt().coerceAtLeast(20)
+                        createStaticLayout(formatSpannable(header, Color.parseColor("#0F172A"), themeColor, defaultBold = true), tableTextPaint, cWidth)
                     }
-                    y += rowHeight
+                    val headerRowH = (headerLayouts.maxOfOrNull { it.height } ?: 16).toFloat() + 10f
+                    checkNewPage(headerRowH + 10f)
 
-                    for (row in block.rows) {
-                        canvas.drawRect(margin, y, margin + contentWidth, y + rowHeight, cellBorderPaint)
-                        for (cIdx in 0 until cols) {
-                            val cellText = if (cIdx < row.size) row[cIdx] else ""
-                            val cx = margin + (cIdx * colWidth) + 6f
-                            canvas.drawText(cellText, cx, y + 15f, tableTextPaint)
+                    canvas.drawRect(margin, y, margin + contentWidth, y + headerRowH, tableHeaderPaint)
+                    canvas.drawRect(margin, y, margin + contentWidth, y + headerRowH, cellBorderPaint)
+
+                    var curX = margin
+                    for (cIdx in 0 until numCols) {
+                        val cW = colWidths[cIdx]
+                        canvas.drawLine(curX, y, curX, y + headerRowH, cellBorderPaint)
+                        if (cIdx < headerLayouts.size) {
+                            canvas.save()
+                            canvas.translate(curX + 4f, y + 5f)
+                            headerLayouts[cIdx].draw(canvas)
+                            canvas.restore()
                         }
-                        y += rowHeight
+                        curX += cW
+                    }
+                    canvas.drawLine(margin + contentWidth, y, margin + contentWidth, y + headerRowH, cellBorderPaint)
+                    y += headerRowH
+
+                    // Render data rows
+                    for (row in block.rows) {
+                        val rowLayouts = (0 until numCols).map { cIdx ->
+                            val cellText = if (cIdx < row.size) row[cIdx] else ""
+                            val cWidth = (colWidths[cIdx] - 8f).toInt().coerceAtLeast(20)
+                            createStaticLayout(formatSpannable(cellText, Color.parseColor("#334155"), themeColor), tableTextPaint, cWidth)
+                        }
+                        val rowH = (rowLayouts.maxOfOrNull { it.height } ?: 14).toFloat() + 8f
+                        checkNewPage(rowH + 6f)
+
+                        canvas.drawRect(margin, y, margin + contentWidth, y + rowH, cellBorderPaint)
+                        curX = margin
+                        for (cIdx in 0 until numCols) {
+                            val cW = colWidths[cIdx]
+                            canvas.drawLine(curX, y, curX, y + rowH, cellBorderPaint)
+                            if (cIdx < rowLayouts.size) {
+                                canvas.save()
+                                canvas.translate(curX + 4f, y + 4f)
+                                rowLayouts[cIdx].draw(canvas)
+                                canvas.restore()
+                            }
+                            curX += cW
+                        }
+                        canvas.drawLine(margin + contentWidth, y, margin + contentWidth, y + rowH, cellBorderPaint)
+                        y += rowH
                     }
                     y += 10f
                 }
@@ -826,7 +1055,8 @@ object NoteExportHelper {
                         "important" -> Color.parseColor("#FEF2F2")
                         else -> Color.parseColor("#F8FAFC")
                     }
-                    val cTextLayout = createStaticLayout(block.text, bodyPaint, contentWidth - 30)
+                    val formatted = formatSpannable(block.text, Color.parseColor("#1E293B"), themeColor)
+                    val cTextLayout = createStaticLayout(formatted, bodyPaint, contentWidth - 30)
                     val cHeight = cTextLayout.height + 20f
                     checkNewPage(cHeight + 8f)
 
@@ -856,8 +1086,10 @@ object NoteExportHelper {
                         isFakeBoldText = true
                         isAntiAlias = true
                     }
-                    val tTitleLayout = createStaticLayout("▼ ${block.title}", tTitlePaint, contentWidth - 10)
-                    val tContentLayout = createStaticLayout(block.content, bodyPaint, contentWidth - 20)
+                    val formattedTitle = formatSpannable("▼ ${block.title}", themeColor, themeColor, defaultBold = true)
+                    val formattedContent = formatSpannable(block.content, Color.parseColor("#334155"), themeColor)
+                    val tTitleLayout = createStaticLayout(formattedTitle, tTitlePaint, contentWidth - 10)
+                    val tContentLayout = createStaticLayout(formattedContent, bodyPaint, contentWidth - 20)
                     val tHeight = tTitleLayout.height + tContentLayout.height + 14f
                     checkNewPage(tHeight)
 
@@ -1036,14 +1268,17 @@ object NoteExportHelper {
                 is BulletBlock -> sb.append("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
                 is QuoteBlock -> sb.append("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
                 is CodeBlock -> sb.append("<pre><code class=\"language-${block.language}\">${escapeHtml(block.code)}</code></pre>\n")
-                is MathBlock -> sb.append("<div class=\"math\">$$ ${escapeHtml(block.formula)} $$</div>\n")
+                is MathBlock -> {
+                    val rendered = escapeHtml(LatexFormulaRenderer.renderFormulaToText(block.formula))
+                    sb.append("<div class=\"math\">$$ $rendered $$</div>\n")
+                }
                 is TableBlock -> {
                     sb.append("<table><thead><tr>")
-                    for (h in block.headers) sb.append("<th>${escapeHtml(h)}</th>")
+                    for (h in block.headers) sb.append("<th>${renderInlineHtml(h, themeHex)}</th>")
                     sb.append("</tr></thead><tbody>\n")
                     for (row in block.rows) {
                         sb.append("<tr>")
-                        for (c in row) sb.append("<td>${escapeHtml(c)}</td>")
+                        for (c in row) sb.append("<td>${renderInlineHtml(c, themeHex)}</td>")
                         sb.append("</tr>\n")
                     }
                     sb.append("</tbody></table>\n")
@@ -1312,19 +1547,28 @@ object NoteExportHelper {
                     measuredHeight += layout.height + 28f + 14f
                 }
                 is TableBlock -> {
-                    val colCount = maxOf(1, block.headers.size)
-                    val colW = contentWidth / colCount.toFloat()
-                    val cellW = (colW - 16f).toInt().coerceAtLeast(30)
+                    val colWeights = block.headers.indices.map { i ->
+                        val hLen = cleanTextLen(block.headers.getOrElse(i) { "" })
+                        val maxRowLen = block.rows.maxOfOrNull { r -> cleanTextLen(r.getOrElse(i) { "" }) } ?: 0
+                        maxOf(hLen, maxRowLen).coerceIn(4, 50)
+                    }
+                    val totalWeight = colWeights.sum().toFloat().coerceAtLeast(1f)
+                    val rawColWidths = colWeights.map { w -> (contentWidth * (w / totalWeight)).coerceIn(70f, contentWidth * 0.75f) }
+                    val scale = contentWidth.toFloat() / rawColWidths.sum().toFloat()
+                    val colWidths = rawColWidths.map { it * scale }
+
                     var maxHRow = 24f
-                    for (h in block.headers) {
-                        val l = createStaticLayout(h.ifBlank { " " }, headerTextPaint, cellW)
+                    for ((i, h) in block.headers.withIndex()) {
+                        val cellW = (colWidths.getOrElse(i) { contentWidth / maxOf(1, block.headers.size).toFloat() } - 16f).toInt().coerceAtLeast(30)
+                        val l = createStaticLayout(formatSpannable(h.ifBlank { " " }, headerTextPaint.color, themeColor), headerTextPaint, cellW)
                         if (l.height > maxHRow) maxHRow = l.height.toFloat()
                     }
                     var totalTableH = maxHRow + 16f
                     for (row in block.rows) {
                         var maxCellH = 20f
-                        for (c in row) {
-                            val l = createStaticLayout(c.ifBlank { " " }, cellTextPaint, cellW)
+                        for ((i, c) in row.withIndex()) {
+                            val cellW = (colWidths.getOrElse(i) { contentWidth / maxOf(1, block.headers.size).toFloat() } - 16f).toInt().coerceAtLeast(30)
+                            val l = createStaticLayout(formatSpannable(c.ifBlank { " " }, cellTextPaint.color, themeColor), cellTextPaint, cellW)
                             if (l.height > maxCellH) maxCellH = l.height.toFloat()
                         }
                         totalTableH += maxCellH + 14f
@@ -1339,7 +1583,7 @@ object NoteExportHelper {
                     measuredHeight += 68f + 14f
                 }
                 is MathBlock -> {
-                    val layout = createStaticLayout(block.formula.ifBlank { " " }, italicPaint, contentWidth - 32)
+                    val layout = createStaticLayout(formatSpannable("$$ " + block.formula + " $$", italicPaint.color, themeColor), italicPaint, contentWidth - 32)
                     measuredHeight += layout.height + 28f + 14f
                 }
                 is DividerBlock -> {
@@ -1352,8 +1596,8 @@ object NoteExportHelper {
         }
 
         measuredHeight += 36f // Citra branding footer
-        val exactFinalHeight = padding + 14f + measuredHeight + padding
-        val minVerticalHeight = width * 1.25f // ensure more vertical than horizontal
+        val exactFinalHeight = padding + 14f + measuredHeight + padding + 60f
+        val minVerticalHeight = width * 1.15f // ensure vertical format
         val totalHeight = maxOf(exactFinalHeight, minVerticalHeight).toInt()
         val bitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -1388,7 +1632,8 @@ object NoteExportHelper {
             when (block) {
                 is TextBlock -> {
                     if (block.text.isNotBlank()) {
-                        val layout = createStaticLayout(block.text, bodyPaint, contentWidth)
+                        val formatted = formatSpannable(block.text, bodyPaint.color, themeColor)
+                        val layout = createStaticLayout(formatted, bodyPaint, contentWidth)
                         canvas.save()
                         canvas.translate(padding, y)
                         layout.draw(canvas)
@@ -1400,7 +1645,8 @@ object NoteExportHelper {
                 }
                 is HeadingBlock -> {
                     val hPaint = getHeadingPaint(block.level)
-                    val layout = createStaticLayout(block.text.ifBlank { " " }, hPaint, contentWidth)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, hPaint.color, themeColor, defaultBold = true)
+                    val layout = createStaticLayout(formatted, hPaint, contentWidth)
                     canvas.save()
                     canvas.translate(padding, y)
                     layout.draw(canvas)
@@ -1414,7 +1660,8 @@ object NoteExportHelper {
                         strokeWidth = 2f
                     }
                     val p = if (block.isChecked) checkedPaint else bodyPaint
-                    val layout = createStaticLayout(block.text.ifBlank { " " }, p, contentWidth - 36)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, p.color, themeColor)
+                    val layout = createStaticLayout(formatted, p, contentWidth - 36)
                     val itemH = maxOf(28f, layout.height.toFloat())
 
                     canvas.drawRoundRect(RectF(padding, y + 4f, padding + 20f, y + 24f), 4f, 4f, boxPaint)
@@ -1450,7 +1697,8 @@ object NoteExportHelper {
                 }
                 is BulletBlock -> {
                     val bDot = Paint().apply { color = themeColor; isAntiAlias = true }
-                    val layout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 28)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, bodyPaint.color, themeColor)
+                    val layout = createStaticLayout(formatted, bodyPaint, contentWidth - 28)
                     val itemH = maxOf(26f, layout.height.toFloat())
 
                     canvas.drawCircle(padding + 8f, y + 12f, 4.5f, bDot)
@@ -1461,7 +1709,8 @@ object NoteExportHelper {
                     y += itemH + 10f
                 }
                 is QuoteBlock -> {
-                    val layout = createStaticLayout(block.text.ifBlank { " " }, italicPaint, contentWidth - 24)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, italicPaint.color, themeColor)
+                    val layout = createStaticLayout(formatted, italicPaint, contentWidth - 24)
                     val itemH = maxOf(32f, layout.height.toFloat())
                     val qBar = Paint().apply { color = themeColor; strokeWidth = 4f }
                     canvas.drawLine(padding, y, padding, y + itemH, qBar)
@@ -1543,7 +1792,8 @@ object NoteExportHelper {
                         "important" -> Pair(Color.parseColor("#FEF2F2"), Color.parseColor("#EF4444"))
                         else -> Pair(Color.parseColor("#EFF6FF"), Color.parseColor("#3B82F6"))
                     }
-                    val layout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 32)
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, bodyPaint.color, themeColor)
+                    val layout = createStaticLayout(formatted, bodyPaint, contentWidth - 32)
                     val calloutH = layout.height + 30f
                     val cBg = Paint().apply { color = bgColor; isAntiAlias = true }
                     val cBorder = Paint().apply { color = borderColor; strokeWidth = 3f; style = Paint.Style.STROKE; isAntiAlias = true }
@@ -1560,51 +1810,88 @@ object NoteExportHelper {
                 }
                 is TableBlock -> {
                     val colCount = maxOf(1, block.headers.size)
-                    val colW = contentWidth / colCount.toFloat()
-                    val cellW = (colW - 16f).toInt().coerceAtLeast(30)
+                    val rawWidths = FloatArray(colCount) { 1f }
+                    for (i in 0 until colCount) {
+                        var maxLen = if (i < block.headers.size) cleanTextLen(block.headers[i]) else 0
+                        for (r in block.rows) {
+                            if (i < r.size) {
+                                maxLen = maxOf(maxLen, cleanTextLen(r[i]))
+                            }
+                        }
+                        rawWidths[i] = maxOf(4, maxLen).toFloat()
+                    }
+                    val totalWeight = rawWidths.sum().coerceAtLeast(1f)
+                    val colWidths = FloatArray(colCount) { i ->
+                        (rawWidths[i] / totalWeight) * contentWidth.toFloat()
+                    }
+
                     val tBorder = Paint().apply { color = Color.parseColor("#CBD5E1"); strokeWidth = 1.5f; style = Paint.Style.STROKE }
                     val hBg = Paint().apply { color = Color.parseColor("#F1F5F9") }
 
-                    // Header row with wrapped text
+                    // Header row with wrapped text and rich formatting
                     var maxHeaderH = 24f
-                    val headerLayouts = block.headers.map { h ->
-                        val l = createStaticLayout(h.ifBlank { " " }, headerTextPaint, cellW)
+                    val headerLayouts = block.headers.mapIndexed { i, h ->
+                        val cellW = (colWidths[i] - 16f).toInt().coerceAtLeast(24)
+                        val formatted = formatSpannable(h.ifBlank { " " }, headerTextPaint.color, themeColor, defaultBold = true)
+                        val l = createStaticLayout(formatted, headerTextPaint, cellW)
                         if (l.height > maxHeaderH) maxHeaderH = l.height.toFloat()
                         l
                     }
                     val headerRowH = maxHeaderH + 16f
                     canvas.drawRect(padding, y, width - padding, y + headerRowH, hBg)
                     canvas.drawRect(padding, y, width - padding, y + headerRowH, tBorder)
+
+                    var currColX = padding
                     headerLayouts.forEachIndexed { i, l ->
+                        val w = colWidths[i]
                         canvas.save()
-                        canvas.translate(padding + (i * colW) + 8f, y + 8f)
+                        canvas.translate(currColX + 8f, y + 8f)
                         l.draw(canvas)
                         canvas.restore()
+                        if (i > 0) {
+                            canvas.drawLine(currColX, y, currColX, y + headerRowH, tBorder)
+                        }
+                        currColX += w
                     }
                     y += headerRowH
 
-                    // Data rows with wrapped text
-                    block.rows.forEach { row ->
+                    // Data rows with wrapped text and rich formatting
+                    val altRowBg = Paint().apply { color = Color.parseColor("#F8FAFC") }
+                    block.rows.forEachIndexed { rowIndex, row ->
                         var maxCellH = 20f
-                        val cellLayouts = row.map { c ->
-                            val l = createStaticLayout(c.ifBlank { " " }, cellTextPaint, cellW)
+                        val cellLayouts = (0 until colCount).map { i ->
+                            val c = if (i < row.size) row[i] else ""
+                            val cellW = (colWidths[i] - 16f).toInt().coerceAtLeast(24)
+                            val formatted = formatSpannable(c.ifBlank { " " }, cellTextPaint.color, themeColor)
+                            val l = createStaticLayout(formatted, cellTextPaint, cellW)
                             if (l.height > maxCellH) maxCellH = l.height.toFloat()
                             l
                         }
                         val rowH = maxCellH + 14f
+                        if (rowIndex % 2 == 1) {
+                            canvas.drawRect(padding, y, width - padding, y + rowH, altRowBg)
+                        }
                         canvas.drawRect(padding, y, width - padding, y + rowH, tBorder)
+
+                        currColX = padding
                         cellLayouts.forEachIndexed { i, l ->
+                            val w = colWidths[i]
                             canvas.save()
-                            canvas.translate(padding + (i * colW) + 8f, y + 7f)
+                            canvas.translate(currColX + 8f, y + 7f)
                             l.draw(canvas)
                             canvas.restore()
+                            if (i > 0) {
+                                canvas.drawLine(currColX, y, currColX, y + rowH, tBorder)
+                            }
+                            currColX += w
                         }
                         y += rowH
                     }
                     y += 16f
                 }
                 is ToggleBlock -> {
-                    val layout = createStaticLayout(block.title.ifBlank { " " }, bodyPaint, contentWidth - 28)
+                    val formatted = formatSpannable(block.title.ifBlank { " " }, bodyPaint.color, themeColor)
+                    val layout = createStaticLayout(formatted, bodyPaint, contentWidth - 28)
                     val tPaint = Paint().apply { color = themeColor; isAntiAlias = true }
                     canvas.drawText("▶", padding, y + 18f, tPaint)
                     canvas.save()
@@ -1636,7 +1923,9 @@ object NoteExportHelper {
                     y += cardH + 14f
                 }
                 is MathBlock -> {
-                    val layout = createStaticLayout(block.formula.ifBlank { " " }, italicPaint, contentWidth - 32)
+                    val rendered = LatexFormulaRenderer.renderFormulaToText(block.formula)
+                    val formatted = formatSpannable("$$ " + rendered + " $$", italicPaint.color, themeColor)
+                    val layout = createStaticLayout(formatted, italicPaint, contentWidth - 32, alignment = Layout.Alignment.ALIGN_CENTER)
                     val boxH = layout.height + 24f
                     val mBg = Paint().apply { color = Color.parseColor("#F8FAFC"); isAntiAlias = true }
                     val mBorder = Paint().apply { color = Color.parseColor("#CBD5E1"); strokeWidth = 1.5f; style = Paint.Style.STROKE; isAntiAlias = true; pathEffect = DashPathEffect(floatArrayOf(10f, 10f), 0f) }
@@ -1668,11 +1957,23 @@ object NoteExportHelper {
         }
         canvas.drawText("🍊 Citra • Gestão Inteligente & Hábitos", width / 2f, y + 20f, footerPaint)
 
+        // Eliminate trailing empty space by trimming bitmap to exact content height
+        val finalBottomY = (y + 40f).toInt().coerceIn(minOf(200, bitmap.height), bitmap.height)
+        val finalBitmap = if (finalBottomY < bitmap.height) {
+            Bitmap.createBitmap(bitmap, 0, 0, width, finalBottomY)
+        } else {
+            bitmap
+        }
+
         val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.png")
         FileOutputStream(file).use { stream ->
-            bitmap.compress(Bitmap.CompressFormat.PNG, 95, stream)
+            finalBitmap.compress(Bitmap.CompressFormat.PNG, 95, stream)
             stream.flush()
         }
+        if (finalBitmap != bitmap) {
+            finalBitmap.recycle()
+        }
+        bitmap.recycle()
 
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
@@ -2019,16 +2320,21 @@ document.addEventListener("DOMContentLoaded", function() {
         context.startActivity(Intent.createChooser(intent, title))
     }
 
-    private fun createStaticLayout(text: String, paint: TextPaint, width: Int): StaticLayout {
+    private fun createStaticLayout(
+        text: CharSequence,
+        paint: TextPaint,
+        width: Int,
+        alignment: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL
+    ): StaticLayout {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             StaticLayout.Builder.obtain(text, 0, text.length, paint, width.coerceAtLeast(10))
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setAlignment(alignment)
                 .setLineSpacing(0f, 1.15f)
                 .setIncludePad(false)
                 .build()
         } else {
             @Suppress("DEPRECATION")
-            StaticLayout(text, paint, width.coerceAtLeast(10), Layout.Alignment.ALIGN_NORMAL, 1.15f, 0f, false)
+            StaticLayout(text, paint, width.coerceAtLeast(10), alignment, 1.15f, 0f, false)
         }
     }
 }

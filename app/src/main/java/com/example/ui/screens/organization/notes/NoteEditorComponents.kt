@@ -50,6 +50,7 @@ import coil.compose.AsyncImage
 import com.example.ui.theme.GreenAccent
 import com.example.util.CodeHighlighter
 import com.example.util.InlineMarkdownHelper
+import com.example.util.LatexFormulaRenderer
 import com.example.util.MathBeautifier
 import com.example.util.NoteAudioPlaybackManager
 
@@ -687,7 +688,7 @@ fun VisualBlockItem(
                                 onUpdate(block.copy(formula = input))
                             }
                         },
-                        placeholder = { Text("Ex: E = mc^2 ou \\frac{a}{b}") },
+                        placeholder = { Text("Ex: E = mc^2 ou \\frac{a}{b} ou \\ce{H2O}") },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Serif),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color.Transparent,
@@ -695,6 +696,23 @@ fun VisualBlockItem(
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    if (block.formula.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = LatexFormulaRenderer.formatAnnotatedBlock(block.formula, isDarkBg),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1354,6 +1372,11 @@ private fun AudioBlockPlayer(
  * Excel-style spreadsheet table with clean sharp grid lines, bold darker header row,
  * in-place editable cells, real-time sync with Markdown, and horizontal scrolling for wide tables.
  */
+/**
+ * Excel-style spreadsheet table with theme-matching subtle borders, lightly highlighted header,
+ * adaptive column widths based on maximum content, automatic line wrapping without truncating,
+ * and rich formatting inside cells (bold, italic, code, strikethrough, underline, highlight, LaTeX, chemistry).
+ */
 @Composable
 fun ExcelTableEditor(
     block: TableBlock,
@@ -1361,11 +1384,45 @@ fun ExcelTableEditor(
     onUpdate: (TableBlock) -> Unit,
     onDelete: (() -> Unit)? = null
 ) {
-    val gridBorderColor = if (isDarkBg) Color(0xFF475569) else Color(0xFFCBD5E1)
-    val headerBgColor = if (isDarkBg) Color(0xFF334155) else Color(0xFFE2E8F0)
-    val headerTextColor = if (isDarkBg) Color(0xFFF1F5F9) else Color(0xFF0F172A)
-    val cellTextColor = if (isDarkBg) Color.White else Color(0xFF1E293B)
-    val colWidth = 130.dp
+    // Current theme matching colors
+    val gridBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDarkBg) 0.35f else 0.45f)
+    val headerBgColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isDarkBg) 0.22f else 0.28f)
+    val headerTextColor = MaterialTheme.colorScheme.onSurface
+    val cellTextColor = MaterialTheme.colorScheme.onSurface
+
+    // Adaptive column widths: adjusts automatically to the largest content in each column
+    val colWidths = remember(block.headers, block.rows) {
+        block.headers.indices.map { colIdx ->
+            val hText = block.headers.getOrElse(colIdx) { "" }
+            val cleanH = hText.replace(Regex("<[^>]+>|\\*\\*|\\*|~~|==|`|\\$|\\\\ce\\{|\\}"), "")
+            val maxRowTextLen = block.rows.maxOfOrNull { r ->
+                val cText = r.getOrElse(colIdx) { "" }
+                cText.replace(Regex("<[^>]+>|\\*\\*|\\*|~~|==|`|\\$|\\\\ce\\{|\\}"), "").length
+            } ?: 0
+            val maxChars = maxOf(cleanH.length, maxRowTextLen)
+            (maxChars * 8.5f + 32f).dp.coerceIn(68.dp, 260.dp)
+        }
+    }
+
+    var activeCell by remember { mutableStateOf<Pair<Int, Int>?>(null) } // Pair(rowIdx, colIdx), -1 for header
+
+    fun formatActiveCell(prefix: String, suffix: String) {
+        val (r, c) = activeCell ?: return
+        if (r == -1) {
+            val oldVal = block.headers.getOrElse(c) { "" }
+            val newVal = InlineMarkdownHelper.toggleOrWrap(oldVal, prefix, suffix)
+            val newHeaders = block.headers.toMutableList().apply { set(c, newVal) }
+            onUpdate(block.copy(headers = newHeaders))
+        } else {
+            val oldVal = block.rows.getOrNull(r)?.getOrNull(c) ?: ""
+            val newVal = InlineMarkdownHelper.toggleOrWrap(oldVal, prefix, suffix)
+            val newRows = block.rows.map { it.toMutableList() }.toMutableList()
+            while (newRows.size <= r) newRows.add(MutableList(block.headers.size) { "" })
+            while (newRows[r].size <= c) newRows[r].add("")
+            newRows[r][c] = newVal
+            onUpdate(block.copy(rows = newRows))
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1391,7 +1448,7 @@ fun ExcelTableEditor(
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
-                    text = "Planilha (${block.headers.size} cols × ${block.rows.size} lins)",
+                    text = "Tabela (${block.headers.size} cols × ${block.rows.size} lins)",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -1465,56 +1522,159 @@ fun ExcelTableEditor(
             }
         }
 
-        // Excel Spreadsheet Grid with Horizontal Scroll and Sharp Borders (No rounded bubbles!)
+        // Cell Quick Formatting Toolbar when a cell is actively focused
+        if (activeCell != null) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("Formatar:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("**", "**") }
+                    ) {
+                        Text("B", fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("*", "*") }
+                    ) {
+                        Text("I", fontStyle = FontStyle.Italic, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("`", "`") }
+                    ) {
+                        Text("`C`", fontFamily = FontFamily.Monospace, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("~~", "~~") }
+                    ) {
+                        Text("S", textDecoration = TextDecoration.LineThrough, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("<u>", "</u>") }
+                    ) {
+                        Text("U", textDecoration = TextDecoration.Underline, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("==", "==") }
+                    ) {
+                        Text("🖍️", fontSize = 10.sp, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("$", "$") }
+                    ) {
+                        Text("$ fx", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.clickable { formatActiveCell("$\\ce{", "}$") }
+                    ) {
+                        Text("🧪 ce", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { activeCell = null }
+                    ) {
+                        Text("Concluir", color = MaterialTheme.colorScheme.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                    }
+                }
+            }
+        }
+
+        // Harmonious Spreadsheet Grid with Adaptive Column Widths & Soft Borders
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, gridBorderColor)
+                .border(1.dp, gridBorderColor, RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(6.dp))
                 .horizontalScroll(rememberScrollState())
         ) {
             Column {
-                // Header Row (Primeira linha mais carregada, estilo cabeçalho do Excel)
+                // Header Row (Lightly highlighted header in current theme color)
                 Row(
                     modifier = Modifier
                         .background(headerBgColor)
                         .border(width = 0.5.dp, color = gridBorderColor)
                 ) {
                     block.headers.forEachIndexed { colIdx, header ->
+                        val colW = colWidths.getOrElse(colIdx) { 110.dp }
+                        val isEditingThisHeader = activeCell == Pair(-1, colIdx)
+
                         Box(
                             modifier = Modifier
-                                .width(colWidth)
+                                .width(colW)
                                 .defaultMinSize(minHeight = 38.dp)
                                 .border(width = 0.5.dp, color = gridBorderColor)
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                .clickable { activeCell = Pair(-1, colIdx) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
-                            BasicTextField(
-                                value = header,
-                                onValueChange = { newH ->
-                                    val newHeaders = block.headers.toMutableList().apply { set(colIdx, newH) }
-                                    onUpdate(block.copy(headers = newHeaders))
-                                },
-                                singleLine = false,
-                                maxLines = 6,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                                textStyle = MaterialTheme.typography.bodySmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = headerTextColor
-                                ),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            if (isEditingThisHeader) {
+                                BasicTextField(
+                                    value = header,
+                                    onValueChange = { newH ->
+                                        val newHeaders = block.headers.toMutableList().apply { set(colIdx, newH) }
+                                        onUpdate(block.copy(headers = newHeaders))
+                                    },
+                                    singleLine = false,
+                                    maxLines = 8,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = headerTextColor
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            } else {
+                                Text(
+                                    text = InlineMarkdownHelper.parseInlineFormatting(header.ifBlank { "Coluna ${colIdx + 1}" }, isDark = isDarkBg),
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = headerTextColor
+                                    ),
+                                    softWrap = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }
 
-                // Data Rows (Células no estilo planilha Excel com edição direta)
+                // Data Rows (Harmonious alternating subtle background, adaptive column widths)
                 block.rows.forEachIndexed { rowIdx, row ->
                     val rowBg = if (rowIdx % 2 == 0) {
-                        if (isDarkBg) Color(0xFF1E293B) else Color.White
+                        Color.Transparent
                     } else {
-                        if (isDarkBg) Color(0xFF0F172A) else Color(0xFFF8FAFC)
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (isDarkBg) 0.15f else 0.25f)
                     }
 
                     Row(
@@ -1522,43 +1682,59 @@ fun ExcelTableEditor(
                             .background(rowBg)
                             .border(width = 0.5.dp, color = gridBorderColor)
                     ) {
-                        // Ensure row has same count of cells as headers
                         val safeCells = if (row.size < block.headers.size) {
                             row + List(block.headers.size - row.size) { "" }
                         } else row
 
                         safeCells.take(block.headers.size).forEachIndexed { colIdx, cell ->
+                            val colW = colWidths.getOrElse(colIdx) { 110.dp }
+                            val isEditingThisCell = activeCell == Pair(rowIdx, colIdx)
+
                             Box(
                                 modifier = Modifier
-                                    .width(colWidth)
+                                    .width(colW)
                                     .defaultMinSize(minHeight = 38.dp)
                                     .border(width = 0.5.dp, color = gridBorderColor)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    .clickable { activeCell = Pair(rowIdx, colIdx) }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
-                                BasicTextField(
-                                    value = cell,
-                                    onValueChange = { newCell ->
-                                        val newRows = block.rows.map { it.toMutableList() }.toMutableList()
-                                        while (newRows.size <= rowIdx) {
-                                            newRows.add(MutableList(block.headers.size) { "" })
-                                        }
-                                        while (newRows[rowIdx].size <= colIdx) {
-                                            newRows[rowIdx].add("")
-                                        }
-                                        newRows[rowIdx][colIdx] = newCell
-                                        onUpdate(block.copy(rows = newRows))
-                                    },
-                                    singleLine = false,
-                                    maxLines = 8,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                                    textStyle = MaterialTheme.typography.bodySmall.copy(
-                                        fontSize = 12.sp,
-                                        color = cellTextColor
-                                    ),
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                if (isEditingThisCell) {
+                                    BasicTextField(
+                                        value = cell,
+                                        onValueChange = { newCell ->
+                                            val newRows = block.rows.map { it.toMutableList() }.toMutableList()
+                                            while (newRows.size <= rowIdx) {
+                                                newRows.add(MutableList(block.headers.size) { "" })
+                                            }
+                                            while (newRows[rowIdx].size <= colIdx) {
+                                                newRows[rowIdx].add("")
+                                            }
+                                            newRows[rowIdx][colIdx] = newCell
+                                            onUpdate(block.copy(rows = newRows))
+                                        },
+                                        singleLine = false,
+                                        maxLines = 10,
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 12.sp,
+                                            color = cellTextColor
+                                        ),
+                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    Text(
+                                        text = InlineMarkdownHelper.parseInlineFormatting(cell.ifBlank { " " }, isDark = isDarkBg),
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 12.sp,
+                                            lineHeight = 16.sp,
+                                            color = cellTextColor
+                                        ),
+                                        softWrap = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
                     }

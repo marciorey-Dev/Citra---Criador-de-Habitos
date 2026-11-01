@@ -201,23 +201,28 @@ object MediaStorageHelper {
      */
     fun isMediaFileValid(context: Context, pathOrUri: String?): Boolean {
         if (pathOrUri.isNullOrBlank()) return false
+        val clean = pathOrUri.trim()
+        // Links diretos da internet (http/https) são válidos
+        if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+            return true
+        }
         return try {
-            if (pathOrUri.startsWith("content://")) {
-                val uri = Uri.parse(pathOrUri)
+            if (clean.startsWith("content://")) {
+                val uri = Uri.parse(clean)
                 context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                     pfd.statSize > 0
                 } ?: false
             } else {
-                val cleanPath = pathOrUri.removePrefix("file://")
+                val cleanPath = clean.removePrefix("file://")
                 val f = File(cleanPath)
                 if (f.exists() && f.length() > 0) {
                     true
                 } else {
-                    openInputStream(context, pathOrUri)?.use { true } ?: false
+                    openInputStream(context, clean)?.use { true } ?: false
                 }
             }
         } catch (_: Exception) {
-            false
+            true // Evita falsos negativos bloqueando a renderização
         }
     }
 

@@ -683,11 +683,14 @@ private fun HabitEmojiSection(
 ) {
     val suggestedEmojis = listOf(
         "💧", "🏃", "📖", "🧘", "🍏", "💪", "🎯", "✍️",
-        "🌿", "🚶", "🚴", "💤", "🧼", "💊", "☕", "✨"
+        "🌿", "🚶", "🚴", "💤", "🧼", "💊", "☕", "✨",
+        "🧠", "🍎", "🥗", "🏋️", "🏊", "🧗", "🤸", "🥊",
+        "📚", "💻", "🎨", "🎵", "🎸", "🌱", "☀️", "🌙",
+        "🔥", "⚡", "❤️", "🧹", "🪴", "🍳", "🥤", "🫁"
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Escolha ou digite um Emoji:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("Escolha ou digite qualquer Emoji (campo livre):", fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -700,13 +703,14 @@ private fun HabitEmojiSection(
                     .background(OrangeContainer, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(selectedEmoji, fontSize = 22.sp)
+                Text(selectedEmoji.ifBlank { "🍊" }, fontSize = 22.sp)
             }
 
             OutlinedTextField(
                 value = selectedEmoji,
-                onValueChange = { if (it.length <= 4) onSelectEmoji(it) },
-                label = { Text("Emoji") },
+                onValueChange = { onSelectEmoji(it) },
+                label = { Text("Qualquer Emoji do Teclado") },
+                placeholder = { Text("Digite ou cole...") },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
