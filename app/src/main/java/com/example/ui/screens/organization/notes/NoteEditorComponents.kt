@@ -73,6 +73,7 @@ fun VisualBlockItem(
     onLongPressChecklist: ((ChecklistBlock) -> Unit)? = null,
     onMoveUp: (() -> Unit)? = null,
     onMoveDown: (() -> Unit)? = null,
+    onReplaceMedia: (() -> Unit)? = null,
     onUpdate: (VisualBlock) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -759,6 +760,14 @@ fun VisualBlockItem(
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            // Replace image button
+                            IconButton(
+                                onClick = { onReplaceMedia?.invoke() },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.ArrowDownward, contentDescription = "Substituir Imagem", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            }
+
                             // Fullscreen View button
                             if (block.url.isNotBlank()) {
                                 IconButton(
@@ -814,32 +823,8 @@ fun VisualBlockItem(
                         }
                     }
 
-                    val isMediaValid = remember(block.url) {
-                        block.url.isBlank() || com.example.util.MediaStorageHelper.isMediaFileValid(context, block.url)
-                    }
-
-                    if (!isMediaValid) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(Icons.Default.BrokenImage, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Imagem não encontrada ou inacessível", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                                    Text(block.url.substringAfterLast('/'), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f))
-                                }
-                            }
-                        }
-                    }
-
                     // Side-by-side or Centered image preview
-                    if (block.url.isNotBlank() && isMediaValid) {
+                    if (block.url.isNotBlank()) {
                         val hasSideText = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right")
                         val imageFraction = (block.widthPercent / 100f).coerceIn(0.25f, 0.75f)
 
@@ -957,6 +942,7 @@ fun VisualBlockItem(
             AudioBlockPlayer(
                 block = block,
                 onUpdate = onUpdate,
+                onReplace = onReplaceMedia,
                 onDelete = onDelete
             )
         }
@@ -1092,6 +1078,7 @@ private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third:
 private fun AudioBlockPlayer(
     block: AudioBlock,
     onUpdate: (AudioBlock) -> Unit,
+    onReplace: (() -> Unit)? = null,
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1138,6 +1125,9 @@ private fun AudioBlockPlayer(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Áudio não encontrado ou inacessível", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
                     Text(block.url.substringAfterLast('/'), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f))
+                }
+                IconButton(onClick = { onReplace?.invoke() }, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.ArrowDownward, contentDescription = "Substituir áudio", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Default.Close, contentDescription = "Remover", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
@@ -1204,6 +1194,13 @@ private fun AudioBlockPlayer(
                             modifier = Modifier.size(12.dp).clickable { isEditingTitle = true }
                         )
                     }
+                }
+
+                IconButton(
+                    onClick = { onReplace?.invoke() },
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(Icons.Default.ArrowDownward, contentDescription = "Substituir áudio", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 }
 
                 IconButton(

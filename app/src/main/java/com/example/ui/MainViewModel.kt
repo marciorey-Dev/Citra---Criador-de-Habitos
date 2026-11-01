@@ -6,8 +6,11 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import java.io.File
 import com.example.audio.LocalMusicPlayer
 import com.example.data.backup.BackupManager
 import com.example.data.local.AppDatabase
@@ -735,7 +738,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     title = title,
                                     content = content,
                                     category = "Geral",
-                                    createdAt = file.lastModified(),
                                     updatedAt = file.lastModified()
                                 )
                             )
@@ -749,11 +751,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 docsError = "Erro ao acessar 'Citra Docs': ${e.message}"
             }
 
-            // 2. Verificar pasta "Citra Records"
+            // 2. Verificar pasta "Citra Records" e carregar os arquivos de lá
             try {
-                val recFolder = File(context.filesDir, "CitraRecord")
+                val recFolder = com.example.util.MediaStorageHelper.getCitraRecordsFolder(context)
                 if (!recFolder.exists()) {
-                    recFolder.mkdirs()
+                    val created = recFolder.mkdirs()
+                    if (!created && !recFolder.exists()) {
+                        recordsError = "Pasta 'Citra Records' não pôde ser criada. Verifique as permissões de armazenamento."
+                    }
+                }
+                if (recFolder.exists()) {
+                    val recFiles = recFolder.listFiles { f ->
+                        f.isFile && (f.name.endsWith(".m4a", ignoreCase = true) ||
+                                     f.name.endsWith(".mp3", ignoreCase = true) ||
+                                     f.name.endsWith(".wav", ignoreCase = true) ||
+                                     f.name.endsWith(".aac", ignoreCase = true))
+                    } ?: emptyArray()
+                    // Pastas e arquivos de áudio validados com sucesso
                 }
             } catch (e: Exception) {
                 recordsError = "Erro na pasta Citra Records: ${e.message}"
@@ -800,7 +814,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 title = finalTitle,
                                 content = content,
                                 category = "Geral",
-                                createdAt = System.currentTimeMillis(),
                                 updatedAt = System.currentTimeMillis()
                             )
                         )

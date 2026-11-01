@@ -122,21 +122,66 @@ object MediaStorageHelper {
     }
 
     /**
-     * Copies an imported note image to permanent internal app storage.
+     * Obtains the directory "Citra Pic" located in Android's Pictures folder.
+     */
+    fun getCitraPicFolder(context: Context): File {
+        try {
+            val publicPictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            val citraPicDir = File(publicPictures, "Citra Pic")
+            if (citraPicDir.exists() || citraPicDir.mkdirs()) {
+                return citraPicDir
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Public Pictures directory inaccessible, trying external app pictures", e)
+        }
+
+        try {
+            val extPictures = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+            if (extPictures != null) {
+                val citraPicDir = File(extPictures, "Citra Pic")
+                if (citraPicDir.exists() || citraPicDir.mkdirs()) {
+                    return citraPicDir
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "External app pictures directory failed, falling back to internal storage", e)
+        }
+
+        val internalDir = File(context.filesDir, "Citra Pic")
+        if (!internalDir.exists()) {
+            internalDir.mkdirs()
+        }
+        return internalDir
+    }
+
+    /**
+     * Copies an imported note image into "Citra Pic" (under Android's Pictures directory)
+     * and returns the exact absolute path so it can be stored directly in the note.
      */
     fun saveNoteImage(context: Context, source: String): String? {
         return try {
-            val dir = File(context.filesDir, "note_images").apply { if (!exists()) mkdirs() }
+            val dir = getCitraPicFolder(context)
             val extension = getExtension(context, source) ?: "jpg"
-            val destFile = File(dir, "img_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
+            val destFile = File(dir, "citra_pic_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
             openInputStream(context, source)?.use { input ->
                 FileOutputStream(destFile).use { output ->
                     input.copyTo(output)
                 }
             } ?: return null
+
+            // Notify MediaScanner so it is visible in Android gallery/file explorer
+            try {
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(destFile.absolutePath),
+                    arrayOf("image/*"),
+                    null
+                )
+            } catch (_: Exception) {}
+
             destFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save note image", e)
+            Log.e(TAG, "Failed to save note image to Citra Pic", e)
             null
         }
     }
@@ -146,32 +191,61 @@ object MediaStorageHelper {
     }
 
     /**
-     * Saves an imported note audio file into permanent internal app storage:
-     * - If <= 10MB: saved in internal note_audios/
-     * - If > 10MB: saved in internal large_audios/
+     * Obtains the primary Citra Records directory (public Recordings/Music/Documents or app storage).
+     */
+    fun getCitraRecordsFolder(context: Context): File {
+        try {
+            val publicDir = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS)
+            } else {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            }
+            val citraRec = File(publicDir, "Citra Records")
+            if (citraRec.exists() || citraRec.mkdirs()) {
+                return citraRec
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val publicDocs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val citraRec = File(publicDocs, "Citra Records")
+            if (citraRec.exists() || citraRec.mkdirs()) {
+                return citraRec
+            }
+        } catch (_: Exception) {}
+
+        val extDir = context.getExternalFilesDir("Citra Records")
+        if (extDir != null && (extDir.exists() || extDir.mkdirs())) {
+            return extDir
+        }
+        val internalDir = File(context.filesDir, "Citra Records")
+        if (!internalDir.exists()) internalDir.mkdirs()
+        return internalDir
+    }
+
+    /**
+     * Saves an imported note audio file into "Citra Records" and returns its absolute path.
      */
     fun saveNoteAudio(context: Context, source: String): String? {
         return try {
-            val size = if (source.startsWith("content://")) getFileSize(context, Uri.parse(source)) else {
-                val f = File(source.removePrefix("file://"))
-                if (f.exists()) f.length() else 0L
-            }
             val extension = getExtension(context, source) ?: "m4a"
-            val isLarge = size > (10 * 1024 * 1024) // > 10MB
-
-            val targetDir = if (isLarge) {
-                File(context.filesDir, "large_audios").apply { if (!exists()) mkdirs() }
-            } else {
-                File(context.filesDir, "note_audios").apply { if (!exists()) mkdirs() }
-            }
-
-            val prefix = if (isLarge) "audio_large" else "audio"
-            val destFile = File(targetDir, "${prefix}_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
+            val targetDir = getCitraRecordsFolder(context)
+            val destFile = File(targetDir, "audio_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
             openInputStream(context, source)?.use { input ->
                 FileOutputStream(destFile).use { output ->
                     input.copyTo(output)
                 }
             } ?: return null
+
+            try {
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(destFile.absolutePath),
+                    arrayOf("audio/*"),
+                    null
+                )
+            } catch (_: Exception) {}
+
             destFile.absolutePath
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save note audio", e)
@@ -184,14 +258,12 @@ object MediaStorageHelper {
     }
 
     /**
-     * Prepares an audio recording output file in app's permanent private storage
-     * (File(context.filesDir, "CitraRecord")), ensuring it survives device reboot,
-     * app cache clearing, and never depends on temporary media permissions.
+     * Prepares an audio recording output file in "Citra Records".
      */
     fun createRecordingFile(context: Context): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "CitraRec_$timeStamp.m4a"
-        val dir = File(context.filesDir, "CitraRecord").apply { if (!exists()) mkdirs() }
+        val dir = getCitraRecordsFolder(context)
         return File(dir, fileName)
     }
 

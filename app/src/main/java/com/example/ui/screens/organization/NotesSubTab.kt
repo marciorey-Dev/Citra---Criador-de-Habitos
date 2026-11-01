@@ -79,6 +79,14 @@ fun NotesSubTab(
     var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
     var showSortMenu by remember { mutableStateOf(false) }
 
+    val importMultipleNotesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importMultipleMarkdownFiles(uris, context)
+        }
+    }
+
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
         if (openCreateTrigger) {
@@ -208,10 +216,8 @@ fun NotesSubTab(
                 activeNoteToEdit = note
                 isCreatingNew = false
             },
-            initialMode = if (viewModel.getLastNoteEditorMode() == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
-            onModeChanged = { mode ->
-                viewModel.setLastNoteEditorMode(mode.name)
-            },
+            initialMode = NoteEditorMode.LIVE_PREVIEW,
+            onModeChanged = null,
             onToggleChecklistTaskSync = { checklistText, isChecked ->
                 viewModel.syncChecklistToTask(checklistText, isChecked)
             },
@@ -280,6 +286,22 @@ fun NotesSubTab(
                         .weight(1f)
                         .testTag("notes_search_input")
                 )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                IconButton(
+                    onClick = { importMultipleNotesLauncher.launch("*/*") },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
+                        .testTag("notes_import_multiple_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FileOpen,
+                        contentDescription = "Importar Várias Notas (.md)",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Spacer(modifier = Modifier.width(8.dp))
 

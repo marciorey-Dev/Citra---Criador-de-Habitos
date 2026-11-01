@@ -82,6 +82,10 @@ object LatexFormulaRenderer {
      * Converts raw LaTeX chemistry notation inside \ce{...} or ce{...}
      * into readable Unicode chemical formulas (e.g. \ce{H2O} -> H₂O, \ce{CO2} -> CO₂).
      */
+    /**
+     * Converts raw LaTeX chemistry notation inside \ce{...} or plain formulas (e.g. H2O, CO2, 2H2 + O2 -> 2H2O)
+     * into readable Unicode chemical formulas.
+     */
     fun renderChemistry(raw: String): String {
         return try {
             val content = raw.removePrefix("\\ce{").removePrefix("ce{").removeSuffix("}").trim()
@@ -89,7 +93,7 @@ object LatexFormulaRenderer {
             var out = content
 
             // 1. Reactions arrows: -> to →, <=> to ⇌
-            out = out.replace("->", "→").replace("<=>", "⇌")
+            out = out.replace("->", " → ").replace("<=>", " ⇌ ")
 
             // 2. Charges: e.g. ^2+ or ^{2+} to ²⁺, ^- or ^{-} to ⁻, ^+ or ^{+} to ⁺
             out = out.replace(Regex("\\^\\{?([0-9]*[+-])\\}?")) { match ->
@@ -97,7 +101,7 @@ object LatexFormulaRenderer {
                 charge.map { superscriptMap[it] ?: it }.joinToString("")
             }
 
-            // 3. Numbers following element symbols (A-Z or a-z) become subscripts (e.g. H2O -> H₂O, SO4 -> SO₄)
+            // 3. Numbers following element symbols (A-Z or a-z or closing parenthesis) become subscripts (e.g. H2O -> H₂O, SO4 -> SO₄, (OH)2 -> (OH)₂)
             out = out.replace(Regex("([a-zA-Z\\)])(\\d+)")) { match ->
                 val prefix = match.groupValues[1]
                 val digits = match.groupValues[2]
@@ -119,18 +123,20 @@ object LatexFormulaRenderer {
      */
     fun renderFormulaToText(input: String): String {
         val trimmed = input.trim()
-        val error = validateFormula(trimmed)
-        if (error != null) {
-            return "[⚠️ Fórmula: $trimmed]"
-        }
+        if (trimmed.isEmpty()) return ""
 
         return try {
             var text = trimmed
 
-            // 1. Check for chemical notation: \ce{...}
+            // 1. Check for chemical notation: \ce{...} or auto-detect chemistry
             val ceRegex = Regex("(\\\\ce\\{[^}]+\\}|ce\\{[^}]+\\})")
-            text = ceRegex.replace(text) { match ->
-                renderChemistry(match.value)
+            if (ceRegex.containsMatchIn(text)) {
+                text = ceRegex.replace(text) { match ->
+                    renderChemistry(match.value)
+                }
+            } else if (text.contains("->") || text.contains("<=>") || Regex("[A-Z][a-z]?\\d+").containsMatchIn(text)) {
+                // Auto-render chemical equations without \ce{}
+                text = renderChemistry(text)
             }
 
             // 2. Fractions: \frac{num}{den} -> (num) / (den) or clean form
@@ -203,9 +209,9 @@ object LatexFormulaRenderer {
             // 9. Extra polish for standalone multiplication and equality
             text = text.replace(Regex("(?<=[a-zA-Z0-9])\\s*\\*\\s*(?=[a-zA-Z0-9])"), " · ")
 
-            text.trim()
+            text.trim().ifEmpty { trimmed }
         } catch (_: Exception) {
-            "[⚠️ Fórmula: $trimmed]"
+            trimmed
         }
     }
 
@@ -213,18 +219,9 @@ object LatexFormulaRenderer {
      * Formats an inline formula into an AnnotatedString with math typography and background badge.
      */
     fun formatAnnotatedInline(raw: String, isDark: Boolean): AnnotatedString {
-        val error = validateFormula(raw.trim())
-        if (error != null) {
-            return buildAnnotatedString {
-                withStyle(SpanStyle(color = Color(0xFFEF4444), fontSize = 13.sp, fontStyle = FontStyle.Normal)) {
-                    append("[⚠️ Fórmula: ${raw.trim()}]")
-                }
-            }
-        }
-
-        val rendered = renderFormulaToText(raw)
-        val pillBg = if (isDark) Color(0xFF334155).copy(alpha = 0.5f) else Color(0xFFF1F5F9)
-        val textCol = if (isDark) Color(0xFF93C5FD) else Color(0xFF0F172A)
+        val rendered = renderFormulaToText(raw).ifBlank { raw.trim() }
+        val pillBg = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+        val textCol = if (isDark) Color(0xFF67E8F9) else Color(0xFF0369A1)
         return buildAnnotatedString {
             withStyle(
                 SpanStyle(
@@ -244,18 +241,9 @@ object LatexFormulaRenderer {
      * Formats a block formula ($$formula$$) into an AnnotatedString with prominent highlighted typography.
      */
     fun formatAnnotatedBlock(raw: String, isDark: Boolean, accentColor: Color = Color(0xFFF97316)): AnnotatedString {
-        val error = validateFormula(raw.trim())
-        if (error != null) {
-            return buildAnnotatedString {
-                withStyle(SpanStyle(color = Color(0xFFEF4444), fontSize = 14.sp, fontStyle = FontStyle.Normal)) {
-                    append("[⚠️ Erro na fórmula: ${raw.trim()} • $error]")
-                }
-            }
-        }
-
-        val rendered = renderFormulaToText(raw)
-        val blockBg = if (isDark) Color(0xFF1E293B) else Color(0xFFFEF3C7)
-        val textCol = if (isDark) Color(0xFFFDE68A) else Color(0xFF78350F)
+        val rendered = renderFormulaToText(raw).ifBlank { raw.trim() }
+        val blockBg = if (isDark) Color(0xFF1E293B) else Color(0xFFFFEDD5)
+        val textCol = if (isDark) Color(0xFFFDE047) else Color(0xFF9A3412)
         return buildAnnotatedString {
             append("\n")
             withStyle(
@@ -263,7 +251,7 @@ object LatexFormulaRenderer {
                     fontFamily = FontFamily.Serif,
                     fontStyle = FontStyle.Italic,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 19.sp,
+                    fontSize = 18.sp,
                     background = blockBg,
                     color = textCol
                 )

@@ -123,19 +123,8 @@ fun FullScreenNoteEditor(
     val snackbarHostState = remember { SnackbarHostState() }
     val noteScrollState = rememberScrollState()
 
-    var isToolbarVisible by remember { mutableStateOf(true) }
-    var previousScrollOffset by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(noteScrollState.value) {
-        val currentOffset = noteScrollState.value
-        val delta = currentOffset - previousScrollOffset
-        if (delta > 8 && currentOffset > 60) {
-            isToolbarVisible = false
-        } else if (delta < -8 || currentOffset <= 20) {
-            isToolbarVisible = true
-        }
-        previousScrollOffset = currentOffset
-    }
+    // Floating toolbar is persistent: it stays visible and does not hide on scroll down
+    val isToolbarVisible = true
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
     var category by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
@@ -148,16 +137,13 @@ fun FullScreenNoteEditor(
     var editorValue by remember {
         mutableStateOf(TextFieldValue(initialNote?.content ?: ""))
     }
-    val prefsManager = remember { PreferencesManager(context) }
-    // Saved mode (Live Preview or Modo Leitura) - persists across all notes
+    // Always start in Live Preview (do not remember last mode across notes)
     var editorMode by remember {
-        val saved = prefsManager.getLastNoteEditorMode()
-        mutableStateOf(if (saved == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW)
+        mutableStateOf(NoteEditorMode.LIVE_PREVIEW)
     }
 
     fun switchEditorMode(newMode: NoteEditorMode) {
         editorMode = newMode
-        prefsManager.setLastNoteEditorMode(newMode.name)
         onModeChanged?.invoke(newMode)
     }
 
@@ -283,35 +269,12 @@ fun FullScreenNoteEditor(
         return (ratio * editorValue.text.length).toInt().coerceIn(0, editorValue.text.length)
     }
 
-    var lastTapTimestamp by remember { mutableLongStateOf(0L) }
-    var tapCounter by remember { mutableIntStateOf(0) }
-
-    fun onReadingAreaTapped(blockIdx: Int, textOffset: Int = -1) {
-        val now = System.currentTimeMillis()
-        if (now - lastTapTimestamp < 500L) {
-            tapCounter++
-        } else {
-            tapCounter = 1
-        }
-        lastTapTimestamp = now
-
-        if (tapCounter >= 3) {
-            tapCounter = 0
-            val baseOffset = findBlockCharOffset(blockIdx)
-            val targetChar = if (textOffset >= 0) {
-                (baseOffset + textOffset).coerceIn(0, editorValue.text.length)
-            } else {
-                baseOffset
-            }
-            editorValue = editorValue.copy(selection = TextRange(targetChar))
-            switchEditorMode(NoteEditorMode.LIVE_PREVIEW)
-            coroutineScope.launch {
-                try {
-                    bodyFocusRequester.requestFocus()
-                } catch (_: Exception) {}
-            }
-        }
+    fun updateBlocksAndMarkdown(newBlocks: List<VisualBlock>) {
+        pushHistory()
+        val md = SmoothMarkdownConverter.blocksToMarkdown(newBlocks)
+        editorValue = editorValue.copy(text = md)
     }
+
 
     DisposableEffect(Unit) {
         onDispose {
@@ -389,28 +352,13 @@ fun FullScreenNoteEditor(
         saveCurrent(close = true)
     }
 
-    // Link navigation handler
+    // Link navigation handler (external web links only; internal note links discarded)
     fun handleLinkClick(target: String) {
-        val clean = target.trim().removeSurrounding("[[", "]]").trim()
-        val noteTitle = if (clean.startsWith("note:")) clean.removePrefix("note:").trim() else clean
-
-        // 1. Link interno: salvar e fechar a nota atual, abrir a nota ligada
-        val matchedNote = allNotes.firstOrNull {
-            it.title.equals(noteTitle, ignoreCase = true) ||
-            it.id.toString() == noteTitle ||
-            it.title.equals(clean, ignoreCase = true)
-        } ?: allNotes.firstOrNull { it.title.contains(noteTitle, ignoreCase = true) }
-
-        if (matchedNote != null) {
-            saveCurrent(close = false)
-            onOpenLinkedNote?.invoke(matchedNote)
-            return
-        }
-
-        // 2. Link externo: abrir no navegador do Android
+        val clean = target.trim()
         val isWeb = clean.startsWith("http://", ignoreCase = true) ||
                 clean.startsWith("https://", ignoreCase = true) ||
                 clean.startsWith("www.", ignoreCase = true) ||
+                (clean.contains(".") && !clean.contains(" "))
                 (clean.contains(".") && !clean.contains(" "))
 
         if (isWeb) {
@@ -530,6 +478,72 @@ fun FullScreenNoteEditor(
                 }
             }
         }
+    }
+
+    // Media Replacement State
+    var tokenToReplaceForImage by remember { mutableStateOf<MediaTokenInfo?>(null) }
+    var tokenToReplaceForAudio by remember { mutableStateOf<MediaTokenInfo?>(null) }
+    var blockIndexToReplaceForImage by remember { mutableStateOf<Int?>(null) }
+    var blockIndexToReplaceForAudio by remember { mutableStateOf<Int?>(null) }
+
+    val replaceImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val savedPath = MediaStorageHelper.saveNoteImage(context, uri)
+            if (savedPath != null) {
+                pushHistory()
+                val targetToken = tokenToReplaceForImage
+                val targetIdx = blockIndexToReplaceForImage
+                if (targetToken != null) {
+                    val newToken = targetToken.rawMatch.replace(targetToken.url, savedPath)
+                    val newText = editorValue.text.replace(targetToken.rawMatch, newToken)
+                    editorValue = editorValue.copy(text = newText)
+                } else if (targetIdx != null && targetIdx in readingBlocks.indices) {
+                    val currentBlock = readingBlocks[targetIdx]
+                    if (currentBlock is ImageBlock) {
+                        val updated = currentBlock.copy(url = savedPath)
+                        val list = readingBlocks.toMutableList().apply { set(targetIdx, updated) }
+                        updateBlocksAndMarkdown(list)
+                    }
+                }
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Imagem substituída com sucesso!")
+                }
+            }
+        }
+        tokenToReplaceForImage = null
+        blockIndexToReplaceForImage = null
+    }
+
+    val replaceAudioPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val savedPath = MediaStorageHelper.saveNoteAudio(context, uri)
+            if (savedPath != null) {
+                pushHistory()
+                val targetToken = tokenToReplaceForAudio
+                val targetIdx = blockIndexToReplaceForAudio
+                if (targetToken != null) {
+                    val newToken = targetToken.rawMatch.replace(targetToken.url, savedPath)
+                    val newText = editorValue.text.replace(targetToken.rawMatch, newToken)
+                    editorValue = editorValue.copy(text = newText)
+                } else if (targetIdx != null && targetIdx in readingBlocks.indices) {
+                    val currentBlock = readingBlocks[targetIdx]
+                    if (currentBlock is AudioBlock) {
+                        val updated = currentBlock.copy(url = savedPath)
+                        val list = readingBlocks.toMutableList().apply { set(targetIdx, updated) }
+                        updateBlocksAndMarkdown(list)
+                    }
+                }
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Áudio substituído com sucesso!")
+                }
+            }
+        }
+        tokenToReplaceForAudio = null
+        blockIndexToReplaceForAudio = null
     }
 
     val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
@@ -1125,51 +1139,7 @@ fun FullScreenNoteEditor(
                         .padding(top = 8.dp, bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Warning banner for missing media files
-                    if (missingMediaTokens.isNotEmpty()) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Warning,
-                                        contentDescription = "Aviso de mídia",
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Text(
-                                        text = "Arquivos de mídia não encontrados nesta nota",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                }
-                                missingMediaTokens.forEach { missingItem ->
-                                    Text(
-                                        text = "• $missingItem",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                }
-                                Text(
-                                    text = "O arquivo de origem pode ter sido apagado do aparelho. Novas mídias inseridas são copiadas e mantidas de forma permanente.",
-                                    fontSize = 11.sp,
-                                    fontStyle = FontStyle.Italic,
-                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f)
-                                )
-                            }
-                        }
-                    }
+
                 // 1. Note Title Input
                 OutlinedTextField(
                     value = title,
@@ -1285,6 +1255,10 @@ fun FullScreenNoteEditor(
                                         val newText = editorValue.text.replace(token.rawMatch, newToken)
                                         editorValue = editorValue.copy(text = newText)
                                     },
+                                    onReplace = {
+                                        tokenToReplaceForAudio = token
+                                        replaceAudioPickerLauncher.launch("audio/*")
+                                    },
                                     onDelete = {
                                         pushHistory()
                                         val newText = editorValue.text.replace(token.rawMatch, "").replace("\n\n\n", "\n\n")
@@ -1296,6 +1270,10 @@ fun FullScreenNoteEditor(
                                     token = token,
                                     isDarkBg = isDarkBg,
                                     onClickFullscreen = { fullscreenImageUrl = token.url },
+                                    onReplace = {
+                                        tokenToReplaceForImage = token
+                                        replaceImagePickerLauncher.launch("image/*")
+                                    },
                                     onChangeWidth = { newWidth ->
                                         pushHistory()
                                         val sidePart = if (token.sideText.isNotEmpty()) {
@@ -1416,14 +1394,7 @@ fun FullScreenNoteEditor(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .defaultMinSize(minHeight = 400.dp)
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onTap = {
-                                            onReadingAreaTapped(readingBlocks.size)
-                                        }
-                                    )
-                                },
+                                .defaultMinSize(minHeight = 400.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             readingBlocks.forEachIndexed { idx, block ->
@@ -1450,14 +1421,6 @@ fun FullScreenNoteEditor(
                                             color = headingColor,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .pointerInput(block.text) {
-                                                    detectTapGestures(
-                                                        onTap = {
-                                                            onReadingAreaTapped(idx)
-                                                            centerBlockOnScreen(idx)
-                                                        }
-                                                    )
-                                                }
                                                 .padding(vertical = 4.dp)
                                         )
                                     }
@@ -1468,14 +1431,6 @@ fun FullScreenNoteEditor(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .height(18.dp)
-                                                    .pointerInput(Unit) {
-                                                        detectTapGestures(
-                                                            onTap = {
-                                                                onReadingAreaTapped(idx)
-                                                                centerBlockOnScreen(idx)
-                                                            }
-                                                        )
-                                                    }
                                             )
                                         } else {
                                             var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -1497,11 +1452,8 @@ fun FullScreenNoteEditor(
                                                             onTap = { pos ->
                                                                 val offset = layoutResult?.getOffsetForPosition(pos) ?: -1
                                                                 val links = if (offset != -1) annotated.getStringAnnotations("LINK", offset, offset) else emptyList()
-                                                                if (links.isNotEmpty() && tapCounter == 0) {
+                                                                if (links.isNotEmpty()) {
                                                                     handleLinkClick(links.first().item)
-                                                                } else {
-                                                                    onReadingAreaTapped(idx, offset)
-                                                                    centerBlockOnScreen(idx)
                                                                 }
                                                             }
                                                         )
@@ -1726,6 +1678,15 @@ fun FullScreenNoteEditor(
                                             onLongPressChecklist = null,
                                             onMoveUp = null,
                                             onMoveDown = null,
+                                            onReplaceMedia = {
+                                                if (block is ImageBlock) {
+                                                    blockIndexToReplaceForImage = idx
+                                                    replaceImagePickerLauncher.launch("image/*")
+                                                } else if (block is AudioBlock) {
+                                                    blockIndexToReplaceForAudio = idx
+                                                    replaceAudioPickerLauncher.launch("audio/*")
+                                                }
+                                            },
                                             onUpdate = { updated ->
                                                 val list = readingBlocks.toMutableList().apply { set(idx, updated) }
                                                 updateBlocksAndMarkdown(list)
@@ -1748,15 +1709,6 @@ fun FullScreenNoteEditor(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(550.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = {
-                                    if (editorMode == NoteEditorMode.READING) {
-                                        onReadingAreaTapped(readingBlocks.size)
-                                    }
-                                }
-                            )
-                        }
                 )
             }
         }
@@ -2061,6 +2013,7 @@ fun FullScreenNoteEditor(
 private fun ObsidianWhatsAppAudioPlayer(
     token: MediaTokenInfo,
     onUpdateTitle: (String) -> Unit,
+    onReplace: () -> Unit,
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2112,6 +2065,14 @@ private fun ObsidianWhatsAppAudioPlayer(
                         text = token.titleOrAlt.ifBlank { token.url.substringAfterLast("/") },
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                    )
+                }
+                IconButton(onClick = onReplace, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowDownward,
+                        contentDescription = "Substituir áudio ausente",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
@@ -2239,6 +2200,19 @@ private fun ObsidianWhatsAppAudioPlayer(
                     )
                 }
 
+                // Replace audio file button
+                IconButton(
+                    onClick = onReplace,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowDownward,
+                        contentDescription = "Substituir áudio",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 IconButton(
                     onClick = {
                         if (isCurrentAudio) {
@@ -2296,58 +2270,12 @@ private fun ObsidianSideBySideImageWidget(
     token: MediaTokenInfo,
     isDarkBg: Boolean,
     onClickFullscreen: () -> Unit,
+    onReplace: () -> Unit,
     onChangeWidth: (Int) -> Unit,
     onChangeAlign: (String) -> Unit,
     onChangeSideText: (String) -> Unit,
     onDelete: () -> Unit
 ) {
-    val context = LocalContext.current
-    val isMediaValid = remember(token.url) {
-        token.url.isBlank() || MediaStorageHelper.isMediaFileValid(context, token.url)
-    }
-
-    if (!isMediaValid && token.url.isNotBlank()) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-        ) {
-            Row(
-                modifier = Modifier.padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.BrokenImage,
-                    contentDescription = "Imagem não encontrada",
-                    tint = MaterialTheme.colorScheme.error
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Arquivo de imagem não encontrado",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Text(
-                        text = token.titleOrAlt.ifBlank { token.url.substringAfterLast("/") },
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
-                    )
-                }
-                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Remover imagem ausente",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-        return
-    }
-
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -2409,6 +2337,9 @@ private fun ObsidianSideBySideImageWidget(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    IconButton(onClick = onReplace, modifier = Modifier.size(26.dp)) {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = "Substituir Imagem", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    }
                     IconButton(onClick = onClickFullscreen, modifier = Modifier.size(26.dp)) {
                         Icon(Icons.Default.Fullscreen, contentDescription = "Tela Cheia", modifier = Modifier.size(16.dp))
                     }

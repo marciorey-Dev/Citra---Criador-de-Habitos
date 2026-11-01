@@ -49,21 +49,22 @@ object NoteExportHelper {
         val len = rawText.length
 
         while (cursor < len) {
-            // LaTeX Block: $$...$$
+            // 1. LaTeX Block: $$...$$
             if (rawText.startsWith("$$", cursor)) {
                 val end = rawText.indexOf("$$", cursor + 2)
                 if (end != -1) {
                     val inner = rawText.substring(cursor + 2, end)
                     val rendered = LatexFormulaRenderer.renderFormulaToText(inner)
                     val startPos = sb.length
-                    sb.append("  $rendered  ")
+                    sb.append(" 📐 $rendered ")
                     sb.setSpan(StyleSpan(Typeface.BOLD_ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    sb.setSpan(ForegroundColorSpan(themeColor), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                     cursor = end + 2
                     continue
                 }
             }
 
-            // LaTeX Inline: $...$
+            // 2. LaTeX Inline: $...$
             if (rawText.startsWith("$", cursor) && !rawText.startsWith("$$", cursor)) {
                 val end = rawText.indexOf("$", cursor + 1)
                 if (end != -1 && end > cursor + 1 && !rawText.substring(cursor + 1, end).contains("\n")) {
@@ -77,23 +78,40 @@ object NoteExportHelper {
                 }
             }
 
-            // Bold: **text**
-            if (rawText.startsWith("**", cursor)) {
-                val end = rawText.indexOf("**", cursor + 2)
-                if (end != -1) {
-                    val inner = rawText.substring(cursor + 2, end)
+            // 3. Bold + Italic: ***text*** or ___text___
+            if (rawText.startsWith("***", cursor) || rawText.startsWith("___", cursor)) {
+                val token = rawText.substring(cursor, cursor + 3)
+                val end = rawText.indexOf(token, cursor + 3)
+                if (end != -1 && !rawText.substring(cursor + 3, end).contains("\n")) {
+                    val inner = rawText.substring(cursor + 3, end)
                     val startPos = sb.length
                     sb.append(inner)
+                    sb.setSpan(StyleSpan(Typeface.BOLD_ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    cursor = end + 3
+                    continue
+                }
+            }
+
+            // 4. Bold: **text** or __text__
+            if (rawText.startsWith("**", cursor) || rawText.startsWith("__", cursor)) {
+                val token = rawText.substring(cursor, cursor + 2)
+                val end = rawText.indexOf(token, cursor + 2)
+                if (end != -1 && !rawText.substring(cursor + 2, end).contains("\n")) {
+                    val inner = rawText.substring(cursor + 2, end)
+                    val startPos = sb.length
+                    // Format inner content for possible nested italic
+                    val nested = formatSpannable(inner, baseColor, themeColor, defaultBold = false)
+                    sb.append(nested)
                     sb.setSpan(StyleSpan(Typeface.BOLD), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                     cursor = end + 2
                     continue
                 }
             }
 
-            // Strikethrough: ~~text~~
+            // 5. Strikethrough: ~~text~~
             if (rawText.startsWith("~~", cursor)) {
                 val end = rawText.indexOf("~~", cursor + 2)
-                if (end != -1) {
+                if (end != -1 && !rawText.substring(cursor + 2, end).contains("\n")) {
                     val inner = rawText.substring(cursor + 2, end)
                     val startPos = sb.length
                     sb.append(inner)
@@ -103,10 +121,10 @@ object NoteExportHelper {
                 }
             }
 
-            // Highlight: ==text==
+            // 6. Highlight: ==text==
             if (rawText.startsWith("==", cursor)) {
                 val end = rawText.indexOf("==", cursor + 2)
-                if (end != -1) {
+                if (end != -1 && !rawText.substring(cursor + 2, end).contains("\n")) {
                     val inner = rawText.substring(cursor + 2, end)
                     val startPos = sb.length
                     sb.append(inner)
@@ -117,7 +135,7 @@ object NoteExportHelper {
                 }
             }
 
-            // Underline: <u>text</u>
+            // 7. Underline: <u>text</u>
             if (rawText.startsWith("<u>", cursor)) {
                 val end = rawText.indexOf("</u>", cursor + 3)
                 if (end != -1) {
@@ -130,10 +148,10 @@ object NoteExportHelper {
                 }
             }
 
-            // Inline code: `text`
+            // 8. Inline code: `text`
             if (rawText.startsWith("`", cursor) && !rawText.startsWith("```", cursor)) {
                 val end = rawText.indexOf("`", cursor + 1)
-                if (end != -1) {
+                if (end != -1 && !rawText.substring(cursor + 1, end).contains("\n")) {
                     val inner = rawText.substring(cursor + 1, end)
                     val startPos = sb.length
                     sb.append(" $inner ")
@@ -144,10 +162,10 @@ object NoteExportHelper {
                 }
             }
 
-            // Italic: *text* or _text_
-            if (rawText.startsWith("*", cursor)) {
+            // 9. Italic: *text* or _text_ (ensure not isolated bullet point like "* Item" or multiplication)
+            if (rawText.startsWith("*", cursor) && cursor + 1 < len && rawText[cursor + 1] != ' ' && rawText[cursor + 1] != '*') {
                 val end = rawText.indexOf("*", cursor + 1)
-                if (end != -1) {
+                if (end != -1 && end > cursor + 1 && rawText[end - 1] != ' ' && !rawText.substring(cursor + 1, end).contains("\n")) {
                     val inner = rawText.substring(cursor + 1, end)
                     val startPos = sb.length
                     sb.append(inner)
@@ -156,9 +174,9 @@ object NoteExportHelper {
                     continue
                 }
             }
-            if (rawText.startsWith("_", cursor)) {
+            if (rawText.startsWith("_", cursor) && cursor + 1 < len && rawText[cursor + 1] != ' ' && rawText[cursor + 1] != '_') {
                 val end = rawText.indexOf("_", cursor + 1)
-                if (end != -1) {
+                if (end != -1 && end > cursor + 1 && rawText[end - 1] != ' ' && !rawText.substring(cursor + 1, end).contains("\n")) {
                     val inner = rawText.substring(cursor + 1, end)
                     val startPos = sb.length
                     sb.append(inner)
@@ -168,11 +186,11 @@ object NoteExportHelper {
                 }
             }
 
-            // Links: [label](url)
+            // 10. Links: [label](url)
             if (rawText.startsWith("[", cursor) && rawText.indexOf("](", cursor) != -1) {
                 val closeLabel = rawText.indexOf("](", cursor)
                 val closeUrl = rawText.indexOf(")", closeLabel)
-                if (closeUrl != -1) {
+                if (closeUrl != -1 && !rawText.substring(cursor, closeUrl).contains("\n")) {
                     val label = rawText.substring(cursor + 1, closeLabel)
                     val startPos = sb.length
                     sb.append(label)

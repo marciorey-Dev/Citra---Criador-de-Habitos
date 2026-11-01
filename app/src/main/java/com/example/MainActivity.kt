@@ -13,6 +13,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
@@ -499,14 +501,14 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                                 .pointerInput(data) {
-                                    androidx.compose.foundation.gestures.detectDragGestures(
+                                    detectDragGestures(
                                         onDrag = { change, dragAmount ->
                                             change.consume()
                                             offsetX += dragAmount.x
                                             offsetY += dragAmount.y
                                         },
                                         onDragEnd = {
-                                            if (kotlin.math.abs(offsetX) > 180f || offsetY > 120f) {
+                                            if (kotlin.math.abs(offsetX) > 50f || offsetY > 40f) {
                                                 data.dismiss()
                                             } else {
                                                 offsetX = 0f
@@ -572,7 +574,7 @@ class MainActivity : ComponentActivity() {
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = MaterialTheme.colorScheme.primary,
                                         selectedTextColor = MaterialTheme.colorScheme.primary,
-                                        indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                        indicatorColor = Color.Transparent,
                                         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
