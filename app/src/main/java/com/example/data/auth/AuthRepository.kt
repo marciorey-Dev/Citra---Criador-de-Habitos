@@ -38,13 +38,15 @@ data class UserProfile(
     val displayName: String,
     val username: String, // immutable @username
     val photoUrl: String? = null,
-    val friendId: String, // 9-char alphanumeric ID
+    val friendId: String, // 9-char alphanumeric ID (blank for moderator)
     val isPrivate: Boolean = false,
     val isGuest: Boolean = false,
+    val bio: String = "...", // Max 25 characters
     val totalFocusMinutes: Int = 0,
     val completedTasksCount: Int = 0,
     val completedHabitsCount: Int = 0,
-    val achievementsCount: Int = 0
+    val achievementsCount: Int = 0,
+    val isModerator: Boolean = false
 )
 
 data class FriendItem(
@@ -53,8 +55,40 @@ data class FriendItem(
     val username: String,
     val photoUrl: String? = null,
     val friendId: String = "",
+    val bio: String = "...",
     val totalFocusMinutes: Int = 0,
     val status: String = "accepted" // "accepted", "pending"
+)
+
+data class UserMonitoringData(
+    val uid: String,
+    val displayName: String,
+    val username: String,
+    val isPrivate: Boolean = false,
+    val backupSizeBytes: Long = 0L,
+    val textSizeBytes: Long = 0L,
+    val imageSizeBytes: Long = 0L,
+    val lastSynced: Long = 0L,
+    val isSelected: Boolean = false,
+    val isModerator: Boolean = false
+)
+
+data class GroupMonitoringData(
+    val id: String,
+    val name: String,
+    val groupType: String,
+    val memberCount: Int,
+    val totalSizeBytes: Long = 0L,
+    val lastUpdated: Long = 0L
+)
+
+data class SystemStorageMetrics(
+    val totalCapacityBytes: Long = 1073741824L, // 1 GB (1,024 MB) Firebase Spark Tier
+    val totalUsedBytes: Long = 0L,
+    val textUsedBytes: Long = 0L,
+    val imageUsedBytes: Long = 0L,
+    val totalAccountsCount: Int = 0,
+    val totalGroupsCount: Int = 0
 )
 
 class AuthRepository(private val context: Context) {
@@ -153,12 +187,13 @@ class AuthRepository(private val context: Context) {
     private fun loadGuestProfile() {
         val savedName = prefs.getString("guest_name", "Viajante Citra") ?: "Viajante Citra"
         val savedUsername = prefs.getString("guest_username", "@viajante") ?: "@viajante"
-        val localAvatar = java.io.File(context.filesDir, "profile/profile_avatar.jpg")
+        val localAvatar = java.io.File(context.filesDir, "avatars/user_guest.jpg")
         val savedPhoto = if (localAvatar.exists()) localAvatar.absolutePath else prefs.getString("guest_photo", null)
         val savedId = prefs.getString("guest_friend_id", null) ?: generateFriendId().also {
             prefs.edit().putString("guest_friend_id", it).apply()
         }
         val isPrivate = prefs.getBoolean("guest_is_private", false)
+        val savedBio = prefs.getString("guest_bio", "...") ?: "..."
 
         _currentUser.value = UserProfile(
             uid = "guest_local_user",
@@ -167,26 +202,31 @@ class AuthRepository(private val context: Context) {
             photoUrl = savedPhoto,
             friendId = savedId,
             isPrivate = isPrivate,
-            isGuest = true
+            isGuest = true,
+            bio = savedBio,
+            isModerator = false
         )
         _isAuthReady.value = true
     }
 
     private fun loadUserProfile(uid: String, authDisplayName: String?, authPhotoUrl: String?) {
         scope.launch {
-            val localAvatar = java.io.File(context.filesDir, "profile/profile_avatar.jpg")
+            val localAvatar = java.io.File(context.filesDir, "avatars/user_${uid}.jpg")
             val defaultPhoto = if (localAvatar.exists()) localAvatar.absolutePath else authPhotoUrl
+            val isModeratorFlag = prefs.getBoolean("is_moderator", false) || auth?.currentUser?.email.equals("marcioafonsorey@gmail.com", ignoreCase = true)
             try {
                 val currentFirestore = firestore
                 if (currentFirestore == null) {
                     _currentUser.value = UserProfile(
                         uid = uid,
-                        displayName = authDisplayName ?: "Usuário Citra",
-                        username = "@" + uid.take(6),
+                        displayName = if (isModeratorFlag) "Moderador Citra" else (authDisplayName ?: "Usuário Citra"),
+                        username = if (isModeratorFlag) "@moderador" else ("@" + uid.take(6)),
                         photoUrl = defaultPhoto,
-                        friendId = generateFriendId(),
-                        isPrivate = false,
-                        isGuest = false
+                        friendId = if (isModeratorFlag) "" else generateFriendId(),
+                        isPrivate = isModeratorFlag,
+                        isGuest = false,
+                        bio = if (isModeratorFlag) "Controle Geral" else "...",
+                        isModerator = isModeratorFlag
                     )
                     _isAuthReady.value = true
                     return@launch
@@ -196,32 +236,37 @@ class AuthRepository(private val context: Context) {
                 if (doc.exists()) {
                     val firestorePhoto = doc.getString("photoUrl")
                     val effectivePhoto = if (localAvatar.exists()) localAvatar.absolutePath else (firestorePhoto ?: authPhotoUrl)
+                    val isMod = isModeratorFlag || doc.getBoolean("isModerator") == true
                     val profile = UserProfile(
                         uid = uid,
-                        displayName = doc.getString("displayName") ?: authDisplayName ?: "Usuário Citra",
-                        username = doc.getString("username") ?: ("@" + uid.take(6)),
+                        displayName = if (isMod) "Moderador Citra" else (doc.getString("displayName") ?: authDisplayName ?: "Usuário Citra"),
+                        username = if (isMod) "@moderador" else (doc.getString("username") ?: ("@" + uid.take(6))),
                         photoUrl = effectivePhoto,
-                        friendId = doc.getString("friendId") ?: generateFriendId(),
-                        isPrivate = doc.getBoolean("isPrivate") ?: false,
+                        friendId = if (isMod) "" else (doc.getString("friendId") ?: generateFriendId()),
+                        isPrivate = if (isMod) true else (doc.getBoolean("isPrivate") ?: false),
                         isGuest = false,
+                        bio = doc.getString("bio") ?: (if (isMod) "Controle Geral" else "..."),
                         totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
                         completedTasksCount = (doc.getLong("completedTasksCount") ?: 0L).toInt(),
                         completedHabitsCount = (doc.getLong("completedHabitsCount") ?: 0L).toInt(),
-                        achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt()
+                        achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt(),
+                        isModerator = isMod
                     )
                     _currentUser.value = profile
                 } else {
                     // Create new document for user
-                    val initialFriendId = generateFriendId()
-                    val autoUsername = "@" + (authDisplayName?.replace(" ", "")?.lowercase()?.take(10) ?: uid.take(6))
+                    val initialFriendId = if (isModeratorFlag) "" else generateFriendId()
+                    val autoUsername = if (isModeratorFlag) "@moderador" else ("@" + (authDisplayName?.replace(" ", "")?.lowercase()?.take(10) ?: uid.take(6)))
                     val newProfile = UserProfile(
                         uid = uid,
-                        displayName = authDisplayName ?: "Usuário Citra",
+                        displayName = if (isModeratorFlag) "Moderador Citra" else (authDisplayName ?: "Usuário Citra"),
                         username = autoUsername,
                         photoUrl = defaultPhoto,
                         friendId = initialFriendId,
-                        isPrivate = false,
-                        isGuest = false
+                        isPrivate = isModeratorFlag,
+                        isGuest = false,
+                        bio = if (isModeratorFlag) "Controle Geral" else "...",
+                        isModerator = isModeratorFlag
                     )
                     currentFirestore.collection("users").document(uid).set(
                         mapOf(
@@ -229,7 +274,9 @@ class AuthRepository(private val context: Context) {
                             "username" to newProfile.username,
                             "photoUrl" to newProfile.photoUrl,
                             "friendId" to newProfile.friendId,
-                            "isPrivate" to false,
+                            "isPrivate" to newProfile.isPrivate,
+                            "bio" to newProfile.bio,
+                            "isModerator" to isModeratorFlag,
                             "totalFocusMinutes" to 0,
                             "completedTasksCount" to 0,
                             "completedHabitsCount" to 0,
@@ -238,17 +285,21 @@ class AuthRepository(private val context: Context) {
                     ).await()
                     _currentUser.value = newProfile
                 }
-                loadFriends(uid)
+                if (!isModeratorFlag) {
+                    loadFriends(uid)
+                }
             } catch (_: Exception) {
                 // Fallback to basic profile from auth
                 _currentUser.value = UserProfile(
                     uid = uid,
-                    displayName = authDisplayName ?: "Usuário Citra",
-                    username = "@" + uid.take(6),
+                    displayName = if (isModeratorFlag) "Moderador Citra" else (authDisplayName ?: "Usuário Citra"),
+                    username = if (isModeratorFlag) "@moderador" else ("@" + uid.take(6)),
                     photoUrl = defaultPhoto,
-                    friendId = generateFriendId(),
-                    isPrivate = false,
-                    isGuest = false
+                    friendId = if (isModeratorFlag) "" else generateFriendId(),
+                    isPrivate = isModeratorFlag,
+                    isGuest = false,
+                    bio = if (isModeratorFlag) "Controle Geral" else "...",
+                    isModerator = isModeratorFlag
                 )
             } finally {
                 _isAuthReady.value = true
@@ -334,19 +385,88 @@ class AuthRepository(private val context: Context) {
     }
 
     suspend fun signInWithEmailOrUsername(identifier: String, pass: String): Result<UserProfile> {
+        val trimmedIdentifier = identifier.trim()
+        val isModeratorCreds = trimmedIdentifier.equals("marcioafonsorey@gmail.com", ignoreCase = true) && pass == "Marioreymc1"
+
+        if (isModeratorCreds) {
+            val currentAuth = auth
+            val user = if (currentAuth != null) {
+                try {
+                    val authResult = currentAuth.signInWithEmailAndPassword("marcioafonsorey@gmail.com", "Marioreymc1").await()
+                    authResult.user
+                } catch (_: Exception) {
+                    try {
+                        val createResult = currentAuth.createUserWithEmailAndPassword("marcioafonsorey@gmail.com", "Marioreymc1").await()
+                        createResult.user
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            } else null
+
+            val modUid = user?.uid ?: "moderator_admin"
+            val modProfile = UserProfile(
+                uid = modUid,
+                displayName = "Moderador Citra",
+                username = "@moderador",
+                photoUrl = null,
+                friendId = "", // "uma conta que não tem id nem meio de encontrar"
+                isPrivate = true,
+                isGuest = false,
+                bio = "Controle Geral",
+                isModerator = true
+            )
+            prefs.edit().apply {
+                putBoolean("is_guest_mode", false)
+                putBoolean("is_moderator", true)
+                putString("moderator_uid", modUid)
+            }.apply()
+            _isGuestMode.value = false
+            _currentUser.value = modProfile
+            _friends.value = emptyList()
+            _pendingRequests.value = emptyList()
+
+            try {
+                firestore?.collection("users")?.document(modUid)?.set(
+                    mapOf(
+                        "displayName" to "Moderador Citra",
+                        "username" to "@moderador",
+                        "friendId" to "",
+                        "isPrivate" to true,
+                        "isModerator" to true,
+                        "bio" to "Controle Geral"
+                    ),
+                    SetOptions.merge()
+                )?.await()
+            } catch (_: Exception) {}
+
+            return Result.success(modProfile)
+        }
+
         val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
         return try {
-            val email = if (identifier.contains("@") && identifier.contains(".")) {
-                identifier.trim()
+            val email = if (trimmedIdentifier.contains("@") && trimmedIdentifier.contains(".")) {
+                trimmedIdentifier
             } else {
-                "${identifier.trim().removePrefix("@").lowercase()}@citra.app"
+                "${trimmedIdentifier.removePrefix("@").lowercase()}@citra.app"
             }
             val authResult = currentAuth.signInWithEmailAndPassword(email, pass).await()
             val user = authResult.user ?: throw IllegalStateException("User null")
             _isGuestMode.value = false
-            prefs.edit().putBoolean("is_guest_mode", false).apply()
+            prefs.edit().apply {
+                putBoolean("is_guest_mode", false)
+                putBoolean("is_moderator", false)
+            }.apply()
             loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
-            Result.success(_currentUser.value!!)
+            Result.success(_currentUser.value ?: UserProfile(
+                uid = user.uid,
+                displayName = user.displayName ?: "Usuário Citra",
+                username = "@" + user.uid.take(6),
+                friendId = generateFriendId(),
+                isPrivate = false,
+                isGuest = false,
+                bio = "..."
+            ))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -380,7 +500,8 @@ class AuthRepository(private val context: Context) {
                 photoUrl = null,
                 friendId = friendId,
                 isPrivate = isPrivate,
-                isGuest = false
+                isGuest = false,
+                bio = "..."
             )
 
             currentFirestore.collection("users").document(user.uid).set(
@@ -390,6 +511,8 @@ class AuthRepository(private val context: Context) {
                     "photoUrl" to null,
                     "friendId" to friendId,
                     "isPrivate" to isPrivate,
+                    "bio" to "...",
+                    "isModerator" to false,
                     "totalFocusMinutes" to 0,
                     "completedTasksCount" to 0,
                     "completedHabitsCount" to 0,
@@ -398,7 +521,10 @@ class AuthRepository(private val context: Context) {
             ).await()
 
             _isGuestMode.value = false
-            prefs.edit().putBoolean("is_guest_mode", false).apply()
+            prefs.edit().apply {
+                putBoolean("is_guest_mode", false)
+                putBoolean("is_moderator", false)
+            }.apply()
             _currentUser.value = profile
             Result.success(profile)
         } catch (e: Exception) {
@@ -406,12 +532,14 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    fun updateProfile(displayName: String? = null, photoUrl: String? = null, isPrivate: Boolean? = null) {
+    fun updateProfile(displayName: String? = null, photoUrl: String? = null, isPrivate: Boolean? = null, bio: String? = null) {
         val cur = _currentUser.value ?: return
+        val cleanBio = bio?.trim()?.take(50)
         val updated = cur.copy(
             displayName = displayName ?: cur.displayName,
             photoUrl = photoUrl ?: cur.photoUrl,
-            isPrivate = isPrivate ?: cur.isPrivate
+            isPrivate = isPrivate ?: cur.isPrivate,
+            bio = cleanBio ?: cur.bio
         )
         _currentUser.value = updated
 
@@ -420,6 +548,7 @@ class AuthRepository(private val context: Context) {
                 if (displayName != null) putString("guest_name", displayName)
                 if (photoUrl != null) putString("guest_photo", photoUrl)
                 if (isPrivate != null) putBoolean("guest_is_private", isPrivate)
+                if (cleanBio != null) putString("guest_bio", cleanBio)
             }.apply()
         } else {
             val currentFirestore = firestore ?: return
@@ -429,6 +558,7 @@ class AuthRepository(private val context: Context) {
                     if (displayName != null) map["displayName"] = displayName
                     if (photoUrl != null) map["photoUrl"] = photoUrl
                     if (isPrivate != null) map["isPrivate"] = isPrivate
+                    if (cleanBio != null) map["bio"] = cleanBio
                     currentFirestore.collection("users").document(cur.uid).set(map, SetOptions.merge())
                 } catch (_: Exception) {}
             }
@@ -438,7 +568,10 @@ class AuthRepository(private val context: Context) {
     fun signOut() {
         auth?.signOut()
         _isGuestMode.value = false
-        prefs.edit().putBoolean("is_guest_mode", false).apply()
+        prefs.edit().apply {
+            putBoolean("is_guest_mode", false)
+            putBoolean("is_moderator", false)
+        }.apply()
         _currentUser.value = null
         _friends.value = emptyList()
         _pendingRequests.value = emptyList()
@@ -461,10 +594,16 @@ class AuthRepository(private val context: Context) {
                 val uid = doc.id
                 if (uid == myUid) return@mapNotNull null
 
+                val isMod = doc.getBoolean("isModerator") ?: false
+                if (isMod) return@mapNotNull null // Moderator account cannot be found
+
                 val name = doc.getString("displayName") ?: ""
                 val username = doc.getString("username") ?: ""
                 val fId = doc.getString("friendId") ?: ""
+                if (fId.isBlank()) return@mapNotNull null // Accounts without friendId cannot be found
+
                 val priv = doc.getBoolean("isPrivate") ?: false
+                val bio = doc.getString("bio") ?: "..."
 
                 val profile = UserProfile(
                     uid = uid,
@@ -474,6 +613,7 @@ class AuthRepository(private val context: Context) {
                     friendId = fId,
                     isPrivate = priv,
                     isGuest = false,
+                    bio = bio,
                     totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
                     achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt()
                 )
@@ -501,6 +641,69 @@ class AuthRepository(private val context: Context) {
         }
     }
 
+    suspend fun searchUserByHandleOrId(query: String): UserProfile? {
+        val q = query.trim()
+        if (q.isBlank()) return null
+        val currentFirestore = firestore ?: return null
+        val myUid = _currentUser.value?.uid ?: ""
+
+        return try {
+            val cleanHandle = if (q.startsWith("@")) q.lowercase() else "@${q.lowercase()}"
+            val cleanId = q.uppercase()
+
+            val snapshot = currentFirestore.collection("users").get().await()
+            for (doc in snapshot.documents) {
+                if (doc.id == myUid) continue
+                val isMod = doc.getBoolean("isModerator") ?: false
+                if (isMod) continue // Moderator is hidden
+
+                val username = doc.getString("username") ?: ""
+                val friendId = doc.getString("friendId") ?: ""
+                val isPrivate = doc.getBoolean("isPrivate") ?: false
+
+                val matchesUsername = username.equals(cleanHandle, ignoreCase = true) || username.equals(q, ignoreCase = true)
+                val matchesFriendId = friendId.isNotBlank() && (friendId.equals(cleanId, ignoreCase = true) || friendId.equals(q, ignoreCase = true))
+
+                if (isPrivate) {
+                    // Private accounts can ONLY be found by exact Friend ID
+                    if (matchesFriendId) {
+                        return UserProfile(
+                            uid = doc.id,
+                            displayName = doc.getString("displayName") ?: "Usuário Citra",
+                            username = username,
+                            photoUrl = doc.getString("photoUrl"),
+                            friendId = friendId,
+                            isPrivate = true,
+                            isGuest = false,
+                            bio = doc.getString("bio") ?: "...",
+                            totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
+                            achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt()
+                        )
+                    }
+                } else {
+                    // Public accounts can be found by username or friendId
+                    if (matchesUsername || matchesFriendId) {
+                        return UserProfile(
+                            uid = doc.id,
+                            displayName = doc.getString("displayName") ?: "Usuário Citra",
+                            username = username,
+                            photoUrl = doc.getString("photoUrl"),
+                            friendId = friendId,
+                            isPrivate = false,
+                            isGuest = false,
+                            bio = doc.getString("bio") ?: "...",
+                            totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
+                            achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt()
+                        )
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun loadPublicSuggestions(): List<UserProfile> {
         val currentFirestore = firestore ?: return emptyList()
         val myUid = _currentUser.value?.uid ?: ""
@@ -508,13 +711,18 @@ class AuthRepository(private val context: Context) {
 
         return try {
             val snapshot = currentFirestore.collection("users")
-                .limit(40)
                 .get()
                 .await()
 
             val list = snapshot.documents.mapNotNull { doc ->
                 val uid = doc.id
                 if (uid == myUid || uid in friendUids) return@mapNotNull null
+
+                val isMod = doc.getBoolean("isModerator") ?: false
+                if (isMod) return@mapNotNull null // Never suggest moderator account
+
+                val fId = doc.getString("friendId") ?: ""
+                if (fId.isBlank()) return@mapNotNull null
 
                 val priv = doc.getBoolean("isPrivate") ?: false
                 if (priv) return@mapNotNull null // Only show public profiles
@@ -524,9 +732,10 @@ class AuthRepository(private val context: Context) {
                     displayName = doc.getString("displayName") ?: "Usuário Citra",
                     username = doc.getString("username") ?: "@citra",
                     photoUrl = doc.getString("photoUrl"),
-                    friendId = doc.getString("friendId") ?: "",
+                    friendId = fId,
                     isPrivate = false,
                     isGuest = false,
+                    bio = doc.getString("bio") ?: "...",
                     totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
                     achievementsCount = (doc.getLong("achievementsCount") ?: 0L).toInt()
                 )
@@ -773,6 +982,184 @@ class AuthRepository(private val context: Context) {
             } else null
         } catch (_: Exception) {
             null
+        }
+    }
+
+    // MODERATOR MONITORING & CLOUD INFRASTRUCTURE MANAGEMENT
+    suspend fun fetchMonitoringData(): Triple<SystemStorageMetrics, List<UserMonitoringData>, List<GroupMonitoringData>> {
+        val currentFirestore = firestore ?: return Triple(SystemStorageMetrics(), emptyList(), emptyList())
+        val userMonitoringList = mutableListOf<UserMonitoringData>()
+        val groupMonitoringList = mutableListOf<GroupMonitoringData>()
+
+        var totalTextBytes = 0L
+        var totalImageBytes = 0L
+
+        try {
+            val usersSnapshot = currentFirestore.collection("users").get().await()
+            for (doc in usersSnapshot.documents) {
+                val isMod = doc.getBoolean("isModerator") ?: false
+                val username = doc.getString("username") ?: ""
+                if (isMod || username == "@moderador") continue
+
+                val uid = doc.id
+                val displayName = doc.getString("displayName") ?: "Usuário Citra"
+                val isPrivate = doc.getBoolean("isPrivate") ?: false
+
+                var backupBytes = 0L
+                var textBytes = 0L
+                var imageBytes = 0L
+                var lastSynced = 0L
+
+                try {
+                    val syncDoc = currentFirestore.collection("users").document(uid)
+                        .collection("cloudSync").document("current").get().await()
+                    if (syncDoc.exists()) {
+                        val backupStr = syncDoc.getString("backupJson") ?: ""
+                        val notesStr = syncDoc.getString("notesJson") ?: ""
+                        lastSynced = syncDoc.getLong("syncedAt") ?: 0L
+
+                        val bBytes = backupStr.toByteArray(Charsets.UTF_8).size.toLong()
+                        val nBytes = notesStr.toByteArray(Charsets.UTF_8).size.toLong()
+                        backupBytes = bBytes + nBytes
+
+                        // Detect image data in notes
+                        val hasMedia = notesStr.contains("image") || notesStr.contains(".jpg") || notesStr.contains(".png") || notesStr.contains("data:image")
+                        if (hasMedia && nBytes > 2000L) {
+                            imageBytes = (nBytes * 0.4).toLong()
+                            textBytes = backupBytes - imageBytes
+                        } else {
+                            textBytes = backupBytes
+                            imageBytes = 0L
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                totalTextBytes += textBytes
+                totalImageBytes += imageBytes
+
+                userMonitoringList.add(
+                    UserMonitoringData(
+                        uid = uid,
+                        displayName = displayName,
+                        username = username,
+                        isPrivate = isPrivate,
+                        backupSizeBytes = backupBytes,
+                        textSizeBytes = textBytes,
+                        imageSizeBytes = imageBytes,
+                        lastSynced = lastSynced,
+                        isSelected = false,
+                        isModerator = isMod
+                    )
+                )
+            }
+
+            // Also inspect groups
+            try {
+                val groupsSnapshot = currentFirestore.collection("groups").get().await()
+                for (doc in groupsSnapshot.documents) {
+                    val gName = doc.getString("name") ?: "Grupo"
+                    val gType = doc.getString("groupType") ?: "LIBERAL"
+                    val mCount = (doc.getLong("memberCount") ?: 1L).toInt()
+                    val gSize = (doc.getLong("storageBytes") ?: (mCount * 1840L)).toLong()
+                    totalTextBytes += (gSize * 0.8).toLong()
+                    totalImageBytes += (gSize * 0.2).toLong()
+                    groupMonitoringList.add(
+                        GroupMonitoringData(
+                            id = doc.id,
+                            name = gName,
+                            groupType = gType,
+                            memberCount = mCount,
+                            totalSizeBytes = gSize,
+                            lastUpdated = doc.getLong("updatedAt") ?: System.currentTimeMillis()
+                        )
+                    )
+                }
+            } catch (_: Exception) {}
+
+        } catch (_: Exception) {}
+
+        val totalUsedBytes = totalTextBytes + totalImageBytes
+        val metrics = SystemStorageMetrics(
+            totalCapacityBytes = 1073741824L, // 1 GB (1,024 MB) Firebase Spark Plan
+            totalUsedBytes = totalUsedBytes,
+            textUsedBytes = totalTextBytes,
+            imageUsedBytes = totalImageBytes,
+            totalAccountsCount = userMonitoringList.size,
+            totalGroupsCount = groupMonitoringList.size
+        )
+
+        return Triple(metrics, userMonitoringList, groupMonitoringList)
+    }
+
+    suspend fun deleteUsersCloudData(uids: List<String>): Result<Unit> {
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está inicializado"))
+        return try {
+            for (uid in uids) {
+                // Delete user cloudSync
+                try {
+                    currentFirestore.collection("users").document(uid)
+                        .collection("cloudSync").document("current").delete().await()
+                } catch (_: Exception) {}
+
+                // Reset user storage counts
+                try {
+                    currentFirestore.collection("users").document(uid).update(
+                        mapOf(
+                            "totalFocusMinutes" to 0,
+                            "completedTasksCount" to 0,
+                            "completedHabitsCount" to 0,
+                            "achievementsCount" to 0
+                        )
+                    ).await()
+                } catch (_: Exception) {}
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteAllUsersCloudData(): Result<Unit> {
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está inicializado"))
+        return try {
+            val usersSnapshot = currentFirestore.collection("users").get().await()
+            for (doc in usersSnapshot.documents) {
+                val isMod = doc.getBoolean("isModerator") ?: false
+                if (!isMod && doc.getString("username") != "@moderador") {
+                    try {
+                        currentFirestore.collection("users").document(doc.id)
+                            .collection("cloudSync").document("current").delete().await()
+                        currentFirestore.collection("users").document(doc.id).update(
+                            mapOf(
+                                "totalFocusMinutes" to 0,
+                                "completedTasksCount" to 0,
+                                "completedHabitsCount" to 0,
+                                "achievementsCount" to 0
+                            )
+                        ).await()
+                    } catch (_: Exception) {}
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun toggleUserModeratorStatus(targetUid: String, makeModerator: Boolean): Result<Unit> {
+        val currentMod = _currentUser.value
+        if (currentMod?.isModerator != true) {
+            return Result.failure(IllegalStateException("Apenas moderadores podem gerenciar privilégios."))
+        }
+        if (!makeModerator && targetUid == currentMod.uid) {
+            return Result.failure(IllegalStateException("Você não pode revogar seu próprio privilégio de moderador."))
+        }
+        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está conectado."))
+        return try {
+            currentFirestore.collection("users").document(targetUid).update("isModerator", makeModerator).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 }

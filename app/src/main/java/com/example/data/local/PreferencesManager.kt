@@ -33,6 +33,10 @@ class PreferencesManager(private val context: Context) {
     private val _themeAccent = MutableStateFlow(loadThemeAccent())
     val themeAccent: StateFlow<ThemeAccent> = _themeAccent.asStateFlow()
 
+    // Persistent Theme Mode: null = system, true = dark, false = light
+    private val _themeMode = MutableStateFlow<Boolean?>(loadThemeMode())
+    val themeMode: StateFlow<Boolean?> = _themeMode.asStateFlow()
+
     // Default start tab: "HOME", "TIMER", "ORGANIZATION", "NOTES", "CALENDAR", "STATS"
     private val _defaultStartTab = MutableStateFlow(prefs.getString("default_start_tab", "HOME") ?: "HOME")
     val defaultStartTab: StateFlow<String> = _defaultStartTab.asStateFlow()
@@ -65,6 +69,14 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putLong("last_sync_timestamp", timestamp).apply()
     }
 
+    private fun loadThemeMode(): Boolean? {
+        return when (prefs.getString("theme_mode", "SYSTEM")) {
+            "DARK" -> true
+            "LIGHT" -> false
+            else -> null
+        }
+    }
+
     private fun loadThemeAccent(): ThemeAccent {
         val name = prefs.getString("theme_accent", ThemeAccent.TANGERINA.name) ?: ThemeAccent.TANGERINA.name
         return try {
@@ -93,9 +105,85 @@ class PreferencesManager(private val context: Context) {
         )
     }
 
+    fun setThemeMode(dark: Boolean?) {
+        val str = when (dark) {
+            true -> "DARK"
+            false -> "LIGHT"
+            null -> "SYSTEM"
+        }
+        prefs.edit().putString("theme_mode", str).apply()
+        _themeMode.value = dark
+    }
+
     fun setThemeAccent(accent: ThemeAccent) {
         prefs.edit().putString("theme_accent", accent.name).apply()
         _themeAccent.value = accent
+    }
+
+    fun exportPreferencesMap(): Map<String, Any> {
+        val s = _settings.value
+        return mapOf(
+            "theme_mode" to (prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"),
+            "theme_accent" to _themeAccent.value.name,
+            "default_start_tab" to _defaultStartTab.value,
+            "keep_screen_on" to _keepScreenOn.value,
+            "task_sound" to s.taskSound,
+            "habit_sound" to s.habitSound,
+            "pomodoro_sound" to s.pomodoroSound,
+            "achievement_sound" to s.achievementSound,
+            "alert_sound" to s.alertSound,
+            "vibrate" to s.vibrate,
+            "heads_up" to s.headsUpBanner,
+            "notify_achievements" to s.notifyAchievements,
+            "notify_missed_habits" to s.notifyMissedHabits,
+            "ambient_music_in_app" to s.ambientBreakMusicInApp,
+            "ambient_music_volume" to s.ambientMusicVolume
+        )
+    }
+
+    fun importPreferencesMap(map: Map<String, Any>) {
+        val editor = prefs.edit()
+        (map["theme_mode"] as? String)?.let {
+            editor.putString("theme_mode", it)
+            _themeMode.value = when (it) {
+                "DARK" -> true
+                "LIGHT" -> false
+                else -> null
+            }
+        }
+        (map["theme_accent"] as? String)?.let { accentName ->
+            try {
+                val acc = ThemeAccent.valueOf(accentName)
+                editor.putString("theme_accent", acc.name)
+                _themeAccent.value = acc
+            } catch (_: Exception) {}
+        }
+        (map["default_start_tab"] as? String)?.let {
+            editor.putString("default_start_tab", it)
+            _defaultStartTab.value = it
+        }
+        (map["keep_screen_on"] as? Boolean)?.let {
+            editor.putBoolean("keep_screen_on", it)
+            _keepScreenOn.value = it
+        }
+
+        // Standard notification and sound effects settings
+        val curSettings = _settings.value
+        val newSettings = curSettings.copy(
+            taskSound = (map["task_sound"] as? String) ?: curSettings.taskSound,
+            habitSound = (map["habit_sound"] as? String) ?: curSettings.habitSound,
+            pomodoroSound = (map["pomodoro_sound"] as? String) ?: curSettings.pomodoroSound,
+            achievementSound = (map["achievement_sound"] as? String) ?: curSettings.achievementSound,
+            alertSound = (map["alert_sound"] as? String) ?: curSettings.alertSound,
+            vibrate = (map["vibrate"] as? Boolean) ?: curSettings.vibrate,
+            headsUpBanner = (map["heads_up"] as? Boolean) ?: curSettings.headsUpBanner,
+            notifyAchievements = (map["notify_achievements"] as? Boolean) ?: curSettings.notifyAchievements,
+            notifyMissedHabits = (map["notify_missed_habits"] as? Boolean) ?: curSettings.notifyMissedHabits,
+            ambientBreakMusicInApp = (map["ambient_music_in_app"] as? Boolean) ?: curSettings.ambientBreakMusicInApp,
+            ambientMusicVolume = ((map["ambient_music_volume"] as? Number)?.toFloat()) ?: curSettings.ambientMusicVolume
+        )
+        editor.apply()
+        updateSettings(newSettings)
     }
 
     fun setDefaultStartTab(tab: String) {

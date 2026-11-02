@@ -41,4 +41,13 @@ interface FriendDao {
 
     @Query("SELECT COUNT(*) FROM friends")
     suspend fun countAll(): Int
+
+    @Query("SELECT * FROM friends WHERE username = :username LIMIT 1")
+    suspend fun getFriendByUsername(username: String): Friend?
+
+    @Query("DELETE FROM friends WHERE username IN (:usernames)")
+    suspend fun deleteFriendsByUsernames(usernames: List<String>)
+
+    @Query("DELETE FROM friends")
+    suspend fun deleteAllFriends()
 }

@@ -138,16 +138,106 @@ object CitraDocsFileManager {
     /**
      * Lists all .md files present in Documents/Citra Docs/
      */
-    fun listAllMarkdownNotes(context: Context): List<File> {
-        return try {
-            val folder = getDocsFolder(context)
-            folder.listFiles { file -> file.isFile && (file.name.endsWith(".md", ignoreCase = true) || file.name.endsWith(".markdown", ignoreCase = true)) }
-                ?.toList()
-                ?.sortedByDescending { it.lastModified() }
-                ?: emptyList()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to list markdown files", e)
-            emptyList()
+    /**
+     * Converts various supported file formats (HTML, TXT, JSON, CITRADOC, TEX, MD) to clean Markdown.
+     */
+    fun convertContentToMarkdown(filename: String, rawText: String): String {
+        val lower = filename.lowercase()
+        return when {
+            lower.endsWith(".html") || lower.endsWith(".htm") || rawText.trim().startsWith("<!DOCTYPE html", ignoreCase = true) || rawText.trim().startsWith("<html", ignoreCase = true) -> {
+                convertHtmlToMarkdown(rawText)
+            }
+            lower.endsWith(".json") || lower.endsWith(".citradoc") -> {
+                convertJsonToMarkdown(rawText)
+            }
+            lower.endsWith(".tex") -> {
+                convertLatexToMarkdown(rawText)
+            }
+            else -> {
+                // .md, .markdown, .txt, or other text formats
+                rawText
+            }
         }
+    }
+
+    private fun convertHtmlToMarkdown(html: String): String {
+        var text = html
+        // Remove scripts and styles
+        text = text.replace(Regex("<script[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), "")
+        text = text.replace(Regex("<style[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), "")
+
+        // Headers
+        text = text.replace(Regex("<h1[^>]*>([\\s\\S]*?)</h1>", RegexOption.IGNORE_CASE)) { "# ${it.groupValues[1].trim()}\n\n" }
+        text = text.replace(Regex("<h2[^>]*>([\\s\\S]*?)</h2>", RegexOption.IGNORE_CASE)) { "## ${it.groupValues[1].trim()}\n\n" }
+        text = text.replace(Regex("<h3[^>]*>([\\s\\S]*?)</h3>", RegexOption.IGNORE_CASE)) { "### ${it.groupValues[1].trim()}\n\n" }
+        text = text.replace(Regex("<h4[^>]*>([\\s\\S]*?)</h4>", RegexOption.IGNORE_CASE)) { "#### ${it.groupValues[1].trim()}\n\n" }
+
+        // Bold & Italic
+        text = text.replace(Regex("<(strong|b)[^>]*>([\\s\\S]*?)</\\1>", RegexOption.IGNORE_CASE)) { "**${it.groupValues[2]}**" }
+        text = text.replace(Regex("<(em|i)[^>]*>([\\s\\S]*?)</\\1>", RegexOption.IGNORE_CASE)) { "*${it.groupValues[2]}*" }
+
+        // Code
+        text = text.replace(Regex("<pre[^>]*><code[^>]*>([\\s\\S]*?)</code></pre>", RegexOption.IGNORE_CASE)) { "\n```\n${it.groupValues[1].trim()}\n```\n" }
+        text = text.replace(Regex("<code[^>]*>([\\s\\S]*?)</code>", RegexOption.IGNORE_CASE)) { "`${it.groupValues[1]}`" }
+
+        // Lists
+        text = text.replace(Regex("<li[^>]*>([\\s\\S]*?)</li>", RegexOption.IGNORE_CASE)) { "- ${it.groupValues[1].trim()}\n" }
+
+        // Paragraphs & Line breaks
+        text = text.replace(Regex("<p[^>]*>([\\s\\S]*?)</p>", RegexOption.IGNORE_CASE)) { "${it.groupValues[1].trim()}\n\n" }
+        text = text.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+        text = text.replace(Regex("<hr\\s*/?>", RegexOption.IGNORE_CASE), "\n---\n")
+
+        // Blockquotes
+        text = text.replace(Regex("<blockquote[^>]*>([\\s\\S]*?)</blockquote>", RegexOption.IGNORE_CASE)) { "> ${it.groupValues[1].trim()}\n\n" }
+
+        // Strip remaining HTML tags
+        text = text.replace(Regex("<[^>]+>"), "")
+
+        // Unescape standard HTML entities
+        text = text.replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+
+        return text.trim()
+    }
+
+    private fun convertJsonToMarkdown(json: String): String {
+        return try {
+            val jsonObject = org.json.JSONObject(json)
+            if (jsonObject.has("content")) {
+                jsonObject.getString("content")
+            } else if (jsonObject.has("body")) {
+                jsonObject.getString("body")
+            } else if (jsonObject.has("text")) {
+                jsonObject.getString("text")
+            } else {
+                // If it's another structured JSON, format keys nicely
+                val sb = StringBuilder()
+                val keys = jsonObject.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    sb.append("**$key:** ${jsonObject.opt(key)}\n\n")
+                }
+                sb.toString().trim()
+            }
+        } catch (_: Exception) {
+            json
+        }
+    }
+
+    private fun convertLatexToMarkdown(tex: String): String {
+        var text = tex
+        text = text.replace(Regex("\\\\section\\{([^}]+)\\}")) { "# ${it.groupValues[1]}\n\n" }
+        text = text.replace(Regex("\\\\subsection\\{([^}]+)\\}")) { "## ${it.groupValues[1]}\n\n" }
+        text = text.replace(Regex("\\\\subsubsection\\{([^}]+)\\}")) { "### ${it.groupValues[1]}\n\n" }
+        text = text.replace(Regex("\\\\textbf\\{([^}]+)\\}")) { "**${it.groupValues[1]}**" }
+        text = text.replace(Regex("\\\\textit\\{([^}]+)\\}")) { "*${it.groupValues[1]}*" }
+        text = text.replace(Regex("\\\\item\\s+")) { "- " }
+        text = text.replace(Regex("\\\\begin\\{itemize\\}|\\\\end\\{itemize\\}|\\\\begin\\{enumerate\\}|\\\\end\\{enumerate\\}"), "")
+        return text.trim()
     }
 }

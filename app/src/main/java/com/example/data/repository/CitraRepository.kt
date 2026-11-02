@@ -699,78 +699,30 @@ Seu companheiro de produtividade, estudos e organização.
         )
     }
 
-    // Seeding mockups data
+    // Seeding mockups data & cleaning prototype profiles
     suspend fun seedInitialSocialDataIfNeeded() {
-        if (friendDao.countAll() == 0) {
-            // Seed Friends from Image 1
-            friendDao.insertFriends(
-                listOf(
-                    Friend(name = "EiK", username = "@eik", subtitleTag = "unknown"),
-                    Friend(name = "Kenny do Usuário", username = "@kenny", subtitleTag = "unknown"),
-                    Friend(name = "Steven do Usuário", username = "@steven", subtitleTag = "unknown"),
-                    Friend(name = "Náme do Usuário", username = "@name", subtitleTag = "unknown"),
-                    Friend(name = "Júlia do Usuário", username = "@julia", subtitleTag = "unknown"),
-                    Friend(name = "Arthur do Usuário", username = "@arthur", subtitleTag = "unknown")
-                )
-            )
+        // Clean up all old prototype fake friends
+        val oldUsernames = listOf(
+            "@eik", "@kenny", "@steven", "@name", "@julia", "@arthur",
+            "@kevin", "@hetan", "@brooklyn", "@joseph", "@felix", "@kaleb",
+            "@jenny", "@simon", "@john"
+        )
+        friendDao.deleteFriendsByUsernames(oldUsernames)
 
-            // Seed Requests from Image 3
-            friendDao.insertFriends(
-                listOf(
-                    Friend(name = "Kevin", username = "@kevin", status = "PENDING_INCOMING", subtitleTag = "<Enviado via GDD>"),
-                    Friend(name = "Hetan", username = "@hetan", status = "PENDING_INCOMING", subtitleTag = "<Sugerido por Citra>"),
-                    Friend(name = "Brooklyn", username = "@brooklyn", status = "PENDING_INCOMING", subtitleTag = "<Vibe Code>")
-                )
-            )
+        // Clean up old prototype fake groups
+        val oldGroupNames = listOf("Faculdade", "Igreja", "BB", "Gravenhil", "No Way Home")
+        groupDao.deleteGroupsByNames(oldGroupNames)
 
-            // Seed Suggestions from Image 3
-            friendDao.insertFriends(
-                listOf(
-                    Friend(name = "Joseph", username = "@joseph", status = "SUGGESTION", subtitleTag = "<Prism.js>"),
-                    Friend(name = "Félix", username = "@felix", status = "SUGGESTION", subtitleTag = "<Markdown>"),
-                    Friend(name = "Kaleb", username = "@kaleb", status = "SUGGESTION", subtitleTag = "unknown"),
-                    Friend(name = "Jenny", username = "@jenny", status = "SUGGESTION", subtitleTag = "unknown"),
-                    Friend(name = "Simon", username = "@simon", status = "SUGGESTION", subtitleTag = "unknown"),
-                    Friend(name = "John", username = "@john", status = "SUGGESTION", subtitleTag = "unknown")
-                )
-            )
-        }
-
-        if (groupDao.countAll() == 0) {
-            // Seed Groups from Image 2
-            val g1 = groupDao.insertGroup(CitraGroup(name = "Faculdade", groupType = "LIBERAL", memberCount = 4, avatarInitials = "FA"))
-            val g2 = groupDao.insertGroup(CitraGroup(name = "Igreja", groupType = "UNILATERAL", memberCount = 8, avatarInitials = "IG"))
-            val g3 = groupDao.insertGroup(CitraGroup(name = "BB", groupType = "LIBERAL", memberCount = 2, avatarInitials = "BB"))
-            val g4 = groupDao.insertGroup(CitraGroup(name = "Gravenhil", groupType = "UNILATERAL", memberCount = 5, avatarInitials = "GR"))
-            val g5 = groupDao.insertGroup(CitraGroup(name = "No Way Home", groupType = "LIBERAL", memberCount = 6, avatarInitials = "NW"))
-
-            // Seed sample shared note in Faculdade group
-            val noteId = noteDao.insertNote(
-                Note(
-                    title = "Anotações de Grupo - Faculdade",
-                    content = """# Grupo Faculdade 🎓
-Material e tarefas compartilhadas para o semestre.
-
-### Tarefas da Semana:
-- [ ] Ler capítulo 4 de Sistemas Distribuídos
-- [ ] Revisar anotações de aula
-- [x] Enviar relatório do laboratório""",
-                    category = "Estudos",
-                    isShared = true,
-                    sharedGroupId = g1,
-                    sharedGroupName = "Faculdade",
-                    sharedOwnerId = "me",
-                    sharedOwnerName = "Você",
-                    sharedGroupType = "LIBERAL"
-                )
-            )
-            noteVersionDao.insertVersion(
-                NoteVersion(
-                    noteId = noteId,
-                    versionNumber = 1,
-                    title = "Anotações de Grupo - Faculdade",
-                    content = "# Grupo Faculdade 🎓\nMaterial e tarefas compartilhadas para o semestre.",
-                    authorName = "Você"
+        // Ensure ONLY Kinn exists as the single prototype profile with black photo and "..." in bio
+        val kinnFriend = friendDao.getFriendByUsername("@kinn")
+        if (kinnFriend == null) {
+            friendDao.insertFriend(
+                Friend(
+                    name = "Kinn",
+                    username = "@kinn",
+                    subtitleTag = "...",
+                    avatarColorHex = "#000000",
+                    status = "FRIEND"
                 )
             )
         }

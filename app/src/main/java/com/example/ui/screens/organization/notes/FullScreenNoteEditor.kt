@@ -645,24 +645,30 @@ fun FullScreenNoteEditor(
         missing
     }
 
-    // Markdown file import launcher
+    // Universal file import launcher (converts HTML, TXT, JSON, CITRADOC, TEX, MD to Markdown)
     val mdImportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
+                val filename = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIdx != -1 && cursor.moveToFirst()) cursor.getString(nameIdx) else null
+                } ?: (uri.lastPathSegment ?: "documento.md")
+
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val importedText = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    val persistedText = MediaStorageHelper.processAndPersistImportedNoteMedia(context, importedText)
+                    val rawText = stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    val markdownText = CitraDocsFileManager.convertContentToMarkdown(filename, rawText)
+                    val persistedText = MediaStorageHelper.processAndPersistImportedNoteMedia(context, markdownText)
                     pushHistory()
                     editorValue = TextFieldValue(persistedText, selection = TextRange(persistedText.length))
                     coroutineScope.launch {
-                        snackbarHostState.showSnackbar("Nota Markdown importada com sucesso!")
+                        snackbarHostState.showSnackbar("Ficheiro importado e convertido em Markdown!")
                     }
                 }
             } catch (e: Exception) {
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("Falha ao importar ficheiro Markdown.")
+                    snackbarHostState.showSnackbar("Falha ao importar ficheiro.")
                 }
             }
         }
@@ -692,18 +698,12 @@ fun FullScreenNoteEditor(
                             shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                             modifier = Modifier.clickable {
-                                if (isUnilateralMemberOnly) {
-                                    coroutineScope.launch {
-                                        snackbarHostState.showSnackbar("Nota compartilhada em grupo unilateral: modo leitura protegido para membros.")
-                                    }
+                                val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
+                                    NoteEditorMode.READING
                                 } else {
-                                    val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
-                                        NoteEditorMode.READING
-                                    } else {
-                                        NoteEditorMode.LIVE_PREVIEW
-                                    }
-                                    switchEditorMode(newMode)
+                                    NoteEditorMode.LIVE_PREVIEW
                                 }
+                                switchEditorMode(newMode)
                             }
                         ) {
                             Row(
@@ -763,49 +763,6 @@ fun FullScreenNoteEditor(
                             contentDescription = "Salvar",
                             tint = GreenAccent
                         )
-                    }
-
-                    if (initialNote?.isShared == true) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF1E88E5).copy(alpha = 0.15f),
-                            modifier = Modifier
-                                .clickable { showShareDialog = true }
-                                .padding(end = 4.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Public, contentDescription = "Compartilhada", tint = Color(0xFF1E88E5), modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = initialNote.sharedGroupName ?: "Grupo",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1E88E5)
-                                )
-                            }
-                        }
-
-                        // Enviar button: Sincronização per user requirement
-                        if (!isUnilateralMemberOnly) {
-                            IconButton(
-                                onClick = {
-                                    saveCurrent(close = false)
-                                    onSendSync?.invoke(editorValue.text)
-                                    coroutineScope.launch {
-                                        snackbarHostState.showSnackbar("Alterações enviadas e sincronizadas com o grupo!")
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Send,
-                                    contentDescription = "Enviar Sincronização",
-                                    tint = Color(0xFF1E88E5)
-                                )
-                            }
-                        }
                     }
 
                     Box {
@@ -1027,6 +984,68 @@ fun FullScreenNoteEditor(
                     .padding(top = 8.dp, bottom = 140.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+
+                // Dedicated Shared Note Bar (Group + Send buttons positioned below top bar to avoid obstruction)
+                if (initialNote?.isShared == true) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E88E5).copy(alpha = 0.08f),
+                        border = BorderStroke(1.dp, Color(0xFF1E88E5).copy(alpha = 0.25f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF1E88E5).copy(alpha = 0.15f),
+                                modifier = Modifier.clickable { showShareDialog = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Public, contentDescription = "Grupo", tint = Color(0xFF1E88E5), modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = initialNote.sharedGroupName ?: "Grupo",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1E88E5)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color(0xFF1E88E5), modifier = Modifier.size(16.dp))
+                                }
+                            }
+
+                            if (!isUnilateralMemberOnly) {
+                                Button(
+                                    onClick = {
+                                        saveCurrent(close = false)
+                                        onSendSync?.invoke(editorValue.text)
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Alterações enviadas e sincronizadas com o grupo!")
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E88E5)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = "Enviar", modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text("Enviar ao Grupo", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // 0. Unilateral Group member mode banner
                 if (isUnilateralMemberOnly) {

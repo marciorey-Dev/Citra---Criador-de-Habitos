@@ -12,7 +12,7 @@ data class Friend(
     val avatarUri: String? = null,
     val avatarColorHex: String? = null,
     val status: String = "FRIEND", // "FRIEND", "PENDING_INCOMING", "PENDING_OUTGOING", "BLOCKED", "SUGGESTION"
-    val subtitleTag: String = "unknown", // e.g. "unknown", "<Enviado via GDD>", "<Sugerido por Citra>", "<Vibe Code>", "<Prism.js>", "<Markdown>"
+    val subtitleTag: String = "...", // BIO of user (max 25 chars)
     val mutualFriendsCount: Int = 0,
     val totalFocusMinutes: Int = 0,
     val createdAt: Long = System.currentTimeMillis()

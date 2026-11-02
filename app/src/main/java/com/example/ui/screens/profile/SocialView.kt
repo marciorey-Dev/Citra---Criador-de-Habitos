@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.data.auth.AuthRepository
 import com.example.data.model.CitraGroup
 import com.example.data.model.Friend
 import com.example.data.model.GroupMember
@@ -45,9 +46,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun SocialView(
     viewModel: MainViewModel,
+    authRepository: AuthRepository? = null,
     onOpenNote: (Note) -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val currentUserProfile by (authRepository?.currentUser?.collectAsState() ?: remember { mutableStateOf(null) })
+    val isModerator = currentUserProfile?.isModerator == true
+
     val friends by viewModel.allFriends.collectAsState()
     val pendingRequests by viewModel.pendingFriendRequests.collectAsState()
     val suggestedFriends by viewModel.suggestedFriends.collectAsState()
@@ -182,7 +187,11 @@ fun SocialView(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = if (isGroupsTab) "${filteredGroups.size} Grupos" else "${filteredFriends.size} Amigos",
+                text = if (isGroupsTab) {
+                    "${filteredGroups.size} Grupos"
+                } else {
+                    if (isModerator) "Painel de Monitoramento" else "${filteredFriends.size} Amigos"
+                },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -201,7 +210,7 @@ fun SocialView(
                     )
                 }
 
-                if (!isGroupsTab && blockedFriends.isNotEmpty()) {
+                if (!isGroupsTab && !isModerator && blockedFriends.isNotEmpty()) {
                     IconButton(
                         onClick = { showBlockedFriendsDialog = true },
                         modifier = Modifier.size(32.dp)
@@ -219,12 +228,12 @@ fun SocialView(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // SEGMENTED PILL SWITCHER: [👤 Amigos] [👥 Grupos] (matches Mockups 1 & 2)
+        // SEGMENTED PILL SWITCHER: [👤 Amigos / 🛡️ Monitoramento] [👥 Grupos]
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Amigos Pill
+            // Amigos / Monitoramento Pill
             Surface(
                 shape = RoundedCornerShape(26.dp),
                 color = if (!isGroupsTab) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface,
@@ -236,7 +245,7 @@ fun SocialView(
                     .weight(1f)
                     .height(48.dp)
                     .clickable { isGroupsTab = false }
-                    .testTag("social_pill_amigos")
+                    .testTag(if (isModerator) "social_pill_monitoring" else "social_pill_amigos")
             ) {
                 Row(
                     modifier = Modifier.fillMaxSize(),
@@ -244,14 +253,14 @@ fun SocialView(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = if (!isGroupsTab) Icons.Filled.Person else Icons.Outlined.Person,
+                        imageVector = if (isModerator) Icons.Default.AdminPanelSettings else if (!isGroupsTab) Icons.Filled.Person else Icons.Outlined.Person,
                         contentDescription = null,
                         tint = if (!isGroupsTab) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Amigos",
+                        text = if (isModerator) "Monitoramento" else "Amigos",
                         fontSize = 15.sp,
                         fontWeight = if (!isGroupsTab) FontWeight.Bold else FontWeight.Medium,
                         color = if (!isGroupsTab) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -299,138 +308,159 @@ fun SocialView(
 
         // TAB CONTENT
         if (!isGroupsTab) {
-            // --- AMIGOS LIST (Mockup 1) ---
-            if (filteredFriends.isEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("Nenhum amigo adicionado ainda", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Toque no sininho acima para ver pedidos de amizade e sugestões da comunidade!",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+            if (isModerator && authRepository != null) {
+                // MODERATOR VIEW: Comprehensive cloud monitoring & management
+                ModeratorMonitoringView(
+                    viewModel = viewModel,
+                    authRepository = authRepository
+                )
             } else {
-                filteredFriends.forEach { friend ->
-                    var showFriendMenu by remember { mutableStateOf(false) }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                // --- AMIGOS LIST (Mockup 1) ---
+                if (filteredFriends.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Avatar (circular)
-                        if (!friend.avatarUri.isNullOrBlank()) {
-                            AsyncImage(
-                                model = friend.avatarUri,
-                                contentDescription = friend.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("Nenhum amigo adicionado ainda", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Toque no sininho acima para ver pedidos de amizade e sugestões da comunidade!",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
-                        } else {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(54.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = friend.name.take(1).uppercase(),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 20.sp,
-                                        color = MaterialTheme.colorScheme.primary
+                        }
+                    }
+                } else {
+                    filteredFriends.forEach { friend ->
+                        var showFriendMenu by remember { mutableStateOf(false) }
+                        val isKinn = friend.name.equals("Kinn", ignoreCase = true) || friend.avatarColorHex == "#000000"
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Avatar (circular: black photo for Kinn, custom photo or initial for others)
+                            if (isKinn) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.Black,
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), CircleShape)
+                                ) {
+                                    // Solid black profile photo as requested
+                                }
+                            } else if (!friend.avatarUri.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = friend.avatarUri,
+                                    contentDescription = friend.name,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                )
+                            } else {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(54.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = friend.name.take(1).uppercase(),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = friend.name,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = friend.subtitleTag.ifBlank { "..." },
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // 3-Dots Button with Block, Unfriend options
+                            Box {
+                                IconButton(
+                                    onClick = { showFriendMenu = true },
+                                    modifier = Modifier.testTag("friend_menu_${friend.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Mais opções",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showFriendMenu,
+                                    onDismissRequest = { showFriendMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Bloquear Amigo", color = RedAction) },
+                                        leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, tint = RedAction) },
+                                        onClick = {
+                                            showFriendMenu = false
+                                            viewModel.blockFriend(friend)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Remover Amigo") },
+                                        leadingIcon = { Icon(Icons.Default.PersonRemove, contentDescription = null) },
+                                        onClick = {
+                                            showFriendMenu = false
+                                            viewModel.removeFriend(friend)
+                                        }
                                     )
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = friend.name,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = friend.subtitleTag,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                        }
-
-                        // 3-Dots Button with Block, Unfriend options
-                        Box {
-                            IconButton(
-                                onClick = { showFriendMenu = true },
-                                modifier = Modifier.testTag("friend_menu_${friend.id}")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Mais opções",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showFriendMenu,
-                                onDismissRequest = { showFriendMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Bloquear Amigo", color = RedAction) },
-                                    leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, tint = RedAction) },
-                                    onClick = {
-                                        showFriendMenu = false
-                                        viewModel.blockFriend(friend)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Remover Amigo") },
-                                    leadingIcon = { Icon(Icons.Default.PersonRemove, contentDescription = null) },
-                                    onClick = {
-                                        showFriendMenu = false
-                                        viewModel.removeFriend(friend)
-                                    }
-                                )
-                            }
-                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(horizontal = 8.dp))
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(horizontal = 8.dp))
                 }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-            // Action row to add friend manually
-            FilledTonalButton(
-                onClick = { showAddFriendDialog = true },
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("add_friend_manual_btn")
-            ) {
-                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Adicionar Amigo por ID / @Usuário", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                // Action row to add friend manually
+                FilledTonalButton(
+                    onClick = { showAddFriendDialog = true },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_friend_manual_btn")
+                ) {
+                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Adicionar Amigo por ID / @Usuário", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
         } else {
             // --- GRUPOS LIST (Mockup 2) ---

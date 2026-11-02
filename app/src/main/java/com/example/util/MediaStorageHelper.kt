@@ -22,14 +22,15 @@ object MediaStorageHelper {
     private const val TAG = "MediaStorageHelper"
 
     /**
+    /**
      * Copies an image from a content Uri or stream into internal private storage
-     * so it never disappears on app relaunch or device restart.
+     * scoped by user ID so it never disappears on app relaunch or crosses between accounts.
      */
-    fun saveProfileImage(context: Context, sourceUri: Uri): String? {
+    fun saveUserAvatar(context: Context, uid: String, sourceUri: Uri): String? {
         return try {
-            val dir = File(context.filesDir, "profile")
+            val dir = File(context.filesDir, "avatars")
             if (!dir.exists()) dir.mkdirs()
-            val destFile = File(dir, "profile_avatar.jpg")
+            val destFile = File(dir, "user_${uid}.jpg")
             context.contentResolver.openInputStream(sourceUri)?.use { input ->
                 FileOutputStream(destFile).use { output ->
                     input.copyTo(output)
@@ -37,24 +38,62 @@ object MediaStorageHelper {
             }
             destFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save profile image", e)
+            Log.e(TAG, "Failed to save user avatar", e)
             null
         }
     }
 
-    fun saveProfileBitmap(context: Context, bitmap: Bitmap): String? {
+    fun saveUserAvatarBitmap(context: Context, uid: String, bitmap: Bitmap): String? {
         return try {
-            val dir = File(context.filesDir, "profile")
+            val dir = File(context.filesDir, "avatars")
             if (!dir.exists()) dir.mkdirs()
-            val destFile = File(dir, "profile_avatar.jpg")
+            val destFile = File(dir, "user_${uid}.jpg")
             FileOutputStream(destFile).use { output ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output)
             }
             destFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save profile bitmap", e)
+            Log.e(TAG, "Failed to save user avatar bitmap", e)
             null
         }
+    }
+
+    fun saveGroupAvatar(context: Context, groupId: Long, sourceUri: Uri): String? {
+        return try {
+            val dir = File(context.filesDir, "avatars")
+            if (!dir.exists()) dir.mkdirs()
+            val destFile = File(dir, "group_${groupId}.jpg")
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                FileOutputStream(destFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            destFile.absolutePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save group avatar", e)
+            null
+        }
+    }
+
+    fun getUserAvatarFile(context: Context, uid: String): File {
+        val dir = File(context.filesDir, "avatars")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "user_${uid}.jpg")
+    }
+
+    fun getGroupAvatarFile(context: Context, groupId: Long): File {
+        val dir = File(context.filesDir, "avatars")
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "group_${groupId}.jpg")
+    }
+
+    // Backward compatible wrappers
+    fun saveProfileImage(context: Context, sourceUri: Uri): String? {
+        return saveUserAvatar(context, "default_user", sourceUri)
+    }
+
+    fun saveProfileBitmap(context: Context, bitmap: Bitmap): String? {
+        return saveUserAvatarBitmap(context, "default_user", bitmap)
     }
 
     /**

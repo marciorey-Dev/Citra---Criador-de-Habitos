@@ -55,4 +55,10 @@ interface GroupDao {
 
     @Query("SELECT COUNT(*) FROM groups")
     suspend fun countAll(): Int
+
+    @Query("DELETE FROM groups WHERE name IN (:names)")
+    suspend fun deleteGroupsByNames(names: List<String>)
+
+    @Query("DELETE FROM groups")
+    suspend fun deleteAllGroups()
 }

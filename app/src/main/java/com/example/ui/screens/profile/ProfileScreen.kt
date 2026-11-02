@@ -89,6 +89,7 @@ fun ProfileScreen(
     // Modals
     var showQrDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
+    var showEditBioDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
@@ -117,7 +118,8 @@ fun ProfileScreen(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            val localPath = MediaStorageHelper.saveProfileImage(context, uri) ?: uri.toString()
+            val uid = user?.uid ?: "guest_local_user"
+            val localPath = MediaStorageHelper.saveUserAvatar(context, uid, uri) ?: uri.toString()
             authRepository.updateProfile(photoUrl = localPath)
         }
     }
@@ -126,7 +128,8 @@ fun ProfileScreen(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            val localPath = MediaStorageHelper.saveProfileBitmap(context, bitmap)
+            val uid = user?.uid ?: "guest_local_user"
+            val localPath = MediaStorageHelper.saveUserAvatarBitmap(context, uid, bitmap)
             authRepository.updateProfile(photoUrl = localPath)
         }
     }
@@ -183,35 +186,88 @@ fun ProfileScreen(
                                     color = MaterialTheme.colorScheme.primary
                                 )
 
+                                // User BIO row (max 25 chars)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Text(
+                                        text = user?.bio?.ifBlank { "..." } ?: "...",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = { showEditBioDialog = true },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Editar Bio",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+
                                 Spacer(modifier = Modifier.height(4.dp))
 
-                                // 9-Character Friend ID pill
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = MaterialTheme.colorScheme.surface,
-                                    modifier = Modifier.clickable {
-                                        val id = user?.friendId ?: "CTR-XXXXX"
-                                        clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra ID", id))
-                                        Toast.makeText(context, "ID copiado: $id", Toast.LENGTH_SHORT).show()
-                                    }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                if (user?.isModerator == true) {
+                                    // Moderator Badge (No public ID, invisible in searches)
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer
                                     ) {
-                                        Text(
-                                            text = "ID: ${user?.friendId ?: "CTR-XXXXX"}",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copiar ID",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(12.dp)
-                                        )
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Shield,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "Conta de Moderador",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // 9-Character Friend ID pill
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.clickable {
+                                            val id = user?.friendId ?: "CTR-XXXXX"
+                                            clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra ID", id))
+                                            Toast.makeText(context, "ID copiado: $id", Toast.LENGTH_SHORT).show()
+                                        }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "ID: ${user?.friendId ?: "CTR-XXXXX"}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Copiar ID",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -355,8 +411,8 @@ fun ProfileScreen(
                     Tab(
                         selected = selectedSubTab == 1,
                         onClick = { selectedSubTab = 1 },
-                        text = { Text("Amigos", fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Normal) },
-                        icon = { Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                        text = { Text(if (user?.isModerator == true) "Monitoramento" else "Amigos", fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Normal) },
+                        icon = { Icon(if (user?.isModerator == true) Icons.Default.AdminPanelSettings else Icons.Default.Group, contentDescription = null, modifier = Modifier.size(18.dp)) }
                     )
                     Tab(
                         selected = selectedSubTab == 2,
@@ -377,10 +433,11 @@ fun ProfileScreen(
                 }
 
                 1 -> {
-                    // AMIGOS & GRUPOS (Concept art layout, 100% local, shared notes & groups)
+                    // AMIGOS & GRUPOS ou MONITORAMENTO (para moderador)
                     item {
                         SocialView(
                             viewModel = viewModel,
+                            authRepository = authRepository,
                             onOpenNote = { note ->
                                 viewModel.openNote(note)
                                 onNavigateToNotes()
@@ -966,6 +1023,43 @@ fun ProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showEditNameDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    // Edit Bio Dialog (Max 50 characters)
+    if (showEditBioDialog) {
+        var newBio by remember { mutableStateOf(user?.bio ?: "...") }
+        AlertDialog(
+            onDismissRequest = { showEditBioDialog = false },
+            title = { Text("Alterar Bio do Perfil", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newBio,
+                        onValueChange = { if (it.length <= 50) newBio = it },
+                        label = { Text("Bio (Mensagem de Status)") },
+                        supportingText = { Text("${newBio.length}/50 caracteres (máx. 50)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val clean = newBio.trim().take(50)
+                        authRepository.updateProfile(bio = clean.ifBlank { "..." })
+                        showEditBioDialog = false
+                    }
+                ) {
+                    Text("Salvar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditBioDialog = false }) {
                     Text("Cancelar")
                 }
             }

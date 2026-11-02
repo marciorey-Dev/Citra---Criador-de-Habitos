@@ -75,9 +75,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val notificationSettings: StateFlow<NotificationSettings> = preferencesManager.settings
     val hasSeenTutorial: StateFlow<Boolean> = preferencesManager.hasSeenTutorial
 
-    // Theme Mode: null = system, true = dark, false = light
-    private val _isDarkTheme = MutableStateFlow<Boolean?>(null)
-    val isDarkTheme: StateFlow<Boolean?> = _isDarkTheme.asStateFlow()
+    // Persistent Theme Mode: null = system, true = dark, false = light
+    val isDarkTheme: StateFlow<Boolean?> = preferencesManager.themeMode
 
     fun setThemeAccent(accent: ThemeAccent) {
         preferencesManager.setThemeAccent(accent)
@@ -104,17 +103,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setThemeMode(dark: Boolean?) {
-        _isDarkTheme.value = dark
+        preferencesManager.setThemeMode(dark)
     }
 
     fun toggleThemeMode() {
-        _isDarkTheme.update { current ->
-            when (current) {
-                null -> false
-                false -> true
-                true -> null
-            }
+        val current = isDarkTheme.value
+        val next = when (current) {
+            null -> false
+            false -> true
+            true -> null
         }
+        preferencesManager.setThemeMode(next)
     }
 
     // Database Flows
@@ -845,27 +844,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             for (uri in uris) {
                 try {
                     val filename = queryFileName(context, uri) ?: "Nota_${System.currentTimeMillis()}"
-                    val title = filename.removeSuffix(".md").removeSuffix(".markdown").removeSuffix(".txt").trim()
+                    val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
 
-                    val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val rawContent = context.contentResolver.openInputStream(uri)?.use { stream ->
                         stream.bufferedReader(Charsets.UTF_8).readText()
                     }
 
-                    if (content != null) {
-                        val finalTitle = if (existingTitles.contains(title.lowercase())) {
-                            "$title (${System.currentTimeMillis().toString().takeLast(4)})"
+                    if (rawContent != null) {
+                        val markdownContent = com.example.util.CitraDocsFileManager.convertContentToMarkdown(filename, rawContent)
+                        val finalTitle = if (existingTitles.contains(rawTitle.lowercase())) {
+                            "$rawTitle (${System.currentTimeMillis().toString().takeLast(4)})"
                         } else {
-                            title
+                            rawTitle
                         }
                         repository.insertNote(
                             Note(
                                 title = finalTitle,
-                                content = content,
+                                content = markdownContent,
                                 category = "Geral",
                                 updatedAt = System.currentTimeMillis()
                             )
                         )
-                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, content)
+                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, markdownContent)
                         successCount++
                     } else {
                         errorCount++
@@ -878,7 +878,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val msg = if (errorCount > 0) {
                 "$successCount importadas, $errorCount com erro"
             } else {
-                "$successCount notas importadas com sucesso!"
+                "$successCount notas importadas e convertidas com sucesso!"
             }
             _userMessage.emit(msg)
         }
@@ -1033,10 +1033,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun permanentlyDeleteNote(note: Note) {
-        viewModelScope.launch {
+    fun permanentlyDeleteNote(note: Note, context: Context? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            context?.let { ctx ->
+                com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title)
+            }
             repository.permanentlyDeleteNote(note)
-            _userMessage.emit("Anotação excluída definitivamente.")
+            _userMessage.emit("Anotação excluída definitivamente do Citra e do armazenamento.")
         }
     }
 
