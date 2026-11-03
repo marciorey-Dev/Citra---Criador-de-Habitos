@@ -138,6 +138,18 @@ object CitraDocsFileManager {
     /**
      * Lists all .md files present in Documents/Citra Docs/
      */
+    fun listAllMarkdownNotes(context: Context): List<File> {
+        return try {
+            val folder = getDocsFolder(context)
+            folder.listFiles { file ->
+                file.isFile && file.name.endsWith(".md", ignoreCase = true)
+            }?.toList() ?: emptyList()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to list markdown notes", e)
+            emptyList()
+        }
+    }
+
     /**
      * Converts various supported file formats (HTML, TXT, JSON, CITRADOC, TEX, MD) to clean Markdown.
      */

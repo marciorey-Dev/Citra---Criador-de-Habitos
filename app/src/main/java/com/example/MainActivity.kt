@@ -73,7 +73,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
-    private val authRepository by lazy { AuthRepository(this) }
+    private val authRepository by lazy { AuthRepository.getInstance(this) }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
@@ -835,6 +835,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AmbientBreakMusicManager.onAppForegrounded(this)
+        viewModel.syncSocialUpdates()
     }
 
     override fun onPause() {

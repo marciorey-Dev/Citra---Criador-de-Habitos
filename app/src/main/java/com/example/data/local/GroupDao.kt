@@ -53,11 +53,11 @@ interface GroupDao {
     @Query("DELETE FROM group_members WHERE groupId = :groupId")
     suspend fun deleteAllMembersForGroup(groupId: Long)
 
-    @Query("SELECT COUNT(*) FROM groups")
-    suspend fun countAll(): Int
-
     @Query("DELETE FROM groups WHERE name IN (:names)")
     suspend fun deleteGroupsByNames(names: List<String>)
+
+    @Query("SELECT * FROM groups WHERE name = :name LIMIT 1")
+    suspend fun getGroupByName(name: String): CitraGroup?
 
     @Query("DELETE FROM groups")
     suspend fun deleteAllGroups()

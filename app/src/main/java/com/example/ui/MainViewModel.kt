@@ -271,6 +271,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.seedInitialDataIfNeeded()
             repository.seedInitialSocialDataIfNeeded()
+            // Start real-time Firestore sync & polling for social, groups, and notes
+            val authRepo = com.example.data.auth.AuthRepository.getInstance(application)
+            authRepo.startRealtimeSocialSync(
+                repository.friendDao,
+                repository.groupDao,
+                repository.noteDao,
+                repository.noteVersionDao
+            )
+        }
+    }
+
+    fun syncSocialUpdates() {
+        viewModelScope.launch {
+            val authRepo = com.example.data.auth.AuthRepository.getInstance(getApplication())
+            authRepo.syncSocialUpdates(
+                repository.friendDao,
+                repository.groupDao,
+                repository.noteDao,
+                repository.noteVersionDao
+            )
         }
     }
 

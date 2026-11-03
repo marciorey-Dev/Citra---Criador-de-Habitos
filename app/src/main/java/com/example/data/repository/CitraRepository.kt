@@ -14,16 +14,17 @@ class CitraRepository(
     private val context: Context,
     private val database: AppDatabase
 ) {
-    private val taskDao = database.taskDao()
-    private val habitDao = database.habitDao()
-    private val noteDao = database.noteDao()
-    private val focusSessionDao = database.focusSessionDao()
-    private val categoryDao = database.categoryDao()
-    private val achievementDao = database.achievementDao()
-    private val friendDao = database.friendDao()
-    private val groupDao = database.groupDao()
-    private val noteVersionDao = database.noteVersionDao()
-    private val preferencesManager = PreferencesManager(context)
+    val taskDao = database.taskDao()
+    val habitDao = database.habitDao()
+    val noteDao = database.noteDao()
+    val focusSessionDao = database.focusSessionDao()
+    val categoryDao = database.categoryDao()
+    val achievementDao = database.achievementDao()
+    val friendDao = database.friendDao()
+    val groupDao = database.groupDao()
+    val noteVersionDao = database.noteVersionDao()
+    val preferencesManager = PreferencesManager(context)
+    val authRepository by lazy { com.example.data.auth.AuthRepository.getInstance(context) }
 
     // Categories
     val allCategories: Flow<List<Category>> = categoryDao.getAllCategories()
@@ -483,14 +484,17 @@ Seu companheiro de produtividade, estudos e organização.
 
     suspend fun acceptFriendRequest(friend: Friend) {
         friendDao.updateFriendStatus(friend.id, "FRIEND")
+        authRepository.acceptFriendRequest(friend, friendDao)
     }
 
     suspend fun removeFriendRequest(friend: Friend) {
         friendDao.deleteFriend(friend)
+        authRepository.rejectFriendRequest(friend, friendDao)
     }
 
     suspend fun blockFriend(friend: Friend) {
         friendDao.updateFriendStatus(friend.id, "BLOCKED")
+        authRepository.blockFriend(friend, friendDao)
     }
 
     suspend fun unblockFriend(friend: Friend) {
@@ -498,11 +502,28 @@ Seu companheiro de produtividade, estudos e organização.
     }
 
     suspend fun sendFriendRequest(friend: Friend) {
-        friendDao.updateFriendStatus(friend.id, "PENDING_OUTGOING")
+        if (friend.id == 0L) {
+            val existing = friendDao.getFriendByUsername(friend.username)
+            if (existing != null) {
+                friendDao.updateFriendStatus(existing.id, "PENDING_OUTGOING")
+            } else {
+                friendDao.insertFriend(friend.copy(status = "PENDING_OUTGOING"))
+            }
+        } else {
+            friendDao.updateFriendStatus(friend.id, "PENDING_OUTGOING")
+        }
+        val curUser = authRepository.currentUser.value
+        if (curUser != null && !curUser.isGuest) {
+            val targetProfile = authRepository.searchUserByHandleOrId(friend.username)
+            if (targetProfile != null) {
+                authRepository.sendFriendRequest(targetProfile, friendDao)
+            }
+        }
     }
 
     suspend fun removeFriend(friend: Friend) {
         friendDao.deleteFriend(friend)
+        authRepository.removeFriend(friend, friendDao)
     }
 
     suspend fun addCustomFriend(name: String, username: String): Long {
@@ -512,12 +533,12 @@ Seu companheiro de produtividade, estudos e organização.
                 name = name.trim(),
                 username = cleanUser,
                 status = "FRIEND",
-                subtitleTag = "unknown"
+                subtitleTag = "..."
             )
         )
     }
 
-    // --- Groups (100% Local) ---
+    // --- Groups ---
     val allGroups: Flow<List<CitraGroup>> = groupDao.getAllGroups()
     val pendingGroupInvites: Flow<List<CitraGroup>> = groupDao.getPendingGroupInvites()
 
@@ -529,6 +550,10 @@ Seu companheiro de produtividade, estudos e organização.
         groupType: String,
         invitedFriends: List<Friend>
     ): Long {
+        val curUser = authRepository.currentUser.value
+        val myName = curUser?.displayName ?: "Você"
+        val myUsername = curUser?.username ?: "@viajante"
+
         val groupId = groupDao.insertGroup(
             CitraGroup(
                 name = name.trim(),
@@ -545,8 +570,8 @@ Seu companheiro de produtividade, estudos e organização.
             GroupMember(
                 groupId = groupId,
                 friendId = 0L,
-                name = "Você",
-                username = "@viajante",
+                name = myName,
+                username = myUsername,
                 isAdmin = true,
                 status = "ACCEPTED"
             )
@@ -565,11 +590,14 @@ Seu companheiro de produtividade, estudos e organização.
                 )
             )
         }
+        // Sync to cloud
+        authRepository.syncCreateGroupToCloud(groupId, name, groupType, imageUri, invitedFriends)
         return groupId
     }
 
     suspend fun acceptGroupInvite(group: CitraGroup) {
         groupDao.updateGroup(group.copy(status = "ACTIVE"))
+        authRepository.acceptGroupInviteInCloud(group.id)
     }
 
     suspend fun declineGroupInvite(group: CitraGroup) {
@@ -605,12 +633,14 @@ Seu companheiro de produtividade, estudos e organização.
     fun getVersionsForNote(noteId: Long): Flow<List<NoteVersion>> = noteVersionDao.getVersionsForNote(noteId)
 
     suspend fun shareNoteWithGroup(note: Note, group: CitraGroup) {
+        val curUser = authRepository.currentUser.value
+        val myName = curUser?.displayName ?: "Você"
         val updated = note.copy(
             isShared = true,
             sharedGroupId = group.id,
             sharedGroupName = group.name,
             sharedOwnerId = "me",
-            sharedOwnerName = "Você",
+            sharedOwnerName = myName,
             sharedGroupType = group.groupType,
             hasUnsyncedChanges = false,
             syncNotificationPending = false,
@@ -627,10 +657,12 @@ Seu companheiro de produtividade, estudos e organização.
                 versionNumber = nextVersionNum,
                 title = note.title,
                 content = note.content,
-                authorName = "Você (Compartilhamento inicial)",
+                authorName = "$myName (Compartilhamento inicial)",
                 timestamp = System.currentTimeMillis()
             )
         )
+        // Sync note to cloud group notes
+        authRepository.shareNoteWithGroupInCloud(updated, group)
     }
 
     suspend fun unshareNoteFromGroup(note: Note) {
@@ -657,6 +689,10 @@ Seu companheiro de produtividade, estudos e organização.
             updatedAt = System.currentTimeMillis()
         )
         noteDao.updateNote(updated)
+        // Sync to cloud
+        note.sharedGroupId?.let { gId ->
+            authRepository.syncNoteContentToCloud(gId, note.id, note.title, newContent, authorName)
+        }
     }
 
     suspend fun acceptNoteSync(note: Note) {

@@ -63,6 +63,9 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE isDeleted = 0")
     suspend fun getAllNotesSync(): List<Note>
 
+    @Query("SELECT * FROM notes WHERE isDeleted = 0 AND sharedGroupId = :groupId AND (id = :noteId OR title = :title) LIMIT 1")
+    suspend fun findGroupNote(groupId: Long, noteId: Long, title: String): Note?
+
     @Query("DELETE FROM notes")
     suspend fun deleteAllNotes()
 }

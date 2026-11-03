@@ -61,6 +61,12 @@ fun SocialView(
     val groups by viewModel.allGroups.collectAsState()
     val pendingGroupInvites by viewModel.pendingGroupInvites.collectAsState()
     val notes by viewModel.notes.collectAsState()
+    val authSuggestedUsers by (authRepository?.suggestedUsers?.collectAsState() ?: remember { mutableStateOf(emptyList()) })
+
+    LaunchedEffect(Unit) {
+        viewModel.syncSocialUpdates()
+        authRepository?.loadPublicSuggestions()
+    }
 
     var isGroupsTab by remember { mutableStateOf(false) }
     var isSearchExpanded by remember { mutableStateOf(false) }
@@ -549,120 +555,306 @@ fun SocialView(
             } else {
                 filteredGroups.forEach { group ->
                     var showGroupMenu by remember { mutableStateOf(false) }
+                    val groupNotes = remember(notes, group.id) { notes.filter { it.sharedGroupId == group.id } }
 
-                    Row(
+                    Card(
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { selectedGroupForManagement = group }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(vertical = 6.dp)
+                            .border(
+                                width = 1.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(18.dp)
+                            )
+                            .testTag("group_card_${group.id}")
                     ) {
-                        // Group Avatar (image or monogram)
-                        if (!group.imageUri.isNullOrBlank()) {
-                            AsyncImage(
-                                model = group.imageUri,
-                                contentDescription = group.name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
-                            )
-                        } else {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.size(54.dp)
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            // Top Row: Group Avatar, Name, Type & Actions
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = group.avatarInitials,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = MaterialTheme.colorScheme.secondary
+                                // Group Avatar
+                                if (!group.imageUri.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = group.imageUri,
+                                        contentDescription = group.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clip(CircleShape)
                                     )
+                                } else {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = group.avatarInitials,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 17.sp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
                                 }
-                            }
-                        }
 
-                        Spacer(modifier = Modifier.width(14.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = group.name,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (group.groupType == "UNILATERAL") MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = group.name,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(3.dp))
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        // Unilateral or Liberal Chip with Icon
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (group.groupType == "UNILATERAL") MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (group.groupType == "UNILATERAL") Icons.Default.Visibility else Icons.Default.EditNote,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(11.dp),
+                                                    tint = if (group.groupType == "UNILATERAL") MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(
+                                                    text = if (group.groupType == "UNILATERAL") "Unilateral" else "Liberal",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (group.groupType == "UNILATERAL") MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                        }
+
+                                        // Members chip with icon
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Groups,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(11.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(
+                                                    text = "${group.memberCount} membros",
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Manage members / details button
+                                IconButton(
+                                    onClick = { selectedGroupForManagement = group },
+                                    modifier = Modifier.size(32.dp)
                                 ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderShared,
+                                        contentDescription = "Ver Grupo",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // 3-Dots Button on Group
+                                Box {
+                                    IconButton(
+                                        onClick = { showGroupMenu = true },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("group_menu_${group.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "Mais opções",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = showGroupMenu,
+                                        onDismissRequest = { showGroupMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Ver Notas e Membros") },
+                                            leadingIcon = { Icon(Icons.Default.FolderShared, contentDescription = null) },
+                                            onClick = {
+                                                showGroupMenu = false
+                                                selectedGroupForManagement = group
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Sair do Grupo") },
+                                            leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null) },
+                                            onClick = {
+                                                showGroupMenu = false
+                                                viewModel.leaveGroup(group.id)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Excluir Grupo", color = RedAction) },
+                                            leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = RedAction) },
+                                            onClick = {
+                                                showGroupMenu = false
+                                                viewModel.deleteGroup(group)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Notes in Group Section
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Article,
+                                        contentDescription = null,
+                                        tint = Color(0xFF1E88E5),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = if (group.groupType == "UNILATERAL") "Unilateral" else "Liberal",
-                                        fontSize = 9.sp,
+                                        text = "Notas no Grupo (${groupNotes.size})",
                                         fontWeight = FontWeight.Bold,
-                                        color = if (group.groupType == "UNILATERAL") MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                if (groupNotes.isNotEmpty()) {
+                                    Text(
+                                        text = "Toque para abrir",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.outline
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "<${group.memberCount} Membros>",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                            )
-                        }
 
-                        // 3-Dots Button on Group
-                        Box {
-                            IconButton(
-                                onClick = { showGroupMenu = true },
-                                modifier = Modifier.testTag("group_menu_${group.id}")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Mais opções",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                            DropdownMenu(
-                                expanded = showGroupMenu,
-                                onDismissRequest = { showGroupMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Ver Notas e Membros") },
-                                    leadingIcon = { Icon(Icons.Default.FolderShared, contentDescription = null) },
-                                    onClick = {
-                                        showGroupMenu = false
-                                        selectedGroupForManagement = group
+                            if (groupNotes.isEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { selectedGroupForManagement = group }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.NoteAdd,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Nenhuma nota compartilhada ainda. Toque para gerenciar.",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Sair do Grupo") },
-                                    leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null) },
-                                    onClick = {
-                                        showGroupMenu = false
-                                        viewModel.leaveGroup(group.id)
+                                }
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    groupNotes.forEach { groupNote ->
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { onOpenNote(groupNote) }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Public,
+                                                        contentDescription = null,
+                                                        tint = Color(0xFF1E88E5),
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = groupNote.title,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 12.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.clickable { onOpenNote(groupNote) }
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text("Entrar", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                        Spacer(modifier = Modifier.width(2.dp))
+                                                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Color.White, modifier = Modifier.size(10.dp))
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Excluir Grupo", color = RedAction) },
-                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = RedAction) },
-                                    onClick = {
-                                        showGroupMenu = false
-                                        viewModel.deleteGroup(group)
-                                    }
-                                )
+                                }
                             }
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(horizontal = 8.dp))
                 }
             }
 
@@ -989,75 +1181,198 @@ fun SocialView(
                             }
                         }
 
-                        // SECTION 2: SUGESTÕES DE AMIZADE (Mockup 3)
+                        // SECTION 2: SUGESTÕES DE AMIZADE (Mockup 3 + Todas as contas públicas)
                         item {
                             Spacer(modifier = Modifier.height(14.dp))
-                            Text(
-                                text = "Sugestões de Amizade",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
-                        }
-
-                        items(suggestedFriends) { suggestion ->
-                            Surface(
-                                shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 5.dp)
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Text(
+                                    text = "Sugestões de Amizade (${if (authSuggestedUsers.isNotEmpty()) authSuggestedUsers.size else suggestedFriends.size})",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                IconButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            viewModel.syncSocialUpdates()
+                                            authRepository?.loadPublicSuggestions()
+                                        }
+                                    }
                                 ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        modifier = Modifier.size(46.dp)
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Atualizar sugestões públicas",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+
+                        if (authSuggestedUsers.isNotEmpty()) {
+                            items(authSuggestedUsers, key = { it.uid }) { user ->
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 5.dp)
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
+                                        Row(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                                modifier = Modifier.size(46.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        text = user.displayName.take(1).uppercase(),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 18.sp,
+                                                        color = MaterialTheme.colorScheme.secondary
+                                                    )
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.width(10.dp))
+
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = user.displayName,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 15.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = user.username.ifBlank { user.friendId },
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                if (user.bio.isNotBlank() && user.bio != "...") {
+                                                    Text(
+                                                        text = user.bio,
+                                                        fontSize = 11.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+
+                                            // Action Button: [Enviar Pedido]
+                                            var requestSentToUser by remember { mutableStateOf(false) }
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (requestSentToUser) Color(0xFF4CAF50) else Color(0xFFC75B5B),
+                                                modifier = Modifier.clickable(enabled = !requestSentToUser) {
+                                                    coroutineScope.launch {
+                                                        authRepository?.sendFriendRequest(user)
+                                                        viewModel.sendFriendRequest(
+                                                            Friend(
+                                                                name = user.displayName,
+                                                                username = user.username.ifBlank { user.friendId },
+                                                                subtitleTag = user.bio.ifBlank { "..." }
+                                                            )
+                                                        )
+                                                        requestSentToUser = true
+                                                    }
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = if (requestSentToUser) "Enviado" else "Enviar Pedido",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                        } else if (suggestedFriends.isNotEmpty()) {
+                            items(suggestedFriends) { suggestion ->
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 5.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            modifier = Modifier.size(46.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = suggestion.name.take(2).uppercase(),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 16.sp,
+                                                    color = MaterialTheme.colorScheme.secondary
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.width(10.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = suggestion.name.take(2).uppercase(),
+                                                text = suggestion.name,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp,
-                                                color = MaterialTheme.colorScheme.secondary
+                                                fontSize = 15.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = suggestion.subtitleTag,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+
+                                        // Action Button: [Enviar Pedido]
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color(0xFFC75B5B),
+                                            modifier = Modifier.clickable { viewModel.sendFriendRequest(suggestion) }
+                                        ) {
+                                            Text(
+                                                text = "Enviar Pedido",
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
                                             )
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = suggestion.name,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = suggestion.subtitleTag,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    // Action Button: [Enviar Pedido]
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFFC75B5B),
-                                        modifier = Modifier.clickable { viewModel.sendFriendRequest(suggestion) }
-                                    ) {
-                                        Text(
-                                            text = "Enviar Pedido",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
-                                        )
-                                    }
+                                }
+                            }
+                        } else {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "Nenhuma sugestão pública no momento. Toque no botão de atualizar acima.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(16.dp)
+                                    )
                                 }
                             }
                         }
@@ -1263,50 +1578,194 @@ fun SocialView(
         )
     }
 
-    // --- DIALOG: ADICIONAR AMIGO POR ID / @USUÁRIO ---
+    // --- DIALOG: ADICIONAR AMIGO POR ID / @USUÁRIO (Busca no Banco de Dados) ---
     if (showAddFriendDialog) {
-        var friendName by remember { mutableStateOf("") }
-        var friendUsername by remember { mutableStateOf("") }
+        var queryInput by remember { mutableStateOf("") }
+        var isSearching by remember { mutableStateOf(false) }
+        var searchResult by remember { mutableStateOf<com.example.data.auth.UserProfile?>(null) }
+        var searchPerformed by remember { mutableStateOf(false) }
+        var requestSent by remember { mutableStateOf(false) }
 
         AlertDialog(
             onDismissRequest = { showAddFriendDialog = false },
-            title = { Text("Adicionar Novo Amigo", fontWeight = FontWeight.Bold) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.PersonSearch, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Buscar Amigo", fontWeight = FontWeight.Bold)
+                }
+            },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = friendName,
-                        onValueChange = { friendName = it },
-                        label = { Text("Nome") },
-                        placeholder = { Text("Ex: Lucas") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Digite o @usuario ou o ID da conta para procurar no banco de dados:",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
-                        value = friendUsername,
-                        onValueChange = { friendUsername = it },
-                        label = { Text("@Usuário ou ID (9 dígitos)") },
-                        placeholder = { Text("@lucas ou CTR-98721") },
+                        value = queryInput,
+                        onValueChange = {
+                            queryInput = it
+                            searchPerformed = false
+                            searchResult = null
+                            requestSent = false
+                        },
+                        label = { Text("@usuário ou ID") },
+                        placeholder = { Text("@kinn ou CTR-12345") },
                         singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (queryInput.isNotBlank()) {
+                                IconButton(onClick = {
+                                    queryInput = ""
+                                    searchPerformed = false
+                                    searchResult = null
+                                }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Limpar")
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    Button(
+                        onClick = {
+                            if (queryInput.isNotBlank()) {
+                                isSearching = true
+                                searchPerformed = false
+                                coroutineScope.launch {
+                                    val profile = authRepository?.searchUserByHandleOrId(queryInput.trim())
+                                    searchResult = profile
+                                    searchPerformed = true
+                                    isSearching = false
+                                }
+                            }
+                        },
+                        enabled = queryInput.isNotBlank() && !isSearching,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        if (isSearching) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Buscando no banco...")
+                        } else {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Procurar Conta")
+                        }
+                    }
+
+                    if (searchPerformed) {
+                        if (searchResult != null) {
+                            val user = searchResult!!
+                            Card(
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(46.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = user.displayName.take(1).uppercase(),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 18.sp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(user.displayName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        Text(user.username.ifBlank { user.friendId }, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                                        if (user.bio.isNotBlank() && user.bio != "...") {
+                                            Text(
+                                                text = user.bio,
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!requestSent) {
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            authRepository?.sendFriendRequest(user)
+                                            val newFriend = Friend(
+                                                name = user.displayName,
+                                                username = user.username.ifBlank { user.friendId },
+                                                subtitleTag = user.bio.ifBlank { "Amigo" }
+                                            )
+                                            viewModel.sendFriendRequest(newFriend)
+                                            requestSent = true
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Enviar Pedido de Amizade")
+                                }
+                            } else {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Pedido enviado com sucesso!", color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        } else {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = RedContainer.copy(alpha = 0.4f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = RedAction, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        "Nenhuma conta encontrada com este @usuário ou ID.",
+                                        color = RedAction,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (friendName.isNotBlank()) {
-                            viewModel.addCustomFriend(friendName, friendUsername)
-                            showAddFriendDialog = false
-                        }
-                    },
-                    enabled = friendName.isNotBlank()
-                ) {
-                    Text("Adicionar")
-                }
-            },
-            dismissButton = {
                 TextButton(onClick = { showAddFriendDialog = false }) {
-                    Text("Cancelar")
+                    Text("Fechar")
                 }
             }
         )

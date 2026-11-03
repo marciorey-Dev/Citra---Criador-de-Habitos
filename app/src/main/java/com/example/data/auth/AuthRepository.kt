@@ -24,14 +24,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.util.UUID
 import com.example.data.backup.BackupManager
+import com.example.data.local.FriendDao
+import com.example.data.local.GroupDao
+import com.example.data.local.NoteDao
+import com.example.data.local.NoteVersionDao
 import com.example.data.model.Achievement
 import com.example.data.model.Category
+import com.example.data.model.CitraGroup
 import com.example.data.model.FocusSession
+import com.example.data.model.Friend
+import com.example.data.model.GroupMember
 import com.example.data.model.Habit
 import com.example.data.model.Note
+import com.example.data.model.NoteVersion
 import com.example.data.model.Task
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.QuerySnapshot
 
 data class UserProfile(
     val uid: String,
@@ -144,6 +157,18 @@ class AuthRepository(private val context: Context) {
 
     private val _isAuthReady = MutableStateFlow(false)
     val isAuthReady: StateFlow<Boolean> = _isAuthReady.asStateFlow()
+
+    private var incomingRequestsRegistration: ListenerRegistration? = null
+    private var outgoingRequestsRegistration: ListenerRegistration? = null
+    private var friendsRegistration: ListenerRegistration? = null
+    private var groupsRegistration: ListenerRegistration? = null
+    private val groupNotesRegistrations = mutableMapOf<Long, ListenerRegistration>()
+    private var periodicSyncJob: Job? = null
+
+    private var attachedFriendDao: FriendDao? = null
+    private var attachedGroupDao: GroupDao? = null
+    private var attachedNoteDao: NoteDao? = null
+    private var attachedNoteVersionDao: NoteVersionDao? = null
 
     init {
         // Load initial state safely
@@ -287,6 +312,15 @@ class AuthRepository(private val context: Context) {
                 }
                 if (!isModeratorFlag) {
                     loadFriends(uid)
+                    attachedFriendDao?.let { fDao ->
+                        attachedGroupDao?.let { gDao ->
+                            attachedNoteDao?.let { nDao ->
+                                attachedNoteVersionDao?.let { nvDao ->
+                                    startRealtimeSocialSync(fDao, gDao, nDao, nvDao)
+                                }
+                            }
+                        }
+                    }
                 }
             } catch (_: Exception) {
                 // Fallback to basic profile from auth
@@ -575,6 +609,19 @@ class AuthRepository(private val context: Context) {
         _currentUser.value = null
         _friends.value = emptyList()
         _pendingRequests.value = emptyList()
+
+        incomingRequestsRegistration?.remove()
+        incomingRequestsRegistration = null
+        outgoingRequestsRegistration?.remove()
+        outgoingRequestsRegistration = null
+        friendsRegistration?.remove()
+        friendsRegistration = null
+        groupsRegistration?.remove()
+        groupsRegistration = null
+        groupNotesRegistrations.values.forEach { it.remove() }
+        groupNotesRegistrations.clear()
+        periodicSyncJob?.cancel()
+        periodicSyncJob = null
     }
 
     suspend fun searchUsers(query: String): List<UserProfile> {
@@ -747,36 +794,147 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    suspend fun sendFriendRequest(target: UserProfile): Result<Unit> {
+    suspend fun sendFriendRequest(target: UserProfile, friendDao: FriendDao? = null): Result<Unit> {
         val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
         val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firestore não está inicializado"))
         return try {
             val reqId = "${myUser.uid}_${target.uid}"
             currentFirestore.collection("friendRequests").document(reqId).set(
                 mapOf(
+                    "requestId" to reqId,
                     "fromUserId" to myUser.uid,
                     "fromDisplayName" to myUser.displayName,
                     "fromUsername" to myUser.username,
-                    "fromPhotoUrl" to myUser.photoUrl,
+                    "fromPhotoUrl" to (myUser.photoUrl ?: ""),
+                    "fromBio" to myUser.bio,
+                    "fromFriendId" to myUser.friendId,
                     "toUserId" to target.uid,
                     "toDisplayName" to target.displayName,
                     "toUsername" to target.username,
+                    "toFriendId" to target.friendId,
                     "status" to "pending",
-                    "createdAt" to System.currentTimeMillis()
-                )
+                    "createdAt" to System.currentTimeMillis(),
+                    "updatedAt" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
             ).await()
 
-            // Optimistically add to my friends as pending
+            // Update local Room database if provided
+            val targetDao = friendDao ?: attachedFriendDao
+            targetDao?.let { dao ->
+                val existing = dao.getFriendByUsername(target.username)
+                if (existing == null) {
+                    dao.insertFriend(
+                        Friend(
+                            name = target.displayName,
+                            username = target.username,
+                            subtitleTag = target.bio,
+                            avatarUri = target.photoUrl,
+                            status = "PENDING_OUTGOING"
+                        )
+                    )
+                } else {
+                    dao.updateFriendStatus(existing.id, "PENDING_OUTGOING")
+                }
+            }
+
+            // Optimistically update memory list
             _friends.value = _friends.value + FriendItem(
                 friendUserId = target.uid,
                 displayName = target.displayName,
                 username = target.username,
                 photoUrl = target.photoUrl,
                 friendId = target.friendId,
+                bio = target.bio,
                 status = "pending"
             )
-            // Remove from suggested users list
+            // Remove from suggestions
             _suggestedUsers.value = _suggestedUsers.value.filter { it.uid != target.uid }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun acceptFriendRequest(friend: Friend, friendDao: FriendDao? = null): Result<Unit> {
+        val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
+        val currentFirestore = firestore
+        val targetDao = friendDao ?: attachedFriendDao
+
+        // Update local Room DB immediately
+        targetDao?.updateFriendStatus(friend.id, "FRIEND")
+
+        if (currentFirestore == null || myUser.isGuest) {
+            return Result.success(Unit)
+        }
+
+        return try {
+            // Find and update the request document
+            val reqQuery = currentFirestore.collection("friendRequests")
+                .whereEqualTo("toUserId", myUser.uid)
+                .whereEqualTo("fromUsername", friend.username)
+                .get()
+                .await()
+
+            var targetUid = ""
+            for (doc in reqQuery.documents) {
+                targetUid = doc.getString("fromUserId") ?: ""
+                doc.reference.update(
+                    mapOf(
+                        "status" to "accepted",
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+            }
+
+            if (targetUid.isBlank()) {
+                val userDoc = currentFirestore.collection("users")
+                    .whereEqualTo("username", friend.username)
+                    .get()
+                    .await()
+                    .documents.firstOrNull()
+                targetUid = userDoc?.id ?: ""
+            }
+
+            if (targetUid.isNotBlank()) {
+                // Add to mutual friends in Firestore
+                currentFirestore.collection("users").document(myUser.uid)
+                    .collection("friends").document(targetUid).set(
+                        mapOf(
+                            "friendUserId" to targetUid,
+                            "displayName" to friend.name,
+                            "username" to friend.username,
+                            "photoUrl" to (friend.avatarUri ?: ""),
+                            "bio" to friend.subtitleTag,
+                            "status" to "accepted",
+                            "updatedAt" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    ).await()
+
+                currentFirestore.collection("users").document(targetUid)
+                    .collection("friends").document(myUser.uid).set(
+                        mapOf(
+                            "friendUserId" to myUser.uid,
+                            "displayName" to myUser.displayName,
+                            "username" to myUser.username,
+                            "photoUrl" to (myUser.photoUrl ?: ""),
+                            "bio" to myUser.bio,
+                            "status" to "accepted",
+                            "updatedAt" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    ).await()
+            }
+
+            _pendingRequests.value = _pendingRequests.value.filter { it.username != friend.username }
+            _friends.value = _friends.value.filter { it.username != friend.username } + FriendItem(
+                friendUserId = targetUid,
+                displayName = friend.name,
+                username = friend.username,
+                photoUrl = friend.avatarUri,
+                status = "accepted"
+            )
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -793,10 +951,11 @@ class AuthRepository(private val context: Context) {
                         "friendUserId" to request.friendUserId,
                         "displayName" to request.displayName,
                         "username" to request.username,
-                        "photoUrl" to request.photoUrl,
+                        "photoUrl" to (request.photoUrl ?: ""),
                         "friendId" to request.friendId,
                         "status" to "accepted"
-                    )
+                    ),
+                    SetOptions.merge()
                 ).await()
 
             currentFirestore.collection("users").document(request.friendUserId)
@@ -805,20 +964,70 @@ class AuthRepository(private val context: Context) {
                         "friendUserId" to myUser.uid,
                         "displayName" to myUser.displayName,
                         "username" to myUser.username,
-                        "photoUrl" to myUser.photoUrl,
+                        "photoUrl" to (myUser.photoUrl ?: ""),
                         "friendId" to myUser.friendId,
                         "status" to "accepted"
-                    )
+                    ),
+                    SetOptions.merge()
                 ).await()
 
             val reqId = "${request.friendUserId}_${myUser.uid}"
             try {
-                currentFirestore.collection("friendRequests").document(reqId).update("status", "accepted").await()
+                currentFirestore.collection("friendRequests").document(reqId).update(
+                    mapOf(
+                        "status" to "accepted",
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
             } catch (_: Exception) {}
+
+            attachedFriendDao?.let { dao ->
+                val existing = dao.getFriendByUsername(request.username)
+                if (existing != null) {
+                    dao.updateFriendStatus(existing.id, "FRIEND")
+                } else {
+                    dao.insertFriend(
+                        Friend(
+                            name = request.displayName,
+                            username = request.username,
+                            avatarUri = request.photoUrl,
+                            subtitleTag = request.bio,
+                            status = "FRIEND"
+                        )
+                    )
+                }
+            }
 
             _pendingRequests.value = _pendingRequests.value.filter { it.friendUserId != request.friendUserId }
             _friends.value = _friends.value.filter { it.friendUserId != request.friendUserId } + request.copy(status = "accepted")
             _suggestedUsers.value = _suggestedUsers.value.filter { it.uid != request.friendUserId }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rejectFriendRequest(friend: Friend, friendDao: FriendDao? = null): Result<Unit> {
+        val targetDao = friendDao ?: attachedFriendDao
+        targetDao?.deleteFriend(friend)
+
+        val myUser = _currentUser.value ?: return Result.success(Unit)
+        val currentFirestore = firestore ?: return Result.success(Unit)
+        return try {
+            val reqQuery = currentFirestore.collection("friendRequests")
+                .whereEqualTo("toUserId", myUser.uid)
+                .whereEqualTo("fromUsername", friend.username)
+                .get()
+                .await()
+            for (doc in reqQuery.documents) {
+                doc.reference.update(
+                    mapOf(
+                        "status" to "rejected",
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+            }
+            _pendingRequests.value = _pendingRequests.value.filter { it.username != friend.username }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -831,9 +1040,18 @@ class AuthRepository(private val context: Context) {
         return try {
             val reqId = "${request.friendUserId}_${myUser.uid}"
             try {
-                currentFirestore.collection("friendRequests").document(reqId).update("status", "rejected").await()
+                currentFirestore.collection("friendRequests").document(reqId).update(
+                    mapOf(
+                        "status" to "rejected",
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
             } catch (_: Exception) {
                 currentFirestore.collection("friendRequests").document(reqId).delete().await()
+            }
+            attachedFriendDao?.let { dao ->
+                val existing = dao.getFriendByUsername(request.username)
+                if (existing != null) dao.deleteFriend(existing)
             }
             _pendingRequests.value = _pendingRequests.value.filter { it.friendUserId != request.friendUserId }
             Result.success(Unit)
@@ -842,24 +1060,621 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    suspend fun removeFriend(friendUserId: String): Result<Unit> {
+    suspend fun blockFriend(friend: Friend, friendDao: FriendDao? = null): Result<Unit> {
+        val targetDao = friendDao ?: attachedFriendDao
+        targetDao?.updateFriendStatus(friend.id, "BLOCKED")
+
+        val myUser = _currentUser.value ?: return Result.success(Unit)
+        val currentFirestore = firestore ?: return Result.success(Unit)
+        return try {
+            val reqQuery = currentFirestore.collection("friendRequests")
+                .whereEqualTo("toUserId", myUser.uid)
+                .whereEqualTo("fromUsername", friend.username)
+                .get()
+                .await()
+            for (doc in reqQuery.documents) {
+                doc.reference.update(
+                    mapOf(
+                        "status" to "blocked",
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+            }
+            _pendingRequests.value = _pendingRequests.value.filter { it.username != friend.username }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun removeFriend(friend: Friend, friendDao: FriendDao? = null): Result<Unit> {
+        val targetDao = friendDao ?: attachedFriendDao
+        targetDao?.deleteFriend(friend)
+        return removeFriend(friend.username)
+    }
+
+    suspend fun removeFriend(friendUserIdOrUsername: String): Result<Unit> {
         val myUser = _currentUser.value ?: return Result.failure(IllegalStateException("Não conectado"))
         val currentFirestore = firestore
-        _friends.value = _friends.value.filter { it.friendUserId != friendUserId }
+        _friends.value = _friends.value.filter { it.friendUserId != friendUserIdOrUsername && it.username != friendUserIdOrUsername }
         if (currentFirestore == null || myUser.isGuest) {
             return Result.success(Unit)
         }
         return try {
             currentFirestore.collection("users").document(myUser.uid)
-                .collection("friends").document(friendUserId).delete().await()
+                .collection("friends").document(friendUserIdOrUsername).delete().await()
             try {
-                currentFirestore.collection("users").document(friendUserId)
+                currentFirestore.collection("users").document(friendUserIdOrUsername)
                     .collection("friends").document(myUser.uid).delete().await()
             } catch (_: Exception) {}
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    // --- REAL-TIME SOCIAL SYNCHRONIZATION ENGINE (<5 min, immediate feedback) ---
+    fun startRealtimeSocialSync(
+        friendDao: FriendDao,
+        groupDao: GroupDao,
+        noteDao: NoteDao,
+        noteVersionDao: NoteVersionDao
+    ) {
+        attachedFriendDao = friendDao
+        attachedGroupDao = groupDao
+        attachedNoteDao = noteDao
+        attachedNoteVersionDao = noteVersionDao
+
+        val currentFirestore = firestore ?: return
+        val myUser = _currentUser.value ?: return
+        if (myUser.isGuest || myUser.isModerator) return
+
+        // 1. Snapshot Listener: Incoming Friend Requests (real-time notification on recipient device)
+        incomingRequestsRegistration?.remove()
+        incomingRequestsRegistration = currentFirestore.collection("friendRequests")
+            .whereEqualTo("toUserId", myUser.uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                scope.launch {
+                    handleIncomingRequestsSnapshot(snapshot, friendDao)
+                }
+            }
+
+        // 2. Snapshot Listener: Outgoing Friend Requests (real-time notification when target accepts)
+        outgoingRequestsRegistration?.remove()
+        outgoingRequestsRegistration = currentFirestore.collection("friendRequests")
+            .whereEqualTo("fromUserId", myUser.uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                scope.launch {
+                    handleOutgoingRequestsSnapshot(snapshot, friendDao)
+                }
+            }
+
+        // 3. Snapshot Listener: My Friends Subcollection
+        friendsRegistration?.remove()
+        friendsRegistration = currentFirestore.collection("users").document(myUser.uid)
+            .collection("friends")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                scope.launch {
+                    for (doc in snapshot.documents) {
+                        val fName = doc.getString("displayName") ?: "Amigo"
+                        val fUser = doc.getString("username") ?: "@amigo"
+                        val fPhoto = doc.getString("photoUrl")
+                        val fBio = doc.getString("bio") ?: "..."
+                        val existing = friendDao.getFriendByUsername(fUser)
+                        if (existing == null) {
+                            friendDao.insertFriend(
+                                Friend(
+                                    name = fName,
+                                    username = fUser,
+                                    avatarUri = fPhoto,
+                                    subtitleTag = fBio,
+                                    status = "FRIEND"
+                                )
+                            )
+                        } else if (existing.status != "FRIEND") {
+                            friendDao.updateFriendStatus(existing.id, "FRIEND")
+                        }
+                    }
+                }
+            }
+
+        // 4. Snapshot Listener: Groups I belong to or am invited to
+        groupsRegistration?.remove()
+        groupsRegistration = currentFirestore.collection("groups")
+            .whereArrayContains("memberUids", myUser.uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                scope.launch {
+                    handleGroupsSnapshot(snapshot, groupDao, noteDao, noteVersionDao)
+                }
+            }
+
+        // 5. Constant Periodic Polling (every 12 seconds in foreground)
+        periodicSyncJob?.cancel()
+        periodicSyncJob = scope.launch {
+            while (isActive) {
+                delay(12_000L) // 12s polling guarantee (well under 5 min)
+                val cur = _currentUser.value
+                if (cur != null && !cur.isGuest && !cur.isModerator) {
+                    try {
+                        syncSocialUpdates(friendDao, groupDao, noteDao, noteVersionDao)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
+        // Initial immediate sync
+        scope.launch {
+            syncSocialUpdates(friendDao, groupDao, noteDao, noteVersionDao)
+        }
+    }
+
+    private suspend fun handleIncomingRequestsSnapshot(snapshot: QuerySnapshot, friendDao: FriendDao) {
+        val requests = mutableListOf<FriendItem>()
+        for (doc in snapshot.documents) {
+            val status = doc.getString("status") ?: "pending"
+            val fromUid = doc.getString("fromUserId") ?: ""
+            val fromName = doc.getString("fromDisplayName") ?: "Usuário"
+            val fromUser = doc.getString("fromUsername") ?: "@usuario"
+            val fromPhoto = doc.getString("fromPhotoUrl")
+            val fromBio = doc.getString("fromBio") ?: "..."
+            val fromFriendId = doc.getString("fromFriendId") ?: ""
+
+            if (status == "pending") {
+                requests.add(
+                    FriendItem(
+                        friendUserId = fromUid,
+                        displayName = fromName,
+                        username = fromUser,
+                        photoUrl = fromPhoto,
+                        friendId = fromFriendId,
+                        bio = fromBio,
+                        status = "pending"
+                    )
+                )
+                // Insert or update in Room
+                val existing = friendDao.getFriendByUsername(fromUser)
+                if (existing == null) {
+                    friendDao.insertFriend(
+                        Friend(
+                            name = fromName,
+                            username = fromUser,
+                            avatarUri = fromPhoto,
+                            subtitleTag = fromBio,
+                            status = "PENDING_INCOMING"
+                        )
+                    )
+                } else if (existing.status != "PENDING_INCOMING" && existing.status != "FRIEND") {
+                    friendDao.updateFriendStatus(existing.id, "PENDING_INCOMING")
+                }
+            } else if (status == "accepted") {
+                val existing = friendDao.getFriendByUsername(fromUser)
+                if (existing == null) {
+                    friendDao.insertFriend(
+                        Friend(
+                            name = fromName,
+                            username = fromUser,
+                            avatarUri = fromPhoto,
+                            subtitleTag = fromBio,
+                            status = "FRIEND"
+                        )
+                    )
+                } else if (existing.status != "FRIEND") {
+                    friendDao.updateFriendStatus(existing.id, "FRIEND")
+                }
+            } else if (status == "rejected" || status == "removed") {
+                val existing = friendDao.getFriendByUsername(fromUser)
+                if (existing != null && existing.status == "PENDING_INCOMING") {
+                    friendDao.deleteFriend(existing)
+                }
+            }
+        }
+        _pendingRequests.value = requests
+    }
+
+    private suspend fun handleOutgoingRequestsSnapshot(snapshot: QuerySnapshot, friendDao: FriendDao) {
+        for (doc in snapshot.documents) {
+            val toUsername = doc.getString("toUsername") ?: ""
+            val toDisplayName = doc.getString("toDisplayName") ?: "Amigo"
+            val toPhoto = doc.getString("toPhotoUrl")
+            val status = doc.getString("status") ?: "pending"
+            if (toUsername.isNotBlank()) {
+                val existing = friendDao.getFriendByUsername(toUsername)
+                if (status == "accepted") {
+                    if (existing != null && existing.status != "FRIEND") {
+                        friendDao.updateFriendStatus(existing.id, "FRIEND")
+                    } else if (existing == null) {
+                        friendDao.insertFriend(
+                            Friend(
+                                name = toDisplayName,
+                                username = toUsername,
+                                avatarUri = toPhoto,
+                                status = "FRIEND"
+                            )
+                        )
+                    }
+                } else if (status == "rejected") {
+                    if (existing != null && existing.status == "PENDING_OUTGOING") {
+                        friendDao.deleteFriend(existing)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun handleGroupsSnapshot(
+        snapshot: QuerySnapshot,
+        groupDao: GroupDao,
+        noteDao: NoteDao,
+        noteVersionDao: NoteVersionDao
+    ) {
+        val myUser = _currentUser.value ?: return
+        for (doc in snapshot.documents) {
+            val gId = doc.getLong("id") ?: doc.id.filter { it.isDigit() }.take(9).toLongOrNull() ?: System.currentTimeMillis()
+            val gName = doc.getString("name") ?: "Grupo"
+            val gType = doc.getString("groupType") ?: "LIBERAL"
+            val gImage = doc.getString("imageUri")
+            val ownerUid = doc.getString("ownerUid") ?: ""
+            val ownerName = doc.getString("ownerName") ?: "Você"
+            val memberDetails = doc.get("memberDetails") as? List<Map<String, Any>> ?: emptyList()
+
+            val isOwner = ownerUid == myUser.uid
+            val myDetail = memberDetails.firstOrNull {
+                (it["uid"] as? String) == myUser.uid || (it["username"] as? String) == myUser.username
+            }
+            val myMemberStatus = myDetail?.get("status") as? String ?: (if (isOwner) "ACCEPTED" else "INVITED")
+            val groupStatus = if (isOwner || myMemberStatus == "ACCEPTED") "ACTIVE" else "INVITED"
+
+            val existing = groupDao.getGroupById(gId) ?: groupDao.getGroupByName(gName)
+            val effectiveGroupId = if (existing == null) {
+                groupDao.insertGroup(
+                    CitraGroup(
+                        id = gId,
+                        name = gName,
+                        imageUri = gImage,
+                        avatarInitials = gName.take(2).uppercase(),
+                        ownerId = if (isOwner) "me" else ownerName,
+                        groupType = gType,
+                        memberCount = memberDetails.size.coerceAtLeast(1),
+                        status = groupStatus
+                    )
+                )
+            } else {
+                groupDao.updateGroup(
+                    existing.copy(
+                        name = gName,
+                        groupType = gType,
+                        imageUri = if (gImage.isNullOrBlank()) existing.imageUri else gImage,
+                        status = groupStatus,
+                        memberCount = memberDetails.size.coerceAtLeast(1)
+                    )
+                )
+                existing.id
+            }
+
+            for (m in memberDetails) {
+                val mName = m["name"] as? String ?: "Membro"
+                val mUser = m["username"] as? String ?: "@membro"
+                val mIsAdmin = m["isAdmin"] as? Boolean ?: false
+                val mPhoto = m["photoUrl"] as? String
+                val mStatus = m["status"] as? String ?: "ACCEPTED"
+                groupDao.insertMember(
+                    GroupMember(
+                        groupId = effectiveGroupId,
+                        friendId = 0L,
+                        name = mName,
+                        username = mUser,
+                        avatarUri = mPhoto,
+                        isAdmin = mIsAdmin,
+                        status = mStatus
+                    )
+                )
+            }
+
+            if (groupStatus == "ACTIVE") {
+                attachGroupNotesListener(effectiveGroupId, gName, gType, noteDao, noteVersionDao)
+            }
+        }
+    }
+
+    private fun attachGroupNotesListener(
+        groupId: Long,
+        groupName: String,
+        groupType: String,
+        noteDao: NoteDao,
+        noteVersionDao: NoteVersionDao
+    ) {
+        if (groupNotesRegistrations.containsKey(groupId)) return
+        val currentFirestore = firestore ?: return
+        val reg = currentFirestore.collection("groups").document(groupId.toString())
+            .collection("notes")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                scope.launch {
+                    for (doc in snapshot.documents) {
+                        val nId = doc.getLong("id") ?: doc.id.filter { it.isDigit() }.take(9).toLongOrNull() ?: System.currentTimeMillis()
+                        val title = doc.getString("title") ?: "Nota Compartilhada"
+                        val content = doc.getString("content") ?: ""
+                        val category = doc.getString("category") ?: "Geral"
+                        val remoteUpdatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
+                        val author = doc.getString("lastAuthor") ?: doc.getString("ownerName") ?: "Membro"
+                        val ownerUid = doc.getString("ownerUid") ?: ""
+                        val isMyNote = ownerUid == _currentUser.value?.uid
+
+                        val existing = noteDao.findGroupNote(groupId, nId, title)
+                        if (existing == null) {
+                            val insertedId = noteDao.insertNote(
+                                Note(
+                                    title = title,
+                                    content = content,
+                                    category = category,
+                                    isShared = true,
+                                    sharedGroupId = groupId,
+                                    sharedGroupName = groupName,
+                                    sharedOwnerId = if (isMyNote) "me" else ownerUid,
+                                    sharedGroupType = groupType,
+                                    updatedAt = remoteUpdatedAt
+                                )
+                            )
+                            noteVersionDao.insertVersion(
+                                NoteVersion(
+                                    noteId = insertedId,
+                                    versionNumber = 1,
+                                    title = title,
+                                    content = content,
+                                    authorName = author,
+                                    timestamp = remoteUpdatedAt
+                                )
+                            )
+                        } else if (remoteUpdatedAt > existing.updatedAt && !isMyNote) {
+                            noteDao.updateNote(
+                                existing.copy(
+                                    title = title,
+                                    content = content,
+                                    updatedAt = remoteUpdatedAt,
+                                    syncNotificationPending = true
+                                )
+                            )
+                            val versions = noteVersionDao.getVersionsForNoteSync(existing.id)
+                            val nextVer = (versions.maxOfOrNull { it.versionNumber } ?: 0) + 1
+                            noteVersionDao.insertVersion(
+                                NoteVersion(
+                                    noteId = existing.id,
+                                    versionNumber = nextVer,
+                                    title = title,
+                                    content = content,
+                                    authorName = author,
+                                    timestamp = remoteUpdatedAt
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        groupNotesRegistrations[groupId] = reg
+    }
+
+    suspend fun syncSocialUpdates(
+        friendDao: FriendDao,
+        groupDao: GroupDao,
+        noteDao: NoteDao,
+        noteVersionDao: NoteVersionDao
+    ) {
+        val myUser = _currentUser.value ?: return
+        if (myUser.isGuest || myUser.isModerator) return
+        val currentFirestore = firestore ?: return
+
+        try {
+            // 1. Fetch pending requests to me
+            val toMeQuery = currentFirestore.collection("friendRequests")
+                .whereEqualTo("toUserId", myUser.uid)
+                .get()
+                .await()
+            handleIncomingRequestsSnapshot(toMeQuery, friendDao)
+
+            if (myUser.username.isNotBlank()) {
+                val toUsernameQuery = currentFirestore.collection("friendRequests")
+                    .whereEqualTo("toUsername", myUser.username)
+                    .get()
+                    .await()
+                handleIncomingRequestsSnapshot(toUsernameQuery, friendDao)
+            }
+
+            // 2. Fetch outgoing requests
+            val fromMeQuery = currentFirestore.collection("friendRequests")
+                .whereEqualTo("fromUserId", myUser.uid)
+                .get()
+                .await()
+            handleOutgoingRequestsSnapshot(fromMeQuery, friendDao)
+
+            // 3. Mutual friends subcollection
+            val friendsSnap = currentFirestore.collection("users").document(myUser.uid)
+                .collection("friends")
+                .get()
+                .await()
+            for (doc in friendsSnap.documents) {
+                val fName = doc.getString("displayName") ?: "Amigo"
+                val fUser = doc.getString("username") ?: "@amigo"
+                val fPhoto = doc.getString("photoUrl")
+                val fBio = doc.getString("bio") ?: "..."
+                val existing = friendDao.getFriendByUsername(fUser)
+                if (existing == null) {
+                    friendDao.insertFriend(
+                        Friend(
+                            name = fName,
+                            username = fUser,
+                            avatarUri = fPhoto,
+                            subtitleTag = fBio,
+                            status = "FRIEND"
+                        )
+                    )
+                } else if (existing.status != "FRIEND") {
+                    friendDao.updateFriendStatus(existing.id, "FRIEND")
+                }
+            }
+
+            // 4. Groups
+            val groupsSnap = currentFirestore.collection("groups")
+                .whereArrayContains("memberUids", myUser.uid)
+                .get()
+                .await()
+            handleGroupsSnapshot(groupsSnap, groupDao, noteDao, noteVersionDao)
+
+            if (myUser.username.isNotBlank()) {
+                val groupsByUsername = currentFirestore.collection("groups")
+                    .whereArrayContains("memberUsernames", myUser.username)
+                    .get()
+                    .await()
+                handleGroupsSnapshot(groupsByUsername, groupDao, noteDao, noteVersionDao)
+            }
+
+            // 5. Suggestions
+            loadPublicSuggestions()
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "syncSocialUpdates failed: ${e.message}")
+        }
+    }
+
+    suspend fun syncCreateGroupToCloud(
+        groupId: Long,
+        name: String,
+        groupType: String,
+        imageUri: String?,
+        invitedFriends: List<Friend>
+    ) {
+        val myUser = _currentUser.value ?: return
+        if (myUser.isGuest) return
+        val currentFirestore = firestore ?: return
+        try {
+            val memberUids = mutableListOf(myUser.uid)
+            val memberUsernames = mutableListOf(myUser.username)
+            val memberDetails = mutableListOf<Map<String, Any>>(
+                mapOf(
+                    "uid" to myUser.uid,
+                    "name" to myUser.displayName,
+                    "username" to myUser.username,
+                    "photoUrl" to (myUser.photoUrl ?: ""),
+                    "isAdmin" to true,
+                    "status" to "ACCEPTED"
+                )
+            )
+
+            for (f in invitedFriends) {
+                memberUsernames.add(f.username)
+                val userDoc = currentFirestore.collection("users")
+                    .whereEqualTo("username", f.username)
+                    .get()
+                    .await()
+                    .documents.firstOrNull()
+                val fUid = userDoc?.id ?: ""
+                if (fUid.isNotBlank()) memberUids.add(fUid)
+                memberDetails.add(
+                    mapOf(
+                        "uid" to fUid,
+                        "name" to f.name,
+                        "username" to f.username,
+                        "photoUrl" to (f.avatarUri ?: ""),
+                        "isAdmin" to false,
+                        "status" to "INVITED"
+                    )
+                )
+            }
+
+            currentFirestore.collection("groups").document(groupId.toString()).set(
+                mapOf(
+                    "id" to groupId,
+                    "name" to name,
+                    "groupType" to groupType,
+                    "imageUri" to (imageUri ?: ""),
+                    "ownerUid" to myUser.uid,
+                    "ownerName" to myUser.displayName,
+                    "ownerUsername" to myUser.username,
+                    "memberUids" to memberUids,
+                    "memberUsernames" to memberUsernames,
+                    "memberDetails" to memberDetails,
+                    "memberCount" to (1 + invitedFriends.size),
+                    "createdAt" to System.currentTimeMillis(),
+                    "updatedAt" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
+            ).await()
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Failed to sync group to cloud: ${e.message}")
+        }
+    }
+
+    suspend fun acceptGroupInviteInCloud(groupId: Long) {
+        val myUser = _currentUser.value ?: return
+        if (myUser.isGuest) return
+        val currentFirestore = firestore ?: return
+        try {
+            val groupDocRef = currentFirestore.collection("groups").document(groupId.toString())
+            val groupSnap = groupDocRef.get().await()
+            if (groupSnap.exists()) {
+                val details = groupSnap.get("memberDetails") as? List<Map<String, Any>> ?: emptyList()
+                val updatedDetails = details.map { memberMap ->
+                    val u = memberMap["username"] as? String ?: ""
+                    val uid = memberMap["uid"] as? String ?: ""
+                    if (u == myUser.username || uid == myUser.uid) {
+                        memberMap.toMutableMap().apply { put("status", "ACCEPTED") }
+                    } else memberMap
+                }
+                groupDocRef.update(
+                    mapOf(
+                        "memberDetails" to updatedDetails,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+            }
+        } catch (_: Exception) {}
+    }
+
+    suspend fun shareNoteWithGroupInCloud(note: Note, group: CitraGroup) {
+        val myUser = _currentUser.value ?: return
+        if (myUser.isGuest) return
+        val currentFirestore = firestore ?: return
+        try {
+            currentFirestore.collection("groups").document(group.id.toString())
+                .collection("notes").document(note.id.toString()).set(
+                    mapOf(
+                        "id" to note.id,
+                        "title" to note.title,
+                        "content" to note.content,
+                        "category" to note.category,
+                        "groupId" to group.id,
+                        "groupName" to group.name,
+                        "groupType" to group.groupType,
+                        "ownerUid" to myUser.uid,
+                        "ownerName" to myUser.displayName,
+                        "ownerUsername" to myUser.username,
+                        "updatedAt" to System.currentTimeMillis()
+                    ),
+                    SetOptions.merge()
+                ).await()
+        } catch (_: Exception) {}
+    }
+
+    suspend fun syncNoteContentToCloud(groupId: Long, noteId: Long, title: String, content: String, authorName: String) {
+        val myUser = _currentUser.value ?: return
+        if (myUser.isGuest) return
+        val currentFirestore = firestore ?: return
+        try {
+            currentFirestore.collection("groups").document(groupId.toString())
+                .collection("notes").document(noteId.toString()).set(
+                    mapOf(
+                        "id" to noteId,
+                        "title" to title,
+                        "content" to content,
+                        "lastAuthor" to authorName,
+                        "lastAuthorUsername" to myUser.username,
+                        "updatedAt" to System.currentTimeMillis()
+                    ),
+                    SetOptions.merge()
+                ).await()
+        } catch (_: Exception) {}
     }
 
     private fun loadFriends(uid: String) {
@@ -1160,6 +1975,17 @@ class AuthRepository(private val context: Context) {
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    companion object {
+        @Volatile
+        private var INSTANCE: AuthRepository? = null
+
+        fun getInstance(context: Context): AuthRepository {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: AuthRepository(context.applicationContext).also { INSTANCE = it }
+            }
         }
     }
 }

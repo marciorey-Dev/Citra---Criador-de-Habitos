@@ -22,7 +22,6 @@ object MediaStorageHelper {
     private const val TAG = "MediaStorageHelper"
 
     /**
-    /**
      * Copies an image from a content Uri or stream into internal private storage
      * scoped by user ID so it never disappears on app relaunch or crosses between accounts.
      */
