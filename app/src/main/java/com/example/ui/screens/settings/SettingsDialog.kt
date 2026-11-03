@@ -704,6 +704,25 @@ fun SettingsDialog(
                                         }
                                     )
                                 }
+
+                                Divider(modifier = Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Tocar independente do estado do celular", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text("Permite tocar som mesmo com o celular em modo silencioso ou vibração. Desativado por padrão para respeitar o aparelho.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Switch(
+                                        checked = tempNotificationSettings.overrideSilentMode,
+                                        onCheckedChange = {
+                                             tempNotificationSettings = tempNotificationSettings.copy(overrideSilentMode = it)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -777,6 +796,48 @@ fun SettingsDialog(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text("Autorizar Alarmes Exatos")
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // 6. TUTORIAL DO APLICATIVO
+                    item {
+                        Text(
+                            text = "Tutorial do Aplicativo",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Rever Tutoriais do App", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(
+                                    "Reinicia os tutoriais guiados em todas as áreas do Citra (Início, Tarefas, Hábitos, Notas, Dados e Menu) para que sejam exibidos novamente.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Button(
+                                    onClick = {
+                                        viewModel.resetAllTutorials()
+                                        onDismiss()
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("reset_tutorials_btn"),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Reativar e Rever Tutoriais")
                                 }
                             }
                         }

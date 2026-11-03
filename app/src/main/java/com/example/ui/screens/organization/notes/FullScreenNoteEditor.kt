@@ -239,12 +239,13 @@ fun FullScreenNoteEditor(
             bgBlur != lastSavedBgBlur ||
             bgBrightness != lastSavedBgBrightness
 
-    var showSaveFeedback by remember { mutableStateOf(false) }
+    var saveFeedbackTimestamp by remember { mutableStateOf(0L) }
+    val showSaveFeedback = saveFeedbackTimestamp > 0L
 
-    LaunchedEffect(showSaveFeedback) {
-        if (showSaveFeedback) {
+    LaunchedEffect(saveFeedbackTimestamp) {
+        if (saveFeedbackTimestamp > 0L) {
             kotlinx.coroutines.delay(1000)
-            showSaveFeedback = false
+            saveFeedbackTimestamp = 0L
         }
     }
 
@@ -379,7 +380,7 @@ fun FullScreenNoteEditor(
                 bgBrightness
             )
         } else {
-            showSaveFeedback = true
+            saveFeedbackTimestamp = System.currentTimeMillis()
             if (onSaveOnly != null) {
                 onSaveOnly(
                     finalTitle,

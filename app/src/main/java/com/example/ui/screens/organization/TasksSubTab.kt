@@ -31,6 +31,7 @@ import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.theme.*
+import com.example.ui.tutorial.tutorialTarget
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -66,7 +67,8 @@ fun TasksSubTab(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 2.dp),
+                        .padding(bottom = 2.dp)
+                        .tutorialTarget("tasks_filter_row"),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
@@ -92,7 +94,9 @@ fun TasksSubTab(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 40.dp),
+                            .padding(vertical = 40.dp)
+                            .tutorialTarget("tasks_list_first_item")
+                            .tutorialTarget("tasks_checkbox_area"),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -112,16 +116,18 @@ fun TasksSubTab(
                 }
             } else {
                 items(filteredTasks, key = { it.id }) { task ->
-                        TaskItemCard(
-                            task = task,
-                            onToggle = { viewModel.toggleTask(task) },
-                            onEdit = { taskToEdit = task },
-                            onPlay = { onStartPomodoroForTask(task) },
-                            onDelete = { taskToDelete = task }
-                        )
-                    }
+                    val isFirst = filteredTasks.firstOrNull()?.id == task.id
+                    TaskItemCard(
+                        task = task,
+                        isFirst = isFirst,
+                        onToggle = { viewModel.toggleTask(task) },
+                        onEdit = { taskToEdit = task },
+                        onPlay = { onStartPomodoroForTask(task) },
+                        onDelete = { taskToDelete = task }
+                    )
                 }
             }
+        }
 
         // Floating Action Button
         FloatingActionButton(
@@ -131,6 +137,7 @@ fun TasksSubTab(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
+                .tutorialTarget("tasks_add_button")
                 .testTag("add_task_fab")
         ) {
             Icon(Icons.Default.Add, contentDescription = "Adicionar Tarefa")
@@ -178,6 +185,7 @@ fun TasksSubTab(
 @Composable
 fun TaskItemCard(
     task: Task,
+    isFirst: Boolean = false,
     onToggle: () -> Unit,
     onEdit: () -> Unit,
     onPlay: () -> Unit,
@@ -197,6 +205,7 @@ fun TaskItemCard(
         elevation = CardDefaults.cardElevation(defaultElevation = if (task.isCompleted) 0.dp else 1.5.dp),
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (isFirst) Modifier.tutorialTarget("tasks_list_first_item") else Modifier)
             .clickable { onEdit() }
             .border(
                 width = 1.dp,
@@ -219,7 +228,9 @@ fun TaskItemCard(
                     checkedColor = GreenAccent,
                     uncheckedColor = priorityBadgeText
                 ),
-                modifier = Modifier.testTag("task_checkbox_${task.id}")
+                modifier = Modifier
+                    .then(if (isFirst) Modifier.tutorialTarget("tasks_checkbox_area") else Modifier)
+                    .testTag("task_checkbox_${task.id}")
             )
 
             Spacer(modifier = Modifier.width(8.dp))

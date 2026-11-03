@@ -90,16 +90,37 @@ object SoundEffectsManager {
     }
 
     /**
+     * Retrieves the current audio ringer mode (Normal, Silent, or Vibrate).
+     */
+    fun getRingerMode(context: Context): Int {
+        return try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            audioManager?.ringerMode ?: android.media.AudioManager.RINGER_MODE_NORMAL
+        } catch (_: Exception) {
+            android.media.AudioManager.RINGER_MODE_NORMAL
+        }
+    }
+
+    /**
+     * Checks if the device is currently in Silent mode.
+     */
+    fun isDeviceSilent(context: Context): Boolean {
+        return getRingerMode(context) == android.media.AudioManager.RINGER_MODE_SILENT
+    }
+
+    /**
+     * Checks if the device is currently in Vibrate mode.
+     */
+    fun isDeviceVibrate(context: Context): Boolean {
+        return getRingerMode(context) == android.media.AudioManager.RINGER_MODE_VIBRATE
+    }
+
+    /**
      * Checks if the device is currently in Silent or Vibrate mode.
      */
     fun isDeviceSilentOrVibrate(context: Context): Boolean {
-        return try {
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-            val ringerMode = audioManager?.ringerMode ?: android.media.AudioManager.RINGER_MODE_NORMAL
-            ringerMode == android.media.AudioManager.RINGER_MODE_SILENT || ringerMode == android.media.AudioManager.RINGER_MODE_VIBRATE
-        } catch (_: Exception) {
-            false
-        }
+        val mode = getRingerMode(context)
+        return mode == android.media.AudioManager.RINGER_MODE_SILENT || mode == android.media.AudioManager.RINGER_MODE_VIBRATE
     }
 
     /**
@@ -130,21 +151,22 @@ object SoundEffectsManager {
 
     /**
      * Dedicated alarm playback engine.
-     * Respects device silent/vibrate modes when user has muted the device.
+     * Respects device silent/vibrate modes unless overrideSilent is explicitly enabled by the user.
      */
     @Synchronized
-    fun playAlarmAudio(context: Context, soundIdOrUri: String, loop: Boolean = false) {
-        if (isDeviceSilentOrVibrate(context)) {
+    fun playAlarmAudio(context: Context, soundIdOrUri: String, loop: Boolean = false, overrideSilent: Boolean = false) {
+        if (!overrideSilent && isDeviceSilentOrVibrate(context)) {
             stopAlarmAudio()
             return
         }
         try {
             stopAlarmAudio()
             val uri = getSoundUri(context, soundIdOrUri)
+            val usageAttr = if (overrideSilent) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION
             val player = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setUsage(usageAttr)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
@@ -164,10 +186,11 @@ object SoundEffectsManager {
             // Fallback to bundled sound if custom URI failed
             try {
                 val fallbackRes = getSoundResId(DEFAULT_NOTIFICATION_SOUND_ID)
+                val usageAttr = if (overrideSilent) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION
                 val player = MediaPlayer.create(context, fallbackRes).apply {
                     setAudioAttributes(
                         AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setUsage(usageAttr)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build()
                     )

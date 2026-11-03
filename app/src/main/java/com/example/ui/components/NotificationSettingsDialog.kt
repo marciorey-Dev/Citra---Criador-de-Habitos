@@ -42,6 +42,7 @@ fun NotificationSettingsDialog(
     var headsUp by remember { mutableStateOf(currentSettings.headsUpBanner) }
     var notifyAchievements by remember { mutableStateOf(currentSettings.notifyAchievements) }
     var notifyMissedHabits by remember { mutableStateOf(currentSettings.notifyMissedHabits) }
+    var overrideSilentMode by remember { mutableStateOf(currentSettings.overrideSilentMode) }
 
     val isIgnoringBattery = remember { NotificationHelper.isIgnoringBatteryOptimizations(context) }
     val canExactAlarms = remember { NotificationHelper.canScheduleExactAlarms(context) }
@@ -226,6 +227,18 @@ fun NotificationSettingsDialog(
                         }
                         Switch(checked = notifyMissedHabits, onCheckedChange = { notifyMissedHabits = it })
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Tocar independente do estado do celular", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("Permite tocar som mesmo com o celular em modo silencioso ou vibração. Desativado por padrão para respeitar o aparelho.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = overrideSilentMode, onCheckedChange = { overrideSilentMode = it })
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -244,7 +257,8 @@ fun NotificationSettingsDialog(
                                 vibrate = vibrate,
                                 headsUpBanner = headsUp,
                                 notifyAchievements = notifyAchievements,
-                                notifyMissedHabits = notifyMissedHabits
+                                notifyMissedHabits = notifyMissedHabits,
+                                overrideSilentMode = overrideSilentMode
                             )
                         )
                     },

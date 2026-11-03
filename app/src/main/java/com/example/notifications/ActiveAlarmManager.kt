@@ -35,12 +35,12 @@ object ActiveAlarmManager {
     }
 
     fun checkAndRestore(context: Context): ActiveAlarmData? {
-        if (_activeAlarm.value != null && SoundEffectsManager.isAlarmPlaying()) {
+        if (_activeAlarm.value != null) {
             return _activeAlarm.value
         }
         val prefs = context.getSharedPreferences("citra_active_alarm", Context.MODE_PRIVATE)
         val isRinging = prefs.getBoolean("is_ringing", false)
-        if (isRinging && SoundEffectsManager.isAlarmPlaying()) {
+        if (isRinging) {
             val data = ActiveAlarmData(
                 notificationId = prefs.getInt("notification_id", -1),
                 type = prefs.getString("type", NotificationHelper.TYPE_TASK) ?: NotificationHelper.TYPE_TASK,
@@ -52,11 +52,8 @@ object ActiveAlarmManager {
             )
             _activeAlarm.value = data
             return data
-        } else if (!SoundEffectsManager.isAlarmPlaying()) {
-            _activeAlarm.value = null
-            prefs.edit().clear().apply()
         }
-        return _activeAlarm.value
+        return null
     }
 
     fun dismissAlarm(context: Context) {

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Habit
 import com.example.ui.MainViewModel
 import com.example.ui.theme.*
+import com.example.ui.tutorial.tutorialTarget
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.roundToInt
@@ -313,7 +314,9 @@ fun StatsScreen(
 
                 // Period Filter Tabs
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tutorialTarget("stats_period_selector"),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatsPeriod.entries.forEach { period ->
@@ -587,7 +590,9 @@ fun StatsScreen(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("stats_focus_chart")
             ) {
                 Column(
                     modifier = Modifier
@@ -677,6 +682,7 @@ fun StatsScreen(
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .tutorialTarget("stats_category_pie")
                     .testTag("category_pie_chart_card")
             ) {
                 Column(

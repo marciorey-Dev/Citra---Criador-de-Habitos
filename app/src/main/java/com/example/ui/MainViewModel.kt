@@ -21,6 +21,8 @@ import com.example.data.model.*
 import com.example.data.repository.CitraRepository
 import com.example.notifications.NotificationHelper
 import com.example.ui.theme.ThemeAccent
+import com.example.ui.tutorial.ActiveTutorialState
+import com.example.ui.tutorial.CitraTutorialArea
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -105,6 +107,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setTutorialSeen(seen: Boolean = true) {
         preferencesManager.setTutorialSeen(seen)
+    }
+
+    val allTutorialsSkipped: StateFlow<Boolean> = preferencesManager.allTutorialsSkipped
+    val completedTutorialAreas: StateFlow<Set<String>> = preferencesManager.completedTutorialAreas
+
+    private val _activeTutorial = MutableStateFlow<ActiveTutorialState?>(null)
+    val activeTutorial: StateFlow<ActiveTutorialState?> = _activeTutorial.asStateFlow()
+
+    fun startTutorial(area: CitraTutorialArea) {
+        if (!preferencesManager.isTutorialAreaCompleted(area.id) && _activeTutorial.value == null) {
+            _activeTutorial.value = ActiveTutorialState(area = area, stepIndex = 0)
+        }
+    }
+
+    fun nextTutorialStep() {
+        val current = _activeTutorial.value ?: return
+        if (current.isLastStep) {
+            preferencesManager.markTutorialAreaCompleted(current.area.id)
+            _activeTutorial.value = null
+        } else {
+            _activeTutorial.value = current.copy(stepIndex = current.stepIndex + 1)
+        }
+    }
+
+    fun skipCurrentTutorialArea() {
+        val current = _activeTutorial.value ?: return
+        preferencesManager.markTutorialAreaCompleted(current.area.id)
+        _activeTutorial.value = null
+    }
+
+    fun skipAllTutorials() {
+        preferencesManager.skipAllTutorials()
+        _activeTutorial.value = null
+        viewModelScope.launch {
+            _userMessage.emit("Tutoriais desativados.")
+        }
+    }
+
+    fun resetAllTutorials() {
+        preferencesManager.resetAllTutorials()
+        _activeTutorial.value = null
+        viewModelScope.launch {
+            _userMessage.emit("Tutoriais redefinidos! Serão exibidos ao navegar pelas áreas.")
+        }
     }
 
     fun setThemeMode(dark: Boolean?) {

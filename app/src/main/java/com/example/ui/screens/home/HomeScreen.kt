@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import com.example.R
+import com.example.ui.tutorial.tutorialTarget
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +98,7 @@ fun HomeScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .tutorialTarget("home_pomodoro_card")
                         .clickable { onNavigateToTimer() }
                         .testTag("home_active_timer_card")
                 ) {
@@ -168,6 +170,7 @@ fun HomeScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .tutorialTarget("home_pomodoro_card")
                         .clickable { onNavigateToTimer() }
                         .testTag("home_start_focus_btn")
                 ) {
@@ -222,7 +225,9 @@ fun HomeScreen(
         // 3. Current & Upcoming Tasks Section
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("home_tasks_shortcut"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -471,7 +476,9 @@ fun HomeScreen(
         // 4. Discreet Daily Habits Summary Section
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("home_habits_shortcut"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {

@@ -128,11 +128,36 @@ object NotificationHelper {
      * with the user's selected sound URI and AudioAttributes.USAGE_ALARM.
      * This bypasses the Android 8.0+ limitation where channel sound cannot be changed once created.
      */
+    const val CHANNEL_SILENT = "citra_silent_notifications"
+
+    fun getOrCreateSilentChannel(context: Context): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return "citra_silent"
+        }
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val existing = notificationManager.getNotificationChannel(CHANNEL_SILENT)
+        if (existing == null) {
+            val channel = NotificationChannel(
+                CHANNEL_SILENT,
+                "Citra Notificações Silenciosas",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Notificações sem som que respeitam o modo silencioso/vibrador do aparelho"
+                setSound(null, null)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 250, 500)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+        return CHANNEL_SILENT
+    }
+
     fun getOrCreateSoundChannel(
         context: Context,
         baseChannelId: String,
         channelName: String,
-        soundIdOrUri: String
+        soundIdOrUri: String,
+        isAlarmUsage: Boolean = false
     ): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return baseChannelId
@@ -140,14 +165,15 @@ object NotificationHelper {
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val sanitizedKey = soundIdOrUri.replace(Regex("[^a-zA-Z0-9_]"), "_").take(32)
-        val dynamicChannelId = "${baseChannelId}_v2_${sanitizedKey.ifEmpty { "def" }}"
+        val usageTag = if (isAlarmUsage) "alarm" else "standard"
+        val dynamicChannelId = "${baseChannelId}_v3_${usageTag}_${sanitizedKey.ifEmpty { "def" }}"
 
         val existing = notificationManager.getNotificationChannel(dynamicChannelId)
         if (existing == null) {
             val soundUri = SoundEffectsManager.getSoundUri(context, soundIdOrUri)
             val audioAttributes = AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setUsage(if (isAlarmUsage) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_NOTIFICATION)
                 .build()
 
             val channel = NotificationChannel(
@@ -155,11 +181,13 @@ object NotificationHelper {
                 channelName,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notificações com toque personalizado do Citra"
+                description = "Notificações com toque do Citra"
                 setSound(soundUri, audioAttributes)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 250, 500)
-                setBypassDnd(true)
+                if (isAlarmUsage) {
+                    setBypassDnd(true)
+                }
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             notificationManager.createNotificationChannel(channel)
@@ -178,10 +206,11 @@ object NotificationHelper {
             val habitSound = if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
             val pomodoroSound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
 
-            // Pre-create initial sound channels
-            getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound)
-            getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound)
-            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound)
+            // Pre-create initial sound channels & silent fallback channel
+            getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSilentChannel(context)
 
             // Low priority channel for ongoing countdown
             val timerOngoingChannel = NotificationChannel(
@@ -205,9 +234,10 @@ object NotificationHelper {
             val habitSound = if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
             val pomodoroSound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
 
-            getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound)
-            getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound)
-            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound)
+            getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSilentChannel(context)
         }
     }
 
@@ -223,12 +253,22 @@ object NotificationHelper {
         taskId: Long = -1L,
         habitId: Long = -1L
     ) {
+        val prefs = PreferencesManager(context)
+        val settings = prefs.settings.value
+        val overrideSilent = settings.overrideSilentMode
+
+        val isSilent = SoundEffectsManager.isDeviceSilent(context)
+        val isVibrate = SoundEffectsManager.isDeviceVibrate(context)
+        val isSilentOrVibrate = isSilent || isVibrate
+
+        // If overrideSilent is disabled, respect if device is silent or vibrate
+        val shouldPlaySound = overrideSilent || !isSilentOrVibrate
+        val shouldVibrate = if (!overrideSilent && isSilent) false else vibratePhone
+
         // Resolve effective sound
         val effectiveSound = if (customSoundUriString.isNotBlank()) {
             customSoundUriString
         } else {
-            val prefs = PreferencesManager(context)
-            val settings = prefs.settings.value
             when {
                 channelId.contains("habit") -> if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
                 channelId.contains("alert") -> if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
@@ -247,8 +287,12 @@ object NotificationHelper {
             else -> "Lembretes de Tarefas"
         }
 
-        val activeChannelId = getOrCreateSoundChannel(context, baseChannel, channelName, effectiveSound)
-        val soundUri = SoundEffectsManager.getSoundUri(context, effectiveSound)
+        val activeChannelId = if (!shouldPlaySound) {
+            getOrCreateSilentChannel(context)
+        } else {
+            getOrCreateSoundChannel(context, baseChannel, channelName, effectiveSound, isAlarmUsage = overrideSilent)
+        }
+        val soundUri = if (shouldPlaySound) SoundEffectsManager.getSoundUri(context, effectiveSound) else null
 
         // Activity intent
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -290,17 +334,29 @@ object NotificationHelper {
             .setContentText(message)
             .setAutoCancel(!loopAlarm)
             .setOngoing(loopAlarm)
-            .setSound(soundUri)
             .setContentIntent(pendingIntent)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(fullScreenPendingIntent, loopAlarm)
+            .setPriority(if (overrideSilent || loopAlarm) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
+            .setCategory(if (overrideSilent) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setVibrate(longArrayOf(0, 500, 250, 500))
+
+        if (soundUri != null) {
+            notificationBuilder.setSound(soundUri)
+        } else {
+            notificationBuilder.setSilent(true)
+        }
+
+        if (shouldVibrate) {
+            notificationBuilder.setVibrate(longArrayOf(0, 500, 250, 500))
+        } else {
+            notificationBuilder.setVibrate(longArrayOf(0))
+        }
 
         val notification = notificationBuilder.build()
         if (loopAlarm) {
-            notification.flags = notification.flags or Notification.FLAG_INSISTENT
+            if (shouldPlaySound) {
+                notification.flags = notification.flags or Notification.FLAG_INSISTENT
+            }
             ActiveAlarmManager.onAlarmTriggered(
                 context = context,
                 data = ActiveAlarmData(
@@ -318,10 +374,12 @@ object NotificationHelper {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(id, notification)
 
-        // Active audio playback via STREAM_ALARM (Dual Engine)
-        SoundEffectsManager.playAlarmAudio(context, effectiveSound, loop = loopAlarm)
+        // Active audio playback via SoundEffectsManager (respects silent/vibrate unless overrideSilent is true)
+        if (shouldPlaySound) {
+            SoundEffectsManager.playAlarmAudio(context, effectiveSound, loop = loopAlarm, overrideSilent = overrideSilent)
+        }
 
-        if (vibratePhone) {
+        if (shouldVibrate) {
             triggerVibration(context, 500)
         }
     }

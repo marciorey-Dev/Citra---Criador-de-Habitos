@@ -42,6 +42,7 @@ import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteEditorMode
 import com.example.ui.theme.*
+import com.example.ui.tutorial.tutorialTarget
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.graphics.toArgb
@@ -324,15 +325,9 @@ fun NotesSubTab(
                     shape = RoundedCornerShape(12.dp),
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                    contentPadding = OutlinedTextFieldDefaults.contentPadding(
-                        start = 12.dp,
-                        top = 0.dp,
-                        end = 8.dp,
-                        bottom = 0.dp
-                    ),
                     modifier = Modifier
                         .weight(1f)
-                        .height(42.dp)
+                        .tutorialTarget("notes_search_input")
                         .testTag("notes_search_input")
                 )
 
@@ -386,7 +381,9 @@ fun NotesSubTab(
             // Category Filter Chips with minimalist icons
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("notes_category_bar")
             ) {
                 item {
                     FilterChip(
@@ -662,6 +659,7 @@ fun NotesSubTab(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
+                .tutorialTarget("notes_add_button")
                 .testTag("add_note_fab")
         ) {
             Icon(Icons.Default.Add, contentDescription = "Nova Anotação")

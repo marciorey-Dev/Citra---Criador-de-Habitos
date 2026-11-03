@@ -63,6 +63,9 @@ import com.example.ui.screens.profile.ProfileScreen
 import com.example.ui.screens.settings.SettingsDialog
 import com.example.ui.screens.timer.TimerScreen
 import com.example.ui.theme.CitraTheme
+import com.example.ui.tutorial.CitraSpotlightOverlay
+import com.example.ui.tutorial.CitraTutorialArea
+import com.example.ui.tutorial.tutorialTarget
 import com.example.util.AmbientBreakMusicManager
 import com.example.notifications.ActiveAlarmData
 import com.example.notifications.ActiveAlarmManager
@@ -392,6 +395,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val organizationSubTab by viewModel.organizationSubTab.collectAsState()
+
+                // Trigger guided tutorial when entering each area for the first time
+                LaunchedEffect(pagerState.currentPage, organizationSubTab) {
+                    when (pagerState.currentPage) {
+                        0 -> viewModel.startTutorial(CitraTutorialArea.HOME)
+                        2 -> {
+                            if (organizationSubTab == 0) {
+                                viewModel.startTutorial(CitraTutorialArea.TASKS)
+                            } else if (organizationSubTab == 1) {
+                                viewModel.startTutorial(CitraTutorialArea.HABITS)
+                            }
+                        }
+                        3 -> viewModel.startTutorial(CitraTutorialArea.NOTES)
+                        4 -> viewModel.startTutorial(CitraTutorialArea.STATS)
+                    }
+                }
+
                 val currentScreen = screens[pagerState.currentPage]
 
                 Scaffold(
@@ -524,8 +545,13 @@ class MainActivity : ComponentActivity() {
                                 // 3-Dots Menu Button
                                 Box {
                                     IconButton(
-                                        onClick = { showMenu = true },
-                                        modifier = Modifier.testTag("top_menu_button")
+                                        onClick = {
+                                            showMenu = true
+                                            viewModel.startTutorial(CitraTutorialArea.MENU)
+                                        },
+                                        modifier = Modifier
+                                            .tutorialTarget("top_menu_button")
+                                            .testTag("top_menu_button")
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.MoreVert,
@@ -535,8 +561,13 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     DropdownMenu(
-                                        expanded = showMenu,
-                                        onDismissRequest = { showMenu = false }
+                                        expanded = showMenu || (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU),
+                                        onDismissRequest = {
+                                            showMenu = false
+                                            if (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU) {
+                                                viewModel.skipCurrentTutorialArea()
+                                            }
+                                        }
                                     ) {
                                         // Configurações
                                         DropdownMenuItem(
@@ -544,6 +575,7 @@ class MainActivity : ComponentActivity() {
                                             leadingIcon = {
                                                 Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                             },
+                                            modifier = Modifier.tutorialTarget("top_menu_settings"),
                                             onClick = {
                                                 showMenu = false
                                                 showSettingsDialog = true
@@ -556,6 +588,7 @@ class MainActivity : ComponentActivity() {
                                             leadingIcon = {
                                                 Icon(Icons.Default.Stars, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                             },
+                                            modifier = Modifier.tutorialTarget("top_menu_achievements"),
                                             onClick = {
                                                 showMenu = false
                                                 showAchievementsDialog = true
@@ -568,6 +601,7 @@ class MainActivity : ComponentActivity() {
                                             leadingIcon = {
                                                 Icon(Icons.Default.Backup, contentDescription = null)
                                             },
+                                            modifier = Modifier.tutorialTarget("top_menu_backup"),
                                             onClick = {
                                                 showMenu = false
                                                 showBackupDialog = true
@@ -663,7 +697,9 @@ class MainActivity : ComponentActivity() {
                             contentColor = MaterialTheme.colorScheme.primary,
                             tonalElevation = 6.dp,
                             windowInsets = WindowInsets.navigationBars,
-                            modifier = Modifier.testTag("main_bottom_nav")
+                            modifier = Modifier
+                                .tutorialTarget("bottom_navigation_bar")
+                                .testTag("main_bottom_nav")
                         ) {
                             screens.forEachIndexed { index, screen ->
                                 val selected = pagerState.currentPage == index
@@ -848,6 +884,17 @@ class MainActivity : ComponentActivity() {
                             viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore)
                             showQuickAddTaskDialog = false
                         }
+                    )
+                }
+
+                // Spotlight Tutorial Overlay
+                val activeTutorial by viewModel.activeTutorial.collectAsState()
+                if (activeTutorial != null) {
+                    CitraSpotlightOverlay(
+                        activeTutorial = activeTutorial!!,
+                        onNextStep = { viewModel.nextTutorialStep() },
+                        onSkipArea = { viewModel.skipCurrentTutorialArea() },
+                        onSkipAll = { viewModel.skipAllTutorials() }
                     )
                 }
             }

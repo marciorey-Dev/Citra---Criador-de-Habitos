@@ -23,7 +23,8 @@ data class NotificationSettings(
     val notifyAchievements: Boolean = true,
     val notifyMissedHabits: Boolean = true,
     val ambientBreakMusicInApp: Boolean = false,
-    val ambientMusicVolume: Float = 0.5f
+    val ambientMusicVolume: Float = 0.5f,
+    val overrideSilentMode: Boolean = false
 )
 
 class PreferencesManager(private val context: Context) {
@@ -55,6 +56,15 @@ class PreferencesManager(private val context: Context) {
 
     private val _hasSeenTutorial = MutableStateFlow(prefs.getBoolean("has_seen_tutorial", true))
     val hasSeenTutorial: StateFlow<Boolean> = _hasSeenTutorial.asStateFlow()
+
+    // Contextual Surface Spotlight Tutorials
+    private val _allTutorialsSkipped = MutableStateFlow(prefs.getBoolean("all_tutorials_skipped", false))
+    val allTutorialsSkipped: StateFlow<Boolean> = _allTutorialsSkipped.asStateFlow()
+
+    private val _completedTutorialAreas = MutableStateFlow(
+        prefs.getStringSet("completed_tutorial_areas", emptySet()) ?: emptySet()
+    )
+    val completedTutorialAreas: StateFlow<Set<String>> = _completedTutorialAreas.asStateFlow()
 
     // Sync Frequency: "1_HOUR", "DAILY", "WEEKLY", "ON_APP_OPEN"
     private val _syncFrequency = MutableStateFlow(prefs.getString("sync_frequency", "DAILY") ?: "DAILY")
@@ -161,7 +171,8 @@ class PreferencesManager(private val context: Context) {
             notifyAchievements = prefs.getBoolean("notify_achievements", true),
             notifyMissedHabits = prefs.getBoolean("notify_missed_habits", true),
             ambientBreakMusicInApp = prefs.getBoolean("ambient_music_in_app", false),
-            ambientMusicVolume = prefs.getFloat("ambient_music_volume", 0.5f)
+            ambientMusicVolume = prefs.getFloat("ambient_music_volume", 0.5f),
+            overrideSilentMode = prefs.getBoolean("override_silent_mode", false)
         )
     }
 
@@ -198,6 +209,7 @@ class PreferencesManager(private val context: Context) {
             "notify_missed_habits" to s.notifyMissedHabits,
             "ambient_music_in_app" to s.ambientBreakMusicInApp,
             "ambient_music_volume" to s.ambientMusicVolume,
+            "override_silent_mode" to s.overrideSilentMode,
             "daily_random_color" to _dailyRandomColor.value
         )
     }
@@ -245,7 +257,8 @@ class PreferencesManager(private val context: Context) {
             notifyAchievements = (map["notify_achievements"] as? Boolean) ?: curSettings.notifyAchievements,
             notifyMissedHabits = (map["notify_missed_habits"] as? Boolean) ?: curSettings.notifyMissedHabits,
             ambientBreakMusicInApp = (map["ambient_music_in_app"] as? Boolean) ?: curSettings.ambientBreakMusicInApp,
-            ambientMusicVolume = ((map["ambient_music_volume"] as? Number)?.toFloat()) ?: curSettings.ambientMusicVolume
+            ambientMusicVolume = ((map["ambient_music_volume"] as? Number)?.toFloat()) ?: curSettings.ambientMusicVolume,
+            overrideSilentMode = (map["override_silent_mode"] as? Boolean) ?: curSettings.overrideSilentMode
         )
         editor.apply()
         updateSettings(newSettings)
@@ -277,6 +290,7 @@ class PreferencesManager(private val context: Context) {
             putBoolean("notify_missed_habits", newSettings.notifyMissedHabits)
             putBoolean("ambient_music_in_app", newSettings.ambientBreakMusicInApp)
             putFloat("ambient_music_volume", newSettings.ambientMusicVolume)
+            putBoolean("override_silent_mode", newSettings.overrideSilentMode)
             apply()
         }
         _settings.value = newSettings
@@ -288,6 +302,31 @@ class PreferencesManager(private val context: Context) {
     fun setTutorialSeen(seen: Boolean = true) {
         prefs.edit().putBoolean("has_seen_tutorial", seen).apply()
         _hasSeenTutorial.value = seen
+    }
+
+    fun isTutorialAreaCompleted(areaId: String): Boolean {
+        return _allTutorialsSkipped.value || _completedTutorialAreas.value.contains(areaId)
+    }
+
+    fun markTutorialAreaCompleted(areaId: String) {
+        val current = _completedTutorialAreas.value.toMutableSet()
+        current.add(areaId)
+        prefs.edit().putStringSet("completed_tutorial_areas", current).apply()
+        _completedTutorialAreas.value = current
+    }
+
+    fun skipAllTutorials() {
+        prefs.edit().putBoolean("all_tutorials_skipped", true).apply()
+        _allTutorialsSkipped.value = true
+    }
+
+    fun resetAllTutorials() {
+        prefs.edit()
+            .putBoolean("all_tutorials_skipped", false)
+            .remove("completed_tutorial_areas")
+            .apply()
+        _allTutorialsSkipped.value = false
+        _completedTutorialAreas.value = emptySet()
     }
 
     fun getLastSeenWhatsNewVersion(): String {

@@ -27,6 +27,7 @@ import com.example.data.model.Habit
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.theme.*
+import com.example.ui.tutorial.tutorialTarget
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -70,7 +71,8 @@ fun HabitsSubTab(
                     )
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.tutorialTarget("habits_streak_counter")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -94,7 +96,8 @@ fun HabitsSubTab(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 40.dp),
+                            .padding(vertical = 40.dp)
+                            .tutorialTarget("habits_checkin_first_item"),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -116,10 +119,12 @@ fun HabitsSubTab(
                 items(habits, key = { it.id }) { habit ->
                     val isDoneToday = habit.completedDatesCsv.split(",")
                         .any { it.trim() == todayStr }
+                    val isFirst = habits.firstOrNull()?.id == habit.id
 
                     HabitItemCard(
                         habit = habit,
                         isDoneToday = isDoneToday,
+                        isFirst = isFirst,
                         onToggleToday = { viewModel.toggleHabitToday(habit) },
                         onEdit = { habitToEdit = habit },
                         onDelete = { habitToDelete = habit }
@@ -136,6 +141,7 @@ fun HabitsSubTab(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
+                .tutorialTarget("habits_add_button")
                 .testTag("add_habit_fab")
         ) {
             Icon(Icons.Default.Add, contentDescription = "Adicionar Hábito")
@@ -183,6 +189,7 @@ fun HabitsSubTab(
 fun HabitItemCard(
     habit: Habit,
     isDoneToday: Boolean,
+    isFirst: Boolean = false,
     onToggleToday: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
@@ -394,6 +401,7 @@ fun HabitItemCard(
                             if (isDoneToday) GreenAccent else MaterialTheme.colorScheme.surfaceVariant,
                             CircleShape
                         )
+                        .then(if (isFirst) Modifier.tutorialTarget("habits_checkin_first_item") else Modifier)
                         .testTag("habit_toggle_${habit.id}")
                 ) {
                     Icon(
