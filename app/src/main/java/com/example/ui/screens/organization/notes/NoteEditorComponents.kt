@@ -612,13 +612,15 @@ fun VisualBlockItem(
                             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                     )
 
-                    // Exit code button
-                    TextButton(
-                        onClick = onEnterPressed,
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.align(Alignment.End)
-                    ) {
-                        Text("Sair do bloco de código ↵", fontSize = 10.sp, color = Color(0xFF38BDF8))
+                    // Exit code button (hidden in reading mode)
+                    if (showPlaceholder) {
+                        TextButton(
+                            onClick = onEnterPressed,
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Sair do bloco de código ↵", fontSize = 10.sp, color = Color(0xFF38BDF8))
+                        }
                     }
                 }
             }
@@ -1082,8 +1084,22 @@ private fun AudioBlockPlayer(
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
+    var effectiveUrl by remember(block.url) { mutableStateOf(block.url) }
+
+    LaunchedEffect(block.url) {
+        if (block.url.isNotBlank()) {
+            val resolved = com.example.util.MediaStorageHelper.resolveOrSelfHealMediaPath(context, block.url)
+            if (resolved != null && resolved != block.url) {
+                effectiveUrl = resolved
+                onUpdate(block.copy(url = resolved))
+            } else if (resolved != null) {
+                effectiveUrl = resolved
+            }
+        }
+    }
+
     val playbackState by NoteAudioPlaybackManager.playbackState.collectAsState()
-    val isCurrentAudio = NoteAudioPlaybackManager.isCurrentAudio(block.id, block.url)
+    val isCurrentAudio = NoteAudioPlaybackManager.isCurrentAudio(block.id, effectiveUrl)
     val isPlayingThis = isCurrentAudio && playbackState.isPlaying
 
     var isEditingTitle by remember { mutableStateOf(false) }
@@ -1106,11 +1122,11 @@ private fun AudioBlockPlayer(
         return "%02d:%02d".format(mins, secs)
     }
 
-    val isMediaValid = remember(block.url) {
-        block.url.isBlank() || com.example.util.MediaStorageHelper.isMediaFileValid(context, block.url)
+    val isMediaValid = remember(effectiveUrl) {
+        effectiveUrl.isBlank() || com.example.util.MediaStorageHelper.isMediaFileValid(context, effectiveUrl)
     }
 
-    if (!isMediaValid && block.url.isNotBlank()) {
+    if (!isMediaValid && effectiveUrl.isNotBlank()) {
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
@@ -1124,7 +1140,7 @@ private fun AudioBlockPlayer(
                 Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Áudio não encontrado ou inacessível", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                    Text(block.url.substringAfterLast('/'), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f))
+                    Text(effectiveUrl.substringAfterLast('/'), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f))
                 }
                 IconButton(onClick = { onReplace?.invoke() }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Default.ArrowDownward, contentDescription = "Substituir áudio", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))

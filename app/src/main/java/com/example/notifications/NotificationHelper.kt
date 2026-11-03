@@ -48,6 +48,35 @@ object NotificationHelper {
     const val TYPE_HABIT_MISSED = "habit_missed"
     const val TYPE_POMODORO = "pomodoro"
     const val TYPE_ACHIEVEMENT = "achievement"
+    const val ACTION_DAILY_MIDNIGHT = "com.example.action.DAILY_MIDNIGHT"
+    const val DAILY_MIDNIGHT_ALARM_ID = 88888
+
+    fun scheduleDailyMidnightColorAlarm(context: Context) {
+        try {
+            val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
+                action = ACTION_DAILY_MIDNIGHT
+            }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else PendingIntent.FLAG_UPDATE_CURRENT
+            val pi = PendingIntent.getBroadcast(context, DAILY_MIDNIGHT_ALARM_ID, intent, flags)
+
+            val cal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+            }
+        } catch (_: Exception) {}
+    }
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

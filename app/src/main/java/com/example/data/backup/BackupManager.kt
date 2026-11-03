@@ -257,22 +257,36 @@ object BackupManager {
     }
 
     /**
-     * Exports multiple notes as JSON
+     * Exports multiple notes as JSON, embedding media attachments <= 3MB if context is provided.
      */
-    fun exportNotesJson(notes: List<Note>): String {
+    fun exportNotesJson(notes: List<Note>, context: android.content.Context? = null): String {
         val root = JSONObject()
-        root.put("version", 1)
+        root.put("version", 2)
         root.put("exportedAt", System.currentTimeMillis())
         val arr = JSONArray()
         notes.forEach { n ->
             val obj = JSONObject().apply {
                 put("id", n.id)
+                put("uuid", n.uuid)
                 put("title", n.title)
                 put("content", n.content)
                 put("category", n.category)
                 put("iconEmoji", n.iconEmoji)
                 put("associatedDate", n.associatedDate ?: JSONObject.NULL)
+                put("isPinned", n.isPinned)
+                put("backgroundImageUri", n.backgroundImageUri ?: JSONObject.NULL)
+                put("backgroundBlur", n.backgroundBlur)
+                put("backgroundBrightness", n.backgroundBrightness)
+                put("isDeleted", n.isDeleted)
+                put("deletedAt", n.deletedAt ?: JSONObject.NULL)
                 put("updatedAt", n.updatedAt)
+
+                if (context != null) {
+                    val attachments = com.example.util.MediaStorageHelper.extractMediaAttachmentsForNote(context, n.content)
+                    if (attachments.length() > 0) {
+                        put("attachments", attachments)
+                    }
+                }
             }
             arr.put(obj)
         }
@@ -281,23 +295,45 @@ object BackupManager {
     }
 
     /**
-     * Parses notes from JSON
+     * Parses notes from JSON, preserving UUIDs and silently restoring attachments <= 3MB.
      */
-    fun parseNotesJson(jsonString: String): List<Note> {
+    fun parseNotesJson(jsonString: String, context: android.content.Context? = null): List<Note> {
         val root = JSONObject(jsonString)
         val list = mutableListOf<Note>()
         if (root.has("notes")) {
             val arr = root.getJSONArray("notes")
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                var contentText = obj.optString("content", "")
+
+                // Regra dos 3 MB: restauração silenciosa de mídias em segundo plano
+                if (context != null && obj.has("attachments")) {
+                    contentText = com.example.util.MediaStorageHelper.restoreMediaAttachments(
+                        context,
+                        obj.optJSONArray("attachments"),
+                        contentText
+                    )
+                }
+
+                val parsedUuid = obj.optString("uuid").ifBlank {
+                    java.util.UUID.randomUUID().toString()
+                }
+
                 list.add(
                     Note(
-                        id = 0L, // new IDs to avoid collision
+                        id = 0L, // new IDs to avoid collision in Room
+                        uuid = parsedUuid,
                         title = obj.getString("title"),
-                        content = obj.optString("content", ""),
+                        content = contentText,
                         category = obj.optString("category", "Geral"),
                         iconEmoji = obj.optString("iconEmoji", "📝"),
                         associatedDate = if (obj.isNull("associatedDate")) null else obj.optString("associatedDate"),
+                        isPinned = obj.optBoolean("isPinned", false),
+                        backgroundImageUri = if (obj.isNull("backgroundImageUri")) null else obj.optString("backgroundImageUri"),
+                        backgroundBlur = obj.optDouble("backgroundBlur", 0.5).toFloat(),
+                        backgroundBrightness = obj.optDouble("backgroundBrightness", 0.5).toFloat(),
+                        isDeleted = obj.optBoolean("isDeleted", false),
+                        deletedAt = if (obj.isNull("deletedAt")) null else obj.optLong("deletedAt"),
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                     )
                 )

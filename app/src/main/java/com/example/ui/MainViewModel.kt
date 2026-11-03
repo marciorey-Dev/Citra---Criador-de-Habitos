@@ -121,6 +121,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.setThemeMode(next)
     }
 
+    val appBgUri: StateFlow<String?> = preferencesManager.appBgUri
+    val appBgBlur: StateFlow<Float> = preferencesManager.appBgBlur
+    val appBgBrightness: StateFlow<Float> = preferencesManager.appBgBrightness
+
+    fun setAppBackground(uri: String?, blur: Float, brightness: Float) {
+        preferencesManager.setAppBackground(uri, blur, brightness)
+    }
+
+    fun clearAppBackground() {
+        preferencesManager.clearAppBackground()
+    }
+
     // Database Flows
     val tasks: StateFlow<List<Task>> = repository.allTasks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -686,10 +698,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             if (isDone) {
                                 if (trimmed.startsWith("- [ ]") || trimmed.startsWith("* [ ]")) {
                                     val itemText = trimmed.substring(5).trim()
-                                    if (itemText.equals(cleanTitle, ignoreCase = true) ||
-                                        itemText.startsWith(cleanTitle, ignoreCase = true) ||
-                                        cleanTitle.startsWith(itemText, ignoreCase = true)) {
-                                        lines[i] = "$indent- [x] $itemText"
+                                    val cleanItem = itemText.removePrefix("~~").removeSuffix("~~").trim()
+                                    if (cleanItem.equals(cleanTitle, ignoreCase = true) ||
+                                        cleanItem.startsWith(cleanTitle, ignoreCase = true) ||
+                                        cleanTitle.startsWith(cleanItem, ignoreCase = true)) {
+                                        lines[i] = "$indent- [x] ~~$cleanItem~~"
                                         noteModified = true
                                     }
                                 }
@@ -697,10 +710,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 if (trimmed.startsWith("- [x]", ignoreCase = true) || trimmed.startsWith("- [X]") ||
                                     trimmed.startsWith("* [x]", ignoreCase = true) || trimmed.startsWith("* [X]")) {
                                     val itemText = trimmed.substring(5).trim()
-                                    if (itemText.equals(cleanTitle, ignoreCase = true) ||
-                                        itemText.startsWith(cleanTitle, ignoreCase = true) ||
+                                    val cleanItem = itemText.removePrefix("~~").removeSuffix("~~").trim()
+                                    if (cleanItem.equals(cleanTitle, ignoreCase = true) ||
+                                        cleanItem.startsWith(cleanTitle, ignoreCase = true) ||
                                         cleanTitle.startsWith(itemText, ignoreCase = true)) {
-                                        lines[i] = "$indent- [ ] $itemText"
+                                        lines[i] = "$indent- [ ] $cleanItem"
                                         noteModified = true
                                     }
                                 }
@@ -721,8 +735,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val clean = checklistText.trim()
             .removePrefix("- [ ]").removePrefix("- [x]").removePrefix("- [X]")
             .removePrefix("* [ ]").removePrefix("* [x]").removePrefix("* [X]")
+            .removePrefix("~~").removeSuffix("~~")
             .trim()
-            .replace(Regex("~~"), "")
         if (clean.isBlank()) return
         val matchingTask = tasks.value.firstOrNull {
             val tTitle = it.title.trim()
@@ -734,7 +748,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 val toggled = repository.toggleTaskCompleted(matchingTask)
                 if (toggled) {
-                    _userMessage.emit("Tarefa '${matchingTask.title}' concluída!")
+                    val soundSetting = notificationSettings.value.taskSoundUri.ifBlank { notificationSettings.value.taskSound }
+                    if (soundSetting.isNotBlank()) {
+                        com.example.util.SoundEffectsManager.playSoundById(getApplication(), soundSetting)
+                    }
+                    vibrate(35)
+                    _userMessage.emit("Tarefa '${matchingTask.title}' concluída! ✅")
+                } else {
+                    _userMessage.emit("Tarefa '${matchingTask.title}' desmarcada.")
                 }
             }
         }
@@ -750,26 +771,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             var docsError: String? = null
             var recordsError: String? = null
 
-            // 1. Verificar pasta "Citra Docs" e importar automaticamente novas notas sem duplicar
+            // 1. Verificar pasta "Citra Docs" e importar/atualizar notas de forma inteligente sem duplicação
             try {
                 val docsFolder = com.example.util.CitraDocsFileManager.getDocsFolder(context)
                 if (docsFolder.exists()) {
                     val mdFiles = com.example.util.CitraDocsFileManager.listAllMarkdownNotes(context)
                     val existingNotes = repository.getAllNotesSync()
-                    val existingTitles = existingNotes.map { it.title.trim().lowercase() }.toSet()
+                    val notesByUuid = existingNotes.filter { it.uuid.isNotBlank() }.associateBy { it.uuid }
+                    val notesByTitle = existingNotes.associateBy { it.title.trim().lowercase() }
 
                     for (file in mdFiles) {
                         val title = file.nameWithoutExtension.trim()
-                        if (title.isNotEmpty() && !existingTitles.contains(title.lowercase())) {
-                            val content = com.example.util.CitraDocsFileManager.readNoteMarkdown(file) ?: ""
+                        if (title.isBlank()) continue
+
+                        val rawContent = com.example.util.CitraDocsFileManager.readNoteMarkdown(file) ?: ""
+                        val fileUuid = com.example.util.CitraDocsFileManager.extractUuidFromMarkdown(rawContent)
+                        val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(rawContent)
+
+                        val matchingNote = (if (fileUuid != null) notesByUuid[fileUuid] else null)
+                            ?: notesByTitle[title.lowercase()]
+
+                        if (matchingNote != null) {
+                            // Nota já existe: atualiza o conteúdo se o arquivo externo foi modificado
+                            if (file.lastModified() > matchingNote.updatedAt) {
+                                val updated = matchingNote.copy(
+                                    title = title,
+                                    content = cleanContent,
+                                    updatedAt = file.lastModified()
+                                )
+                                repository.updateNote(updated)
+                            }
+                            // Se a nota não tinha identificador gravado no arquivo, salva o UUID no cabeçalho
+                            if (fileUuid == null) {
+                                com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                                    context = context,
+                                    title = title,
+                                    content = cleanContent,
+                                    uuid = matchingNote.uuid
+                                )
+                            }
+                        } else {
+                            // Nova nota encontrada na pasta: importa com UUID fixo
+                            val newUuid = fileUuid ?: java.util.UUID.randomUUID().toString()
                             repository.insertNote(
                                 Note(
+                                    uuid = newUuid,
                                     title = title,
-                                    content = content,
+                                    content = cleanContent,
                                     category = "Geral",
                                     updatedAt = file.lastModified()
                                 )
                             )
+                            if (fileUuid == null) {
+                                com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                                    context = context,
+                                    title = title,
+                                    content = cleanContent,
+                                    uuid = newUuid
+                                )
+                            }
                             docsImportCount++
                         }
                     }
@@ -833,22 +893,88 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     if (rawContent != null) {
-                        val markdownContent = com.example.util.CitraDocsFileManager.convertContentToMarkdown(filename, rawContent)
-                        val finalTitle = if (existingTitles.contains(rawTitle.lowercase())) {
-                            "$rawTitle (${System.currentTimeMillis().toString().takeLast(4)})"
-                        } else {
-                            rawTitle
+                        // Check if it's a full Citra backup JSON
+                        val trimmed = rawContent.trim()
+                        if (filename.lowercase().endsWith(".json") && trimmed.contains("\"version\"") && (trimmed.contains("\"tasks\"") || trimmed.contains("\"notes\""))) {
+                            try {
+                                val backupData = BackupManager.parseBackupJson(rawContent)
+                                val parsedNotes = BackupManager.parseNotesJson(rawContent, context)
+                                for (n in parsedNotes) {
+                                    repository.upsertNoteByUuid(n)
+                                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, n.title, n.content, uuid = n.uuid)
+                                    successCount++
+                                }
+                                for (t in backupData.tasks) {
+                                    repository.insertTask(t.copy(id = 0L))
+                                }
+                                for (h in backupData.habits) {
+                                    repository.insertHabit(h.copy(id = 0L))
+                                }
+                                for (c in backupData.categories) {
+                                    repository.categoryDao.insertCategory(c)
+                                }
+                                continue
+                            } catch (_: Exception) {}
                         }
-                        repository.insertNote(
-                            Note(
-                                title = finalTitle,
-                                content = markdownContent,
-                                category = "Geral",
-                                updatedAt = System.currentTimeMillis()
+
+                        // Check if it's a JSON array of notes
+                        if (filename.lowercase().endsWith(".json") && trimmed.startsWith("[")) {
+                            try {
+                                val array = org.json.JSONArray(trimmed)
+                                var anyImported = false
+                                for (i in 0 until array.length()) {
+                                    val item = array.optJSONObject(i)
+                                    if (item != null) {
+                                        val nTitle = item.optString("title", "Nota ${i + 1}")
+                                        val nContent = item.optString("content", item.optString("body", item.toString(2)))
+                                        val nCat = item.optString("category", "Geral")
+                                        val nUuid = item.optString("uuid").ifBlank { java.util.UUID.randomUUID().toString() }
+                                        repository.upsertNoteByUuid(
+                                            Note(
+                                                uuid = nUuid,
+                                                title = nTitle,
+                                                content = nContent,
+                                                category = nCat,
+                                                updatedAt = System.currentTimeMillis()
+                                            )
+                                        )
+                                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, nTitle, nContent, uuid = nUuid)
+                                        successCount++
+                                        anyImported = true
+                                    }
+                                }
+                                if (anyImported) continue
+                            } catch (_: Exception) {}
+                        }
+
+                        val markdownContent = com.example.util.CitraDocsFileManager.convertContentToMarkdown(filename, rawContent)
+                        val fileUuid = com.example.util.CitraDocsFileManager.extractUuidFromMarkdown(markdownContent)
+                        val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(markdownContent)
+
+                        val existingByUuid = if (fileUuid != null) repository.getNoteByUuid(fileUuid) else null
+                        if (existingByUuid != null) {
+                            repository.updateNote(existingByUuid.copy(title = rawTitle, content = cleanContent, updatedAt = System.currentTimeMillis()))
+                            com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, rawTitle, cleanContent, uuid = existingByUuid.uuid)
+                            successCount++
+                        } else {
+                            val finalTitle = if (existingTitles.contains(rawTitle.lowercase())) {
+                                "$rawTitle (${System.currentTimeMillis().toString().takeLast(4)})"
+                            } else {
+                                rawTitle
+                            }
+                            val newUuid = fileUuid ?: java.util.UUID.randomUUID().toString()
+                            repository.insertNote(
+                                Note(
+                                    uuid = newUuid,
+                                    title = finalTitle,
+                                    content = cleanContent,
+                                    category = "Geral",
+                                    updatedAt = System.currentTimeMillis()
+                                )
                             )
-                        )
-                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, markdownContent)
-                        successCount++
+                            com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, cleanContent, uuid = newUuid)
+                            successCount++
+                        }
                     } else {
                         errorCount++
                     }
@@ -858,9 +984,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val msg = if (errorCount > 0) {
-                "$successCount importadas, $errorCount com erro"
+                "$successCount ficheiros importados, $errorCount com erro"
             } else {
-                "$successCount notas importadas e convertidas com sucesso!"
+                "$successCount ficheiros importados e integrados com sucesso!"
             }
             _userMessage.emit(msg)
         }
@@ -972,13 +1098,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         backgroundImageUri: String? = null,
         backgroundBlur: Float = 0.5f,
         backgroundBrightness: Float = 0.5f,
+        uuid: String? = null,
+        oldTitle: String? = null,
         onSaved: ((Long) -> Unit)? = null
     ) {
         viewModelScope.launch {
+            val existing = if (id != 0L) repository.getNoteById(id) else null
+            val resolvedUuid = uuid ?: existing?.uuid ?: java.util.UUID.randomUUID().toString()
+            val previousTitle = oldTitle ?: existing?.title
+            val finalTitle = title.ifBlank { "Sem título" }
+            val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(content)
+
             val note = Note(
                 id = id,
-                title = title.ifBlank { "Sem título" },
-                content = content,
+                uuid = resolvedUuid,
+                title = finalTitle,
+                content = cleanContent,
                 category = category.ifBlank { "Geral" },
                 iconEmoji = iconEmoji.ifBlank { "📝" },
                 associatedDate = associatedDate,
@@ -995,6 +1130,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.updateNote(note)
                 id
             }
+
+            // Sync to Citra Docs, cleaning old file if title changed
+            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                context = getApplication(),
+                title = finalTitle,
+                content = cleanContent,
+                uuid = resolvedUuid,
+                oldTitle = previousTitle
+            )
+
             onSaved?.invoke(resultId)
         }
     }
@@ -1115,6 +1260,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.createLocalCopyOfVersion(version)
             _userMessage.emit("Cópia local criada com sucesso!")
+        }
+    }
+
+    fun restoreSingleNote(note: Note) {
+        viewModelScope.launch {
+            repository.insertNote(note.copy(id = 0L))
+            _userMessage.emit("Nota '${note.title}' restaurada com sucesso!")
+        }
+    }
+
+    fun restoreSingleTask(task: Task) {
+        viewModelScope.launch {
+            repository.insertTask(task.copy(id = 0L))
+            _userMessage.emit("Tarefa '${task.title}' restaurada com sucesso!")
+        }
+    }
+
+    fun restoreSingleHabit(habit: Habit) {
+        viewModelScope.launch {
+            repository.insertHabit(habit.copy(id = 0L))
+            _userMessage.emit("Hábito '${habit.title}' restaurado com sucesso!")
         }
     }
 

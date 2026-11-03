@@ -60,6 +60,31 @@ class PreferencesManager(private val context: Context) {
     private val _syncFrequency = MutableStateFlow(prefs.getString("sync_frequency", "DAILY") ?: "DAILY")
     val syncFrequency: StateFlow<String> = _syncFrequency.asStateFlow()
 
+    // App Global Background Settings (Wallpaper, Blur, Darkness)
+    private val _appBgUri = MutableStateFlow<String?>(prefs.getString("app_bg_uri", null))
+    val appBgUri: StateFlow<String?> = _appBgUri.asStateFlow()
+
+    private val _appBgBlur = MutableStateFlow(prefs.getFloat("app_bg_blur", 0.5f))
+    val appBgBlur: StateFlow<Float> = _appBgBlur.asStateFlow()
+
+    private val _appBgBrightness = MutableStateFlow(prefs.getFloat("app_bg_brightness", 0.6f))
+    val appBgBrightness: StateFlow<Float> = _appBgBrightness.asStateFlow()
+
+    fun setAppBackground(uri: String?, blur: Float = _appBgBlur.value, brightness: Float = _appBgBrightness.value) {
+        prefs.edit().apply {
+            if (uri != null) putString("app_bg_uri", uri) else remove("app_bg_uri")
+            putFloat("app_bg_blur", blur)
+            putFloat("app_bg_brightness", brightness)
+        }.apply()
+        _appBgUri.value = uri
+        _appBgBlur.value = blur
+        _appBgBrightness.value = brightness
+    }
+
+    fun clearAppBackground() {
+        setAppBackground(null, 0.5f, 0.6f)
+    }
+
     fun setSyncFrequency(frequency: String) {
         prefs.edit().putString("sync_frequency", frequency).apply()
         _syncFrequency.value = frequency
@@ -103,6 +128,7 @@ class PreferencesManager(private val context: Context) {
         _dailyRandomColor.value = enabled
         if (enabled) {
             checkDailyRandomColor(force = true)
+            com.example.notifications.NotificationHelper.scheduleDailyMidnightColorAlarm(context)
         }
     }
 

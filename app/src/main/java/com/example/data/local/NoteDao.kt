@@ -24,6 +24,12 @@ interface NoteDao {
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun getNoteById(id: Long): Note?
 
+    @Query("SELECT * FROM notes WHERE uuid = :uuid LIMIT 1")
+    suspend fun getNoteByUuid(uuid: String): Note?
+
+    @Query("SELECT * FROM notes WHERE title = :title AND isDeleted = 0 LIMIT 1")
+    suspend fun getNoteByTitle(title: String): Note?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNote(note: Note): Long
 

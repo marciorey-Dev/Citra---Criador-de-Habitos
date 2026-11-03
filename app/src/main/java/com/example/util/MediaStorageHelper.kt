@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Base64
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
@@ -450,6 +451,159 @@ object MediaStorageHelper {
             Log.e(TAG, "Failed to copy export to downloads", e)
             null
         }
+    }
+
+    const val MAX_SYNC_MEDIA_SIZE_BYTES = 8L * 1024 * 1024 // 8 MB
+
+    /**
+     * Resolves a media path, attempting transparent self-healing if the original
+     * file path changed, device storage path differed, or file was moved to Citra's folders.
+     */
+    fun resolveOrSelfHealMediaPath(context: Context, pathOrUri: String?): String? {
+        if (pathOrUri.isNullOrBlank()) return null
+        val clean = pathOrUri.trim()
+        if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+            return clean
+        }
+
+        // 1. Direct check
+        val directFile = File(clean.removePrefix("file://"))
+        if (directFile.exists() && directFile.length() > 0 && directFile.canRead()) {
+            return directFile.absolutePath
+        }
+
+        if (clean.startsWith("content://")) {
+            try {
+                val uri = Uri.parse(clean)
+                context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                    if (pfd.statSize > 0) return clean
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Self-healing: search known Citra media directories by filename
+        val filename = clean.substringAfterLast('/').substringAfterLast('\\').trim()
+        if (filename.isNotBlank()) {
+            val candidateDirs = listOf(
+                getCitraRecordsFolder(context),
+                File(context.filesDir, "Citra Records"),
+                File(context.filesDir, "avatars"),
+                File(context.filesDir, "images"),
+                CitraDocsFileManager.getDocsFolder(context),
+                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC),
+                context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+            ).filterNotNull()
+
+            for (dir in candidateDirs) {
+                if (dir.exists()) {
+                    val candidate = File(dir, filename)
+                    if (candidate.exists() && candidate.length() > 0 && candidate.canRead()) {
+                        return candidate.absolutePath
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Regra dos 3 MB: Extracts all media in the note with size <= 3 MB
+     * into a JSON-friendly array of Base64 attachments for sync & backup.
+     */
+    fun extractMediaAttachmentsForNote(context: Context, content: String): org.json.JSONArray {
+        val attachments = org.json.JSONArray()
+        if (content.isBlank()) return attachments
+
+        val mediaUrls = mutableSetOf<String>()
+
+        // 1. Images: ![alt](url)
+        val imgRegex = Regex("!\\[.*?\\]\\((.*?)\\)")
+        imgRegex.findAll(content).forEach { m ->
+            val u = m.groupValues[1].trim()
+            if (u.isNotBlank() && !u.startsWith("http://", true) && !u.startsWith("https://", true)) {
+                mediaUrls.add(u)
+            }
+        }
+
+        // 2. Audios: [audio:...](url) or ![audio:...](url)
+        val audioRegex = Regex("!?\\[audio:.*?\\]\\((.*?)\\)")
+        audioRegex.findAll(content).forEach { m ->
+            val u = m.groupValues[1].trim()
+            if (u.isNotBlank() && !u.startsWith("http://", true) && !u.startsWith("https://", true)) {
+                mediaUrls.add(u)
+            }
+        }
+
+        for (rawUrl in mediaUrls) {
+            try {
+                val resolvedPath = resolveOrSelfHealMediaPath(context, rawUrl) ?: rawUrl
+                val file = File(resolvedPath.removePrefix("file://"))
+                if (file.exists() && file.length() in 1..MAX_SYNC_MEDIA_SIZE_BYTES) {
+                    val bytes = file.readBytes()
+                    val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    val filename = file.name
+                    val isAudio = rawUrl.contains("audio", true) || filename.endsWith(".m4a", true) || filename.endsWith(".mp3", true) || filename.endsWith(".wav", true) || filename.endsWith(".aac", true)
+                    val mime = if (isAudio) "audio/mp4" else "image/jpeg"
+
+                    val item = org.json.JSONObject().apply {
+                        put("originalPath", rawUrl)
+                        put("resolvedPath", resolvedPath)
+                        put("filename", filename)
+                        put("mimeType", mime)
+                        put("sizeBytes", file.length())
+                        put("base64Data", b64)
+                    }
+                    attachments.put(item)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to attach media under 3MB rule: $rawUrl", e)
+            }
+        }
+
+        return attachments
+    }
+
+    /**
+     * Regra dos 3 MB: Silently restores embedded media attachments from backup/sync
+     * to the appropriate local Citra folder, updating markdown paths seamlessly.
+     */
+    fun restoreMediaAttachments(context: Context, attachmentsJson: org.json.JSONArray?, noteContent: String): String {
+        if (attachmentsJson == null || attachmentsJson.length() == 0) return noteContent
+        var updatedContent = noteContent
+
+        for (i in 0 until attachmentsJson.length()) {
+            try {
+                val item = attachmentsJson.getJSONObject(i)
+                val originalPath = item.optString("originalPath", "")
+                val filename = item.optString("filename", "media_${System.currentTimeMillis()}")
+                val mimeType = item.optString("mimeType", "")
+                val b64 = item.optString("base64Data", "")
+
+                if (b64.isNotBlank()) {
+                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                    val isAudio = mimeType.startsWith("audio/") || filename.endsWith(".m4a", true) || filename.endsWith(".mp3", true) || filename.endsWith(".wav", true) || filename.endsWith(".aac", true)
+                    val targetDir = if (isAudio) getCitraRecordsFolder(context) else {
+                        File(context.filesDir, "images").apply { if (!exists()) mkdirs() }
+                    }
+                    val targetFile = File(targetDir, filename)
+                    if (!targetFile.exists() || targetFile.length() == 0L) {
+                        FileOutputStream(targetFile).use { fos ->
+                            fos.write(bytes)
+                        }
+                    }
+
+                    val newLocalPath = targetFile.absolutePath
+                    if (originalPath.isNotBlank() && originalPath != newLocalPath) {
+                        updatedContent = updatedContent.replace(originalPath, newLocalPath)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Silent restore of media attachment failed", e)
+            }
+        }
+
+        return updatedContent
     }
 
     private fun getFileSize(context: Context, uri: Uri): Long {

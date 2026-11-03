@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,6 +59,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -123,7 +125,7 @@ fun FullScreenNoteEditor(
     initialMode: NoteEditorMode = NoteEditorMode.LIVE_PREVIEW,
     onModeChanged: ((NoteEditorMode) -> Unit)? = null,
     onToggleChecklistTaskSync: ((checklistText: String, isChecked: Boolean) -> Unit)? = null,
-    onConvertChecklistToDirectTask: ((title: String, category: String, priority: String, dueDate: String) -> Unit)? = null,
+    onConvertChecklistToDirectTask: ((title: String, category: String, priority: String, dueDate: String, dueTimestamp: Long?, reminderMinutesBefore: Int) -> Unit)? = null,
     noteVersions: List<NoteVersion> = emptyList(),
     onRestoreVersion: ((NoteVersion) -> Unit)? = null,
     onCreateLocalCopy: ((NoteVersion) -> Unit)? = null
@@ -140,6 +142,8 @@ fun FullScreenNoteEditor(
     var isToolbarMinimized by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
+    var currentSavedTitle by remember { mutableStateOf(initialNote?.title) }
+    val noteUuid = remember { initialNote?.uuid ?: java.util.UUID.randomUUID().toString() }
     var category by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
     var isPinned by remember { mutableStateOf(initialNote?.isPinned ?: false) }
     var bgUri by remember { mutableStateOf(initialNote?.backgroundImageUri) }
@@ -216,27 +220,49 @@ fun FullScreenNoteEditor(
     val redoStack = remember { mutableStateListOf<TextFieldValue>() }
     var lastSnapshotValue by remember { mutableStateOf(editorValue) }
     var lastTypingTime by remember { mutableLongStateOf(0L) }
+    var isHistoryApplying by remember { mutableStateOf(false) }
+
+    // Tracking unsaved changes for Save button state (colored when dirty, neutral gray when saved)
+    var lastSavedTitle by remember { mutableStateOf(initialNote?.title ?: "") }
+    var lastSavedContent by remember { mutableStateOf(initialNote?.content ?: "") }
+    var lastSavedCategory by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
+    var lastSavedIsPinned by remember { mutableStateOf(initialNote?.isPinned ?: false) }
+    var lastSavedBgUri by remember { mutableStateOf(initialNote?.backgroundImageUri) }
+    var lastSavedBgBlur by remember { mutableStateOf(initialNote?.backgroundBlur ?: 0.5f) }
+    var lastSavedBgBrightness by remember { mutableStateOf(initialNote?.backgroundBrightness ?: 0.6f) }
+
+    val isDirty = title != lastSavedTitle ||
+            editorValue.text != lastSavedContent ||
+            category != lastSavedCategory ||
+            isPinned != lastSavedIsPinned ||
+            bgUri != lastSavedBgUri ||
+            bgBlur != lastSavedBgBlur ||
+            bgBrightness != lastSavedBgBrightness
 
     var showSaveFeedback by remember { mutableStateOf(false) }
 
     LaunchedEffect(showSaveFeedback) {
         if (showSaveFeedback) {
-            kotlinx.coroutines.delay(2200)
+            kotlinx.coroutines.delay(2000)
             showSaveFeedback = false
         }
     }
 
     fun pushHistory() {
-        undoStack.add(editorValue)
-        if (undoStack.size > 50) undoStack.removeAt(0)
+        if (undoStack.isEmpty() || undoStack.last().text != editorValue.text) {
+            undoStack.add(editorValue)
+            if (undoStack.size > 80) undoStack.removeAt(0)
+        }
         redoStack.clear()
         lastSnapshotValue = editorValue
     }
 
     fun undo() {
         if (undoStack.isNotEmpty()) {
+            isHistoryApplying = true
+            val current = editorValue
             val prev = undoStack.removeAt(undoStack.lastIndex)
-            redoStack.add(editorValue)
+            redoStack.add(current)
             editorValue = prev
             lastSnapshotValue = prev
         }
@@ -244,8 +270,10 @@ fun FullScreenNoteEditor(
 
     fun redo() {
         if (redoStack.isNotEmpty()) {
+            isHistoryApplying = true
+            val current = editorValue
             val next = redoStack.removeAt(redoStack.lastIndex)
-            undoStack.add(editorValue)
+            undoStack.add(current)
             editorValue = next
             lastSnapshotValue = next
         }
@@ -323,8 +351,22 @@ fun FullScreenNoteEditor(
         val finalTitle = title.trim().ifBlank { "Sem título" }
         val finalContent = editorValue.text
 
-        // Sync directly to physical .md file in Documents/Citra Docs/
-        CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, finalContent)
+        // Sync directly to physical .md file in Documents/Citra Docs/ with UUID and old title cleanup
+        CitraDocsFileManager.saveNoteMarkdown(
+            context = context,
+            title = finalTitle,
+            content = finalContent,
+            uuid = noteUuid,
+            oldTitle = currentSavedTitle
+        )
+        currentSavedTitle = finalTitle
+        lastSavedTitle = finalTitle
+        lastSavedContent = finalContent
+        lastSavedCategory = category
+        lastSavedIsPinned = isPinned
+        lastSavedBgUri = bgUri
+        lastSavedBgBlur = bgBlur
+        lastSavedBgBrightness = bgBrightness
 
         if (close) {
             onSaveAndClose(
@@ -690,9 +732,9 @@ fun FullScreenNoteEditor(
                             modifier = Modifier.weight(1f, fill = false)
                         )
 
-                        // Mode selector pill (Toggle strictly between Live Preview & Modo Leitura)
+                        // Mode selector pill (Toggle strictly between Live Preview & Modo Leitura - Icon only)
                         Surface(
-                            shape = RoundedCornerShape(16.dp),
+                            shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                             modifier = Modifier.clickable {
                                 val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
@@ -703,10 +745,9 @@ fun FullScreenNoteEditor(
                                 switchEditorMode(newMode)
                             }
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            Box(
+                                modifier = Modifier.padding(6.dp),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
@@ -714,15 +755,9 @@ fun FullScreenNoteEditor(
                                     } else {
                                         Icons.AutoMirrored.Filled.MenuBook
                                     },
-                                    contentDescription = null,
-                                    modifier = Modifier.size(13.dp),
+                                    contentDescription = editorMode.label,
+                                    modifier = Modifier.size(20.dp),
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Text(
-                                    text = editorMode.label,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -738,7 +773,11 @@ fun FullScreenNoteEditor(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { undo() }, enabled = undoStack.isNotEmpty()) {
+                    IconButton(
+                        onClick = { undo() },
+                        enabled = undoStack.isNotEmpty(),
+                        modifier = Modifier.testTag("note_editor_undo_btn")
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Undo,
                             contentDescription = "Desfazer",
@@ -746,7 +785,11 @@ fun FullScreenNoteEditor(
                         )
                     }
 
-                    IconButton(onClick = { redo() }, enabled = redoStack.isNotEmpty()) {
+                    IconButton(
+                        onClick = { redo() },
+                        enabled = redoStack.isNotEmpty(),
+                        modifier = Modifier.testTag("note_editor_redo_btn")
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Redo,
                             contentDescription = "Refazer",
@@ -754,11 +797,14 @@ fun FullScreenNoteEditor(
                         )
                     }
 
-                    IconButton(onClick = { saveCurrent(close = false) }) {
+                    IconButton(
+                        onClick = { saveCurrent(close = false) },
+                        modifier = Modifier.testTag("note_editor_save_btn")
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            imageVector = Icons.Default.Save,
                             contentDescription = "Salvar",
-                            tint = GreenAccent
+                            tint = if (isDirty) primaryColor else Color.Gray.copy(alpha = 0.5f)
                         )
                     }
 
@@ -870,6 +916,23 @@ fun FullScreenNoteEditor(
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
                                     val uri = NoteExportHelper.shareAsImage(context, title, category, blocks, primaryColor.toArgb())
                                     NoteExportHelper.shareUri(context, uri, "image/png", "Compartilhar Imagem da Nota")
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = { Text("Converter Checklist em Tarefa ⚡") },
+                                leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null, tint = primaryColor) },
+                                onClick = {
+                                    showMenu = false
+                                    val lines = editorValue.text.lines()
+                                    val checklistLine = lines.firstOrNull { it.trim().startsWith("- [ ]") || it.trim().startsWith("* [ ]") }
+                                        ?: lines.firstOrNull { it.trim().startsWith("- [x]") || it.trim().startsWith("* [x]") }
+                                    val extracted = if (checklistLine != null) {
+                                        checklistLine.trim().substring(5).removePrefix("~~").removeSuffix("~~").trim()
+                                    } else {
+                                        editorValue.text.take(60).trim().ifBlank { title.ifBlank { "Minha Tarefa" } }
+                                    }
+                                    checklistItemToConvert = extracted
                                 }
                             )
 
@@ -1130,17 +1193,25 @@ fun FullScreenNoteEditor(
                         BasicTextField(
                             value = editorValue,
                             onValueChange = { newVal ->
+                                if (isHistoryApplying) {
+                                    isHistoryApplying = false
+                                    editorValue = newVal
+                                    return@BasicTextField
+                                }
                                 if (newVal.text != editorValue.text) {
                                     val now = System.currentTimeMillis()
-                                    val textDiff = newVal.text.length - editorValue.text.length
-                                    val isSpaceOrNewline = newVal.text.endsWith(" ") || newVal.text.endsWith("\n") || 
-                                                           newVal.text.endsWith(".") || newVal.text.endsWith(",")
-                                    val isBigJump = kotlin.math.abs(newVal.text.length - lastSnapshotValue.text.length) >= 4 || kotlin.math.abs(textDiff) > 1
-                                    val isTimeElapsed = (now - lastTypingTime) > 750L
+                                    val textDiff = kotlin.math.abs(newVal.text.length - editorValue.text.length)
+                                    val isWordBoundary = newVal.text.endsWith(" ") || newVal.text.endsWith("\n") || 
+                                                           newVal.text.endsWith(".") || newVal.text.endsWith(",") ||
+                                                           newVal.text.endsWith(";") || newVal.text.endsWith(":")
+                                    val isTimeElapsed = (now - lastTypingTime) > 600L
+                                    val isLargeChange = textDiff > 1
 
-                                    if (isSpaceOrNewline || isBigJump || isTimeElapsed) {
-                                        undoStack.add(lastSnapshotValue)
-                                        if (undoStack.size > 50) undoStack.removeAt(0)
+                                    if (undoStack.isEmpty() || isWordBoundary || isTimeElapsed || isLargeChange) {
+                                        if (undoStack.isEmpty() || undoStack.last().text != editorValue.text) {
+                                            undoStack.add(editorValue)
+                                            if (undoStack.size > 80) undoStack.removeAt(0)
+                                        }
                                         redoStack.clear()
                                         lastSnapshotValue = newVal
                                     }
@@ -1159,10 +1230,10 @@ fun FullScreenNoteEditor(
                                                 val oUnchecked = o.startsWith("- [ ]") || o.startsWith("* [ ]")
                                                 val nUnchecked = n.startsWith("- [ ]") || n.startsWith("* [ ]")
                                                 if (oUnchecked && nChecked) {
-                                                    val text = n.substring(5).trim()
+                                                    val text = n.substring(5).removePrefix("~~").removeSuffix("~~").trim()
                                                     onToggleChecklistTaskSync?.invoke(text, true)
                                                 } else if (oChecked && nUnchecked) {
-                                                    val text = n.substring(5).trim()
+                                                    val text = n.substring(5).removePrefix("~~").removeSuffix("~~").trim()
                                                     onToggleChecklistTaskSync?.invoke(text, false)
                                                 }
                                             }
@@ -1757,6 +1828,18 @@ fun FullScreenNoteEditor(
                                     editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- [ ] ")
                                 }
 
+                                ToolbarToolButton(label = "Para Tarefa", icon = Icons.Default.AddTask) {
+                                    val lines = editorValue.text.lines()
+                                    val checklistLine = lines.firstOrNull { it.trim().startsWith("- [ ]") || it.trim().startsWith("* [ ]") }
+                                        ?: lines.firstOrNull { it.trim().startsWith("- [x]") || it.trim().startsWith("* [x]") }
+                                    val extracted = if (checklistLine != null) {
+                                        checklistLine.trim().substring(5).removePrefix("~~").removeSuffix("~~").trim()
+                                    } else {
+                                        editorValue.text.take(60).trim().ifBlank { title.ifBlank { "Minha Tarefa" } }
+                                    }
+                                    checklistItemToConvert = extracted
+                                }
+
                                 ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
                                     pushHistory()
                                     editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- ")
@@ -1938,36 +2021,39 @@ fun FullScreenNoteEditor(
                 }
             }
 
-            // Bottom-center pop-up feedback when saving note
+            // Bottom-center pop-up feedback when saving note (2 seconds, no emoji, matches current theme palette)
             androidx.compose.animation.AnimatedVisibility(
                 visible = showSaveFeedback,
-                enter = fadeIn() + slideInVertically { it / 2 },
-                exit = fadeOut() + slideOutVertically { it / 2 },
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 72.dp)
+                    .imePadding()
+                    .padding(bottom = 76.dp)
+                    .zIndex(100f)
             ) {
                 Surface(
                     shape = RoundedCornerShape(24.dp),
-                    color = Color(0xFF1E293B),
-                    tonalElevation = 8.dp,
-                    shadowElevation = 8.dp
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 8.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = Color(0xFF4ADE80),
-                            modifier = Modifier.size(20.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Nota salva com sucesso! 💾",
-                            color = Color.White,
-                            fontSize = 14.sp,
+                            text = "Nota salva",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -2113,10 +2199,11 @@ fun FullScreenNoteEditor(
             onConfirm = { taskTitle, taskCategory, taskPriority, dueDateText, dueTimestamp, reminderMinutesBefore ->
                 checklistItemToConvert = null
                 if (onConvertChecklistToDirectTask != null) {
-                    onConvertChecklistToDirectTask(taskTitle, taskCategory, taskPriority.name, dueDateText)
+                    onConvertChecklistToDirectTask(taskTitle, taskCategory, taskPriority.name, dueDateText, dueTimestamp, reminderMinutesBefore)
                 } else {
                     onConvertChecklistToTask?.invoke(taskTitle, dueDateText)
                 }
+                Toast.makeText(context, "Tarefa criada a partir do checklist: $taskTitle ($dueDateText) ⚡", Toast.LENGTH_SHORT).show()
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("Tarefa criada com sucesso: $taskTitle ($dueDateText)")
                 }
@@ -2162,7 +2249,7 @@ fun FullScreenNoteEditor(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Desfoque Gaussiano (Blur)", fontSize = 13.sp)
+                        Text("Desfoque", fontSize = 13.sp)
                         Text("${(bgBlur * 100).toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                     Slider(

@@ -46,6 +46,18 @@ fun SettingsDialog(
     val notificationSettings by viewModel.notificationSettings.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val dailyRandomColor by viewModel.dailyRandomColor.collectAsState()
+    val appBgUri by viewModel.appBgUri.collectAsState()
+    val appBgBlur by viewModel.appBgBlur.collectAsState()
+    val appBgBrightness by viewModel.appBgBrightness.collectAsState()
+
+    val appBgPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val permUri = com.example.util.MediaStorageHelper.saveNoteBackground(context, uri)
+            viewModel.setAppBackground(permUri ?: uri.toString(), appBgBlur, appBgBrightness)
+        }
+    }
 
     var tempNotificationSettings by remember(notificationSettings) {
         mutableStateOf(notificationSettings)
@@ -304,6 +316,118 @@ fun SettingsDialog(
                                     checked = dailyRandomColor,
                                     onCheckedChange = { viewModel.setDailyRandomColor(it) }
                                 )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // App Background Image Card (matching note background logic with blur & darkening)
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .background(selectedAccent.container, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Wallpaper,
+                                                contentDescription = null,
+                                                tint = selectedAccent.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = "Imagem de Fundo do App",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (appBgUri != null) "Personalizada ativa" else "Nenhuma imagem selecionada",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    FilledTonalButton(
+                                        onClick = {
+                                            appBgPickerLauncher.launch(
+                                                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(if (appBgUri != null) "Trocar" else "Importar", fontSize = 12.sp)
+                                    }
+                                }
+
+                                if (appBgUri != null) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    // Desfoque slider
+                                    Column {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("Desfoque", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                            Text("${(appBgBlur * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Slider(
+                                            value = appBgBlur,
+                                            onValueChange = { viewModel.setAppBackground(appBgUri, it, appBgBrightness) },
+                                            valueRange = 0f..1f,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+
+                                    // Escurecer slider
+                                    Column {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("Escurecer", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                            Text("${((1f - appBgBrightness) * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Slider(
+                                            value = appBgBrightness,
+                                            onValueChange = { viewModel.setAppBackground(appBgUri, appBgBlur, it) },
+                                            valueRange = 0.1f..1f,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+
+                                    TextButton(
+                                        onClick = { viewModel.clearAppBackground() },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                        modifier = Modifier.align(Alignment.End)
+                                    ) {
+                                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Remover Imagem de Fundo", fontSize = 11.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -827,6 +951,26 @@ fun NotificationSoundSelector(
         Spacer(modifier = Modifier.height(4.dp))
 
         if (customUri.isNotBlank()) {
+            val audioFileName = remember(customUri) {
+                try {
+                    val uri = Uri.parse(customUri)
+                    var name: String? = null
+                    if (uri.scheme == "content") {
+                        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                if (index != -1) {
+                                    name = cursor.getString(index)
+                                }
+                            }
+                        }
+                    }
+                    name ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Áudio Personalizado"
+                } catch (_: Exception) {
+                    "Áudio Personalizado"
+                }
+            }
+
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
@@ -846,10 +990,12 @@ fun NotificationSoundSelector(
                         Text(text = "🎶", fontSize = 14.sp)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Áudio Local Selecionado",
+                            text = audioFileName,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {

@@ -141,7 +141,9 @@ fun CalendarScreen(
                     isPinned = isPinned,
                     backgroundImageUri = bgUri,
                     backgroundBlur = blur,
-                    backgroundBrightness = brightness
+                    backgroundBrightness = brightness,
+                    uuid = activeNoteForEditor?.uuid,
+                    oldTitle = activeNoteForEditor?.title
                 )
                 isCreatingNoteForCalendar = false
                 activeNoteForEditor = null
@@ -164,7 +166,7 @@ fun CalendarScreen(
             onToggleChecklistTaskSync = { checklistText, isChecked ->
                 viewModel.syncChecklistToTask(checklistText, isChecked)
             },
-            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate ->
+            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate, dueTimestamp, reminderMinutes ->
                 val priorityEnum = when (taskPriority) {
                     "ALTA" -> TaskPriority.ALTA
                     "BAIXA" -> TaskPriority.BAIXA
@@ -175,8 +177,8 @@ fun CalendarScreen(
                     category = taskCategory,
                     priority = priorityEnum,
                     dueDateText = dueDate,
-                    dueTimestamp = null,
-                    reminderMinutesBefore = 0
+                    dueTimestamp = dueTimestamp,
+                    reminderMinutesBefore = reminderMinutes
                 )
             },
             onConvertChecklistToTask = { taskTitle, dueDate ->

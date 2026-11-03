@@ -247,6 +247,33 @@ class MainActivity : ComponentActivity() {
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
                 var showAuthDialog by remember { mutableStateOf(false) }
 
+                val appBgUri by viewModel.appBgUri.collectAsState()
+                val appBgBlur by viewModel.appBgBlur.collectAsState()
+                val appBgBrightness by viewModel.appBgBrightness.collectAsState()
+
+                var processedAppBgBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+                LaunchedEffect(appBgUri, appBgBlur) {
+                    if (!appBgUri.isNullOrBlank()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                val stream = com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, appBgUri!!)
+                                val original = stream?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                if (original != null) {
+                                    val radius = (appBgBlur * 24).toInt().coerceAtLeast(0)
+                                    processedAppBgBitmap = if (radius > 0) com.example.util.FastBlur.blur(original, radius) else original
+                                } else {
+                                    processedAppBgBitmap = null
+                                }
+                            } catch (_: Exception) {
+                                processedAppBgBitmap = null
+                            }
+                        }
+                    } else {
+                        processedAppBgBitmap = null
+                    }
+                }
+
                 val achievements by viewModel.achievements.collectAsState()
 
                 // Request notification permission on Android 13+
@@ -310,10 +337,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Handle back press to return to Home or Timer
+                // Handle back press to return to Home or Timer (instant transition without intermediate scroll lag)
                 BackHandler(enabled = pagerState.currentPage != 0) {
                     coroutineScope.launch {
-                        pagerState.animateScrollToPage(0)
+                        pagerState.scrollToPage(0)
                     }
                 }
 
@@ -358,7 +385,7 @@ class MainActivity : ComponentActivity() {
                                                         color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                                         modifier = Modifier
                                                             .clickable {
-                                                                coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                                                coroutineScope.launch { pagerState.scrollToPage(1) }
                                                             }
                                                             .testTag("top_floating_timer_pill")
                                                     ) {
@@ -402,7 +429,7 @@ class MainActivity : ComponentActivity() {
                                                     color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                                     modifier = Modifier
                                                         .clickable {
-                                                            coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                                            coroutineScope.launch { pagerState.scrollToPage(1) }
                                                         }
                                                         .testTag("top_floating_timer_pill")
                                                 ) {
@@ -620,7 +647,7 @@ class MainActivity : ComponentActivity() {
                                     selected = selected,
                                     onClick = {
                                         coroutineScope.launch {
-                                            pagerState.animateScrollToPage(index)
+                                            pagerState.scrollToPage(index)
                                         }
                                     },
                                     colors = NavigationBarItemDefaults.colors(
@@ -637,22 +664,41 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             ) { innerPadding ->
-                // HorizontalPager: allows swiping quickly between the tabs!
-                HorizontalPager(
-                    state = pagerState,
-                    userScrollEnabled = !isNoteEditorOpen,
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                ) { page ->
+                ) {
+                    if (processedAppBgBitmap != null) {
+                        Image(
+                            bitmap = processedAppBgBitmap!!.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Color.Black.copy(alpha = (1f - appBgBrightness).coerceIn(0.15f, 0.85f))
+                                )
+                        )
+                    }
+
+                    // HorizontalPager: instant tab navigation on button clicks while preserving smooth user manual swiping
+                    HorizontalPager(
+                        state = pagerState,
+                        userScrollEnabled = !isNoteEditorOpen,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
                         when (screens[page]) {
                             Screen.Home -> HomeScreen(
                                 viewModel = viewModel,
                                 onNavigateToTimer = {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    coroutineScope.launch { pagerState.scrollToPage(1) }
                                 },
                                 onNavigateToOrganization = {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    coroutineScope.launch { pagerState.scrollToPage(2) }
                                 },
                                 onQuickAddTask = {
                                     showQuickAddTaskDialog = true
@@ -661,20 +707,20 @@ class MainActivity : ComponentActivity() {
                                     viewModel.triggerCreateNote()
                                     val notesPageIndex = screens.indexOf(Screen.Notes)
                                     if (notesPageIndex >= 0) {
-                                        coroutineScope.launch { pagerState.animateScrollToPage(notesPageIndex) }
+                                        coroutineScope.launch { pagerState.scrollToPage(notesPageIndex) }
                                     }
                                 }
                             )
                             Screen.Timer -> TimerScreen(
                                 viewModel = viewModel,
                                 onNavigateToTasks = {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    coroutineScope.launch { pagerState.scrollToPage(2) }
                                 }
                             )
                             Screen.Organization -> OrganizationScreen(
                                 viewModel = viewModel,
                                 onNavigateToTimerWithTask = {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    coroutineScope.launch { pagerState.scrollToPage(1) }
                                 }
                             )
                             Screen.Notes -> NotesSubTab(
@@ -688,7 +734,7 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToNotes = {
                                     val notesIndex = screens.indexOf(Screen.Notes)
                                     if (notesIndex >= 0) {
-                                        coroutineScope.launch { pagerState.animateScrollToPage(notesIndex) }
+                                        coroutineScope.launch { pagerState.scrollToPage(notesIndex) }
                                     }
                                 }
                             )
@@ -696,12 +742,13 @@ class MainActivity : ComponentActivity() {
                                 viewModel = viewModel,
                                 onStartPomodoroForTask = {
                                     viewModel.linkTaskToPomodoro(it)
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    coroutineScope.launch { pagerState.scrollToPage(1) }
                                 }
                             )
                         }
                     }
                 }
+            }
 
                 if (showAuthDialog) {
                     Dialog(
@@ -738,11 +785,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                if (whatsNewVisible) {
-                    WhatsNewDialog(
-                        onDismiss = { viewModel.dismissWhatsNew() }
-                    )
-                }
+
 
                 if (showCreditsDialog) {
                     CreditsDialog(onDismiss = { showCreditsDialog = false })

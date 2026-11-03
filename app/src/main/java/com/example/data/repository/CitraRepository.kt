@@ -184,10 +184,25 @@ class CitraRepository(
 
     fun getNotesByDate(dateStr: String): Flow<List<Note>> = noteDao.getNotesByDate(dateStr)
 
+    suspend fun getNoteById(id: Long): Note? = noteDao.getNoteById(id)
+    suspend fun getNoteByUuid(uuid: String): Note? = noteDao.getNoteByUuid(uuid)
+    suspend fun getNoteByTitle(title: String): Note? = noteDao.getNoteByTitle(title)
+
     suspend fun insertNote(note: Note): Long {
         val id = noteDao.insertNote(note)
         checkNoteAchievements()
         return id
+    }
+
+    suspend fun upsertNoteByUuid(note: Note): Long {
+        val existing = if (note.uuid.isNotBlank()) noteDao.getNoteByUuid(note.uuid) else null
+        return if (existing != null) {
+            val updated = note.copy(id = existing.id)
+            noteDao.updateNote(updated)
+            existing.id
+        } else {
+            insertNote(note)
+        }
     }
 
     suspend fun insertNotes(notes: List<Note>): Int {
@@ -391,60 +406,6 @@ class CitraRepository(
             Achievement("note_5", "Mente Organizada", "Salve 5 anotações com formatação", "📚", "Anotações")
         )
         achievementDao.insertDefaultAchievements(defaultAchievements)
-
-        // Seed initial task if needed
-        val currentTasks = taskDao.getAllTasks().firstOrNull()
-        if (currentTasks.isNullOrEmpty()) {
-            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-            taskDao.insertTask(
-                Task(
-                    title = "Revisar anotações de estudo",
-                    category = "Estudos",
-                    priority = TaskPriority.ALTA,
-                    dueDateText = todayStr
-                )
-            )
-            taskDao.insertTask(
-                Task(
-                    title = "Planejar metas semanais",
-                    category = "Trabalho",
-                    priority = TaskPriority.MEDIA,
-                    dueDateText = todayStr
-                )
-            )
-        }
-
-        // Seed initial habit if needed
-        val currentHabits = habitDao.getAllHabits().firstOrNull()
-        if (currentHabits.isNullOrEmpty()) {
-            val cal = Calendar.getInstance()
-            cal.add(Calendar.DAY_OF_YEAR, -1)
-            val yesterdayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
-            habitDao.insertHabit(
-                Habit(
-                    title = "Beber 2L de água",
-                    category = "Saúde",
-                    iconEmoji = "💧",
-                    reminderTime = "08:30",
-                    frequencyDays = "ALL",
-                    currentStreak = 3,
-                    bestStreak = 5,
-                    lastCompletedDate = yesterdayStr,
-                    completedDatesCsv = yesterdayStr
-                )
-            )
-            habitDao.insertHabit(
-                Habit(
-                    title = "Leitura de 15 minutos",
-                    category = "Leitura",
-                    iconEmoji = "📖",
-                    reminderTime = "21:00",
-                    frequencyDays = "ALL",
-                    currentStreak = 1,
-                    bestStreak = 4
-                )
-            )
-        }
 
         // Seed initial note if needed
         val currentNotes = noteDao.getAllNotes().firstOrNull()

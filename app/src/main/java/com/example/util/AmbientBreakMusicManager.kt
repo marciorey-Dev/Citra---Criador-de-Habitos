@@ -25,13 +25,8 @@ object AmbientBreakMusicManager {
 
     fun onBreakStateChanged(context: Context, isBreak: Boolean) {
         isBreakActive = isBreak
-        if (isAlwaysPlayingInApp) {
-            // Already playing
-            return
-        }
-        if (isBreak) {
-            startPlaying(context)
-        } else {
+        // The user requested: "no timer quando alguém entrar no modo pausa toca uma música eu quero que essa música não toque mais."
+        if (!isAlwaysPlayingInApp) {
             stopPlaying()
         }
     }

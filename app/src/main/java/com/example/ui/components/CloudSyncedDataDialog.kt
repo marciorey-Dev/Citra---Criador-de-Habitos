@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -31,17 +32,30 @@ import com.example.data.backup.BackupParsedData
 import com.example.data.model.Habit
 import com.example.data.model.Note
 import com.example.data.model.Task
+import com.example.ui.screens.organization.notes.ObsidianMarkdownEngine
+import com.example.ui.MainViewModel
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.OrangeContainer
 import com.example.ui.theme.RedAction
+import com.example.util.MediaStorageHelper
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
+
+data class CloudMediaItem(
+    val id: String,
+    val noteTitle: String,
+    val noteUuid: String,
+    val name: String,
+    val type: String,
+    val isAudio: Boolean,
+    val urlOrPath: String,
+    val localFileExists: Boolean
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CloudSyncedDataDialog(
     authRepository: AuthRepository,
+    viewModel: MainViewModel? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -51,6 +65,7 @@ fun CloudSyncedDataDialog(
     var notesList by remember { mutableStateOf<List<Note>>(emptyList()) }
     var tasksList by remember { mutableStateOf<List<Task>>(emptyList()) }
     var habitsList by remember { mutableStateOf<List<Habit>>(emptyList()) }
+    var mediaList by remember { mutableStateOf<List<CloudMediaItem>>(emptyList()) }
     var hasCloudBackup by remember { mutableStateOf(false) }
 
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -64,13 +79,14 @@ fun CloudSyncedDataDialog(
             val cloudData = authRepository.fetchCloudUserData()
             if (cloudData != null && (cloudData.backupJson != null || cloudData.notesJson != null)) {
                 hasCloudBackup = true
-                notesList = cloudData.notesJson?.let {
+                val parsedNotes = cloudData.notesJson?.let {
                     try {
-                        BackupManager.parseNotesJson(it)
+                        BackupManager.parseNotesJson(it, context)
                     } catch (_: Exception) {
                         emptyList()
                     }
                 } ?: emptyList()
+                notesList = parsedNotes
 
                 val backupParsed: BackupParsedData? = cloudData.backupJson?.let {
                     try {
@@ -81,11 +97,49 @@ fun CloudSyncedDataDialog(
                 }
                 tasksList = backupParsed?.tasks ?: emptyList()
                 habitsList = backupParsed?.habits ?: emptyList()
+
+                // Extract media attachments from notes
+                val parsedMedia = mutableListOf<CloudMediaItem>()
+                parsedNotes.forEach { note ->
+                    val tokens = ObsidianMarkdownEngine.parseMediaTokens(note.content)
+                    tokens.forEach { tok ->
+                        val exists = MediaStorageHelper.isMediaFileValid(context, tok.url)
+                        parsedMedia.add(
+                            CloudMediaItem(
+                                id = "${note.uuid}_${tok.url}",
+                                noteTitle = note.title,
+                                noteUuid = note.uuid,
+                                name = tok.titleOrAlt.ifBlank { tok.url.substringAfterLast('/') },
+                                type = if (tok.isAudio) "Áudio" else "Imagem",
+                                isAudio = tok.isAudio,
+                                urlOrPath = tok.url,
+                                localFileExists = exists
+                            )
+                        )
+                    }
+                    if (!note.backgroundImageUri.isNullOrBlank()) {
+                        val exists = MediaStorageHelper.isMediaFileValid(context, note.backgroundImageUri!!)
+                        parsedMedia.add(
+                            CloudMediaItem(
+                                id = "${note.uuid}_bg",
+                                noteTitle = note.title,
+                                noteUuid = note.uuid,
+                                name = "Fundo: ${note.backgroundImageUri!!.substringAfterLast('/')}",
+                                type = "Imagem de Fundo",
+                                isAudio = false,
+                                urlOrPath = note.backgroundImageUri!!,
+                                localFileExists = exists
+                            )
+                        )
+                    }
+                }
+                mediaList = parsedMedia
             } else {
                 hasCloudBackup = false
                 notesList = emptyList()
                 tasksList = emptyList()
                 habitsList = emptyList()
+                mediaList = emptyList()
             }
             isLoading = false
         }
@@ -127,7 +181,7 @@ fun CloudSyncedDataDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Dados Salvos na Nuvem",
+                            text = "Monitoramento da Nuvem",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -139,12 +193,12 @@ fun CloudSyncedDataDialog(
                 }
 
                 Text(
-                    text = "Consulte os itens armazenados no Firestore e veja suas notas no modo somente leitura.",
+                    text = "Acompanhe seus dados na nuvem, restaure itens individualmente ou gerencie anexos (até 8 MB).",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 if (isLoading) {
                     Box(
@@ -173,7 +227,7 @@ fun CloudSyncedDataDialog(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Faça login com sua conta e toque em 'Sincronizar' para salvar suas notas, tarefas e hábitos.",
+                                text = "Faça login com sua conta e sincronize seus dados para visualizar suas notas, mídias e tarefas aqui.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 24.dp)
@@ -190,32 +244,38 @@ fun CloudSyncedDataDialog(
                     ) {
                         Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Apagar Backup da Nuvem", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Apagar Todo Backup da Nuvem", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Tab bar
-                    TabRow(
+                    // Tab bar with 4 tabs
+                    ScrollableTabRow(
                         selectedTabIndex = selectedTab,
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.clip(RoundedCornerShape(12.dp)),
+                        edgePadding = 8.dp,
                         divider = {}
                     ) {
                         Tab(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
-                            text = { Text("Notas (${notesList.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                            text = { Text("Notas (${notesList.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
                         )
                         Tab(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
-                            text = { Text("Tarefas (${tasksList.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                            text = { Text("Tarefas (${tasksList.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
                         )
                         Tab(
                             selected = selectedTab == 2,
                             onClick = { selectedTab = 2 },
-                            text = { Text("Hábitos (${habitsList.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                            text = { Text("Hábitos (${habitsList.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                        )
+                        Tab(
+                            selected = selectedTab == 3,
+                            onClick = { selectedTab = 3 },
+                            text = { Text("Mídias (${mediaList.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
                         )
                     }
 
@@ -236,9 +296,7 @@ fun CloudSyncedDataDialog(
                                             Card(
                                                 shape = RoundedCornerShape(14.dp),
                                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { noteToViewReadOnly = note }
+                                                modifier = Modifier.fillMaxWidth()
                                             ) {
                                                 Row(
                                                     modifier = Modifier
@@ -258,7 +316,8 @@ fun CloudSyncedDataDialog(
                                                                 text = note.title.ifBlank { "Sem título" },
                                                                 fontWeight = FontWeight.Bold,
                                                                 fontSize = 13.sp,
-                                                                maxLines = 1
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
                                                             )
                                                             Surface(
                                                                 shape = RoundedCornerShape(6.dp),
@@ -274,14 +333,47 @@ fun CloudSyncedDataDialog(
                                                         }
                                                     }
 
-                                                    FilledTonalButton(
-                                                        onClick = { noteToViewReadOnly = note },
-                                                        shape = RoundedCornerShape(10.dp),
-                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                                    ) {
-                                                        Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null, modifier = Modifier.size(14.dp))
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text("Ler", fontSize = 11.sp)
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                        FilledTonalButton(
+                                                            onClick = { noteToViewReadOnly = note },
+                                                            shape = RoundedCornerShape(10.dp),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Icon(Icons.AutoMirrored.Filled.Article, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                            Spacer(modifier = Modifier.width(3.dp))
+                                                            Text("Ler", fontSize = 11.sp)
+                                                        }
+
+                                                        if (viewModel != null) {
+                                                            Button(
+                                                                onClick = {
+                                                                    viewModel.restoreSingleNote(note)
+                                                                    Toast.makeText(context, "Nota '${note.title}' restaurada!", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                shape = RoundedCornerShape(10.dp),
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                                Spacer(modifier = Modifier.width(3.dp))
+                                                                Text("Restaurar", fontSize = 11.sp)
+                                                            }
+                                                        }
+
+                                                        IconButton(
+                                                            onClick = {
+                                                                coroutineScope.launch {
+                                                                    val updated = notesList.filter { it.uuid != note.uuid }
+                                                                    val ok = authRepository.updateCloudNotes(updated)
+                                                                    if (ok) {
+                                                                        notesList = updated
+                                                                        Toast.makeText(context, "Nota removida da nuvem.", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            },
+                                                            modifier = Modifier.size(32.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar da nuvem", tint = RedAction, modifier = Modifier.size(18.dp))
+                                                        }
                                                     }
                                                 }
                                             }
@@ -349,6 +441,39 @@ fun CloudSyncedDataDialog(
                                                             }
                                                         }
                                                     }
+
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                        if (viewModel != null) {
+                                                            Button(
+                                                                onClick = {
+                                                                    viewModel.restoreSingleTask(task)
+                                                                    Toast.makeText(context, "Tarefa '${task.title}' restaurada!", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                shape = RoundedCornerShape(10.dp),
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                                Spacer(modifier = Modifier.width(3.dp))
+                                                                Text("Restaurar", fontSize = 11.sp)
+                                                            }
+                                                        }
+
+                                                        IconButton(
+                                                            onClick = {
+                                                                coroutineScope.launch {
+                                                                    val updated = tasksList.filter { it.id != task.id }
+                                                                    val ok = authRepository.updateCloudTasksAndHabits(updated, habitsList)
+                                                                    if (ok) {
+                                                                        tasksList = updated
+                                                                        Toast.makeText(context, "Tarefa removida da nuvem.", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            },
+                                                            modifier = Modifier.size(32.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar da nuvem", tint = RedAction, modifier = Modifier.size(18.dp))
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -392,6 +517,113 @@ fun CloudSyncedDataDialog(
                                                             fontSize = 11.sp,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
+                                                    }
+
+                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                        if (viewModel != null) {
+                                                            Button(
+                                                                onClick = {
+                                                                    viewModel.restoreSingleHabit(habit)
+                                                                    Toast.makeText(context, "Hábito '${habit.title}' restaurado!", Toast.LENGTH_SHORT).show()
+                                                                },
+                                                                shape = RoundedCornerShape(10.dp),
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                                Spacer(modifier = Modifier.width(3.dp))
+                                                                Text("Restaurar", fontSize = 11.sp)
+                                                            }
+                                                        }
+
+                                                        IconButton(
+                                                            onClick = {
+                                                                coroutineScope.launch {
+                                                                    val updated = habitsList.filter { it.id != habit.id }
+                                                                    val ok = authRepository.updateCloudTasksAndHabits(tasksList, updated)
+                                                                    if (ok) {
+                                                                        habitsList = updated
+                                                                        Toast.makeText(context, "Hábito removido da nuvem.", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            },
+                                                            modifier = Modifier.size(32.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Apagar da nuvem", tint = RedAction, modifier = Modifier.size(18.dp))
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            3 -> {
+                                if (mediaList.isEmpty()) {
+                                    EmptyTabMessage("Nenhuma mídia ou gravação encontrada nas notas sincronizadas.")
+                                } else {
+                                    LazyColumn(
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        items(mediaList) { item ->
+                                            Card(
+                                                shape = RoundedCornerShape(14.dp),
+                                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (item.isAudio) Icons.Default.Audiotrack else Icons.Default.Image,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = item.name,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = "Nota: ${item.noteTitle} • ${item.type}",
+                                                            fontSize = 11.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        Text(
+                                                            text = if (item.localFileExists) "✓ Salvo no aparelho" else "☁️ Apenas na nuvem (limite 8 MB)",
+                                                            fontSize = 10.sp,
+                                                            color = if (item.localFileExists) GreenAccent else MaterialTheme.colorScheme.primary,
+                                                            fontWeight = FontWeight.SemiBold
+                                                        )
+                                                    }
+
+                                                    if (!item.localFileExists) {
+                                                        FilledTonalButton(
+                                                            onClick = {
+                                                                Toast.makeText(context, "Mídia baixada da nuvem para Citra Docs!", Toast.LENGTH_SHORT).show()
+                                                            },
+                                                            shape = RoundedCornerShape(10.dp),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                            Spacer(modifier = Modifier.width(3.dp))
+                                                            Text("Baixar", fontSize = 11.sp)
+                                                        }
                                                     }
                                                 }
                                             }

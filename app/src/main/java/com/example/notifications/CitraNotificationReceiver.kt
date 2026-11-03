@@ -20,6 +20,13 @@ class CitraNotificationReceiver : BroadcastReceiver() {
         )
         wakeLock?.acquire(30_000L) // Hold wake lock for up to 30 seconds to ensure screen turns on and sound completes
 
+        if (intent.action == NotificationHelper.ACTION_DAILY_MIDNIGHT) {
+            val prefs = PreferencesManager(context)
+            prefs.checkDailyRandomColor(force = true)
+            NotificationHelper.scheduleDailyMidnightColorAlarm(context)
+            return
+        }
+
         try {
             val type = intent.getStringExtra(NotificationHelper.EXTRA_TYPE) ?: NotificationHelper.TYPE_TASK
             val title = intent.getStringExtra(NotificationHelper.EXTRA_TITLE) ?: "Citra"

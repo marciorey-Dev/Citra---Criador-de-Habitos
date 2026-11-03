@@ -458,7 +458,7 @@ class AuthRepository(private val context: Context) {
                 categories = categories,
                 achievements = achievements
             )
-            val notesJson = BackupManager.exportNotesJson(notes)
+            val notesJson = BackupManager.exportNotesJson(notes, context)
 
             userRef.collection("cloudSync").document("current").set(
                 mapOf(
@@ -497,6 +497,42 @@ class AuthRepository(private val context: Context) {
         return try {
             currentFirestore.collection("users").document(user.uid)
                 .collection("cloudSync").document("current").delete().await()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun updateCloudNotes(notes: List<Note>): Boolean {
+        val user = _currentUser.value ?: return false
+        if (user.isGuest) return false
+        val currentFirestore = firestore ?: return false
+        return try {
+            val notesJson = BackupManager.exportNotesJson(notes, context)
+            currentFirestore.collection("users").document(user.uid)
+                .collection("cloudSync").document("current")
+                .set(mapOf("notesJson" to notesJson), com.google.firebase.firestore.SetOptions.merge()).await()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun updateCloudTasksAndHabits(tasks: List<Task>, habits: List<Habit>): Boolean {
+        val user = _currentUser.value ?: return false
+        if (user.isGuest) return false
+        val currentFirestore = firestore ?: return false
+        return try {
+            val backupJson = BackupManager.createBackupJson(
+                tasks = tasks,
+                habits = habits,
+                focusSessions = emptyList(),
+                categories = emptyList(),
+                achievements = emptyList()
+            )
+            currentFirestore.collection("users").document(user.uid)
+                .collection("cloudSync").document("current")
+                .set(mapOf("backupJson" to backupJson), com.google.firebase.firestore.SetOptions.merge()).await()
             true
         } catch (_: Exception) {
             false

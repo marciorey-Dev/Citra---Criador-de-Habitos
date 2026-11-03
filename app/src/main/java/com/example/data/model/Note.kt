@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 data class Note(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
+    val uuid: String = java.util.UUID.randomUUID().toString(),
     val title: String,
     val content: String,
     val category: String = "Geral",

@@ -205,13 +205,16 @@ fun NotesSubTab(
                     isPinned = isPinned,
                     backgroundImageUri = bgUri,
                     backgroundBlur = blur,
-                    backgroundBrightness = brightness
+                    backgroundBrightness = brightness,
+                    uuid = activeNoteToEdit?.uuid,
+                    oldTitle = activeNoteToEdit?.title
                 )
                 isCreatingNew = false
                 activeNoteToEdit = null
                 viewModel.setNoteEditorOpen(false)
             },
             onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness ->
+                val currentUuid = activeNoteToEdit?.uuid ?: java.util.UUID.randomUUID().toString()
                 viewModel.saveNote(
                     id = activeNoteToEdit?.id ?: 0L,
                     title = title,
@@ -223,20 +226,21 @@ fun NotesSubTab(
                     backgroundImageUri = bgUri,
                     backgroundBlur = blur,
                     backgroundBrightness = brightness,
+                    uuid = currentUuid,
+                    oldTitle = activeNoteToEdit?.title,
                     onSaved = { savedId ->
-                        if (activeNoteToEdit == null || activeNoteToEdit?.id == 0L) {
-                            activeNoteToEdit = Note(
-                                id = savedId,
-                                title = title,
-                                content = content,
-                                category = category,
-                                iconEmoji = "📝",
-                                isPinned = isPinned,
-                                backgroundImageUri = bgUri,
-                                backgroundBlur = blur,
-                                backgroundBrightness = brightness
-                            )
-                        }
+                        activeNoteToEdit = Note(
+                            id = savedId,
+                            uuid = currentUuid,
+                            title = title,
+                            content = content,
+                            category = category,
+                            iconEmoji = "📝",
+                            isPinned = isPinned,
+                            backgroundImageUri = bgUri,
+                            backgroundBlur = blur,
+                            backgroundBrightness = brightness
+                        )
                     }
                 )
             },
@@ -257,7 +261,7 @@ fun NotesSubTab(
             onToggleChecklistTaskSync = { checklistText, isChecked ->
                 viewModel.syncChecklistToTask(checklistText, isChecked)
             },
-            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate ->
+            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate, dueTimestamp, reminderMinutes ->
                 val priorityEnum = when (taskPriority) {
                     "ALTA" -> TaskPriority.ALTA
                     "BAIXA" -> TaskPriority.BAIXA
@@ -268,8 +272,8 @@ fun NotesSubTab(
                     category = taskCategory,
                     priority = priorityEnum,
                     dueDateText = dueDate,
-                    dueTimestamp = null,
-                    reminderMinutesBefore = 0
+                    dueTimestamp = dueTimestamp,
+                    reminderMinutesBefore = reminderMinutes
                 )
             },
             onConvertChecklistToTask = { taskTitle, dueDate ->
@@ -301,25 +305,28 @@ fun NotesSubTab(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Pesquisar anotações...") },
+                    placeholder = { Text("Pesquisar", fontSize = 14.sp) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Pesquisar",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Limpar")
+                                Icon(Icons.Default.Clear, contentDescription = "Limpar", modifier = Modifier.size(18.dp))
                             }
                         }
                     },
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(14.dp),
                     singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                     modifier = Modifier
                         .weight(1f)
+                        .height(48.dp)
                         .testTag("notes_search_input")
                 )
 

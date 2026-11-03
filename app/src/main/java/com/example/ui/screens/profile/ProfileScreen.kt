@@ -171,13 +171,6 @@ fun ProfileScreen(
                                         )
                                     }
                                 }
-
-                                Text(
-                                    text = user?.username ?: "@viajante",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
                             }
 
                             Spacer(modifier = Modifier.width(12.dp))
@@ -483,7 +476,7 @@ fun ProfileScreen(
                                         ) {
                                             Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Ver Dados Salvos na Nuvem (Notas, Tarefas, Hábitos)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                            Text("Monitoramento do Armazenamento em Nuvem", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
 
                                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -752,14 +745,15 @@ fun ProfileScreen(
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .testTag("profile_latex_manual_btn")
                                     .clickable { showLatexManualDialog = true }
                             ) {
                                 Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Functions, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("Manual de Fórmulas LaTeX", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("Regras de cálculo, sintaxe e fórmulas prontas para copiar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("Manual de Fórmulas e Cálculos LaTeX", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Regras de cálculo, sintaxe, todos os comandos e fórmulas prontas para copiar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Icon(Icons.Default.ChevronRight, contentDescription = null)
                                 }
@@ -929,6 +923,7 @@ fun ProfileScreen(
     if (showCloudDataDialog) {
         CloudSyncedDataDialog(
             authRepository = authRepository,
+            viewModel = viewModel,
             onDismiss = { showCloudDataDialog = false }
         )
     }

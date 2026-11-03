@@ -67,16 +67,67 @@ object CitraDocsFileManager {
     }
 
     /**
-     * Writes or updates a .md file directly in Documents/Citra Docs/
+     * Embeds a clean, standard identifier comment in markdown content.
      */
-    fun saveNoteMarkdown(context: Context, title: String, content: String): File? {
+    fun buildContentWithFrontmatter(uuid: String, content: String): String {
+        val clean = stripFrontmatter(content)
+        return "<!-- citra_id: $uuid -->\n$clean"
+    }
+
+    /**
+     * Extracts UUID from markdown comments or YAML frontmatter.
+     */
+    fun extractUuidFromMarkdown(content: String): String? {
+        val commentRegex = Regex("<!--\\s*citra_id:\\s*([a-zA-Z0-9_-]+)\\s*-->")
+        val match = commentRegex.find(content)
+        if (match != null) return match.groupValues[1].trim()
+
+        val yamlRegex = Regex("(?s)^---\\s*\\n.*?citra_id:\\s*([a-zA-Z0-9_-]+).*?\\n---\\s*\\n?")
+        val yamlMatch = yamlRegex.find(content)
+        if (yamlMatch != null) return yamlMatch.groupValues[1].trim()
+
+        return null
+    }
+
+    /**
+     * Strips frontmatter/citra_id tags so text remains clean for UI editors.
+     */
+    fun stripFrontmatter(content: String): String {
+        var result = content.replace(Regex("<!--\\s*citra_id:\\s*[a-zA-Z0-9_-]+\\s*-->\\s*\\n?"), "")
+        result = result.replace(Regex("(?s)^---\\s*\\n.*?citra_id:\\s*[a-zA-Z0-9_-]+.*?\\n---\\s*\\n?"), "")
+        return result.trimStart()
+    }
+
+    /**
+     * Writes or updates a .md file directly in Documents/Citra Docs/.
+     * If oldTitle is provided and different, safely removes the old file to prevent duplicates.
+     */
+    fun saveNoteMarkdown(
+        context: Context,
+        title: String,
+        content: String,
+        uuid: String? = null,
+        oldTitle: String? = null
+    ): File? {
         return try {
             val folder = getDocsFolder(context)
+
+            // If title was renamed, remove old file so it won't be re-imported as a duplicate
+            if (oldTitle != null && oldTitle.isNotBlank() && !oldTitle.equals(title, ignoreCase = true)) {
+                deleteNoteMarkdown(context, oldTitle)
+            }
+
             val filename = "${sanitizeFilename(title)}.md"
             val file = File(folder, filename)
 
+            val textToWrite = if (uuid != null && uuid.isNotBlank()) {
+                buildContentWithFrontmatter(uuid, content)
+            } else {
+                content
+            }
+
             FileOutputStream(file).use { fos ->
-                fos.write(content.toByteArray(StandardCharsets.UTF_8))
+                fos.write(textToWrite.toByteArray(StandardCharsets.UTF_8))
             }
 
             // Notify Android media scanner so the file is visible over USB MTP and file managers
@@ -159,11 +210,17 @@ object CitraDocsFileManager {
             lower.endsWith(".html") || lower.endsWith(".htm") || rawText.trim().startsWith("<!DOCTYPE html", ignoreCase = true) || rawText.trim().startsWith("<html", ignoreCase = true) -> {
                 convertHtmlToMarkdown(rawText)
             }
+            lower.endsWith(".csv") -> {
+                convertCsvToMarkdown(rawText)
+            }
             lower.endsWith(".json") || lower.endsWith(".citradoc") -> {
                 convertJsonToMarkdown(rawText)
             }
             lower.endsWith(".tex") -> {
                 convertLatexToMarkdown(rawText)
+            }
+            lower.endsWith(".xml") -> {
+                "```xml\n$rawText\n```"
             }
             else -> {
                 // .md, .markdown, .txt, or other text formats
@@ -217,7 +274,43 @@ object CitraDocsFileManager {
         return text.trim()
     }
 
+    private fun convertCsvToMarkdown(csv: String): String {
+        val lines = csv.lines().filter { it.isNotBlank() }
+        if (lines.isEmpty()) return csv
+        val sb = StringBuilder()
+        val firstLine = lines.first()
+        val delimiter = if (firstLine.contains(";")) ";" else ","
+        val headers = firstLine.split(delimiter).map { it.trim().removeSurrounding("\"") }
+        sb.append("| ${headers.joinToString(" | ")} |\n")
+        sb.append("| ${headers.joinToString(" | ") { "---" }} |\n")
+        for (i in 1 until lines.size) {
+            val cols = lines[i].split(delimiter).map { it.trim().removeSurrounding("\"") }
+            sb.append("| ${cols.joinToString(" | ")} |\n")
+        }
+        return sb.toString().trim()
+    }
+
     private fun convertJsonToMarkdown(json: String): String {
+        val trimmed = json.trim()
+        if (trimmed.startsWith("[")) {
+            return try {
+                val array = org.json.JSONArray(trimmed)
+                val sb = StringBuilder()
+                for (i in 0 until array.length()) {
+                    val item = array.opt(i)
+                    if (item is org.json.JSONObject) {
+                        val title = item.optString("title", "Item ${i + 1}")
+                        val content = item.optString("content", item.optString("body", item.toString(2)))
+                        sb.append("### $title\n\n$content\n\n---\n\n")
+                    } else {
+                        sb.append("- $item\n")
+                    }
+                }
+                sb.toString().trim()
+            } catch (_: Exception) {
+                "```json\n$json\n```"
+            }
+        }
         return try {
             val jsonObject = org.json.JSONObject(json)
             if (jsonObject.has("content")) {
@@ -227,17 +320,17 @@ object CitraDocsFileManager {
             } else if (jsonObject.has("text")) {
                 jsonObject.getString("text")
             } else {
-                // If it's another structured JSON, format keys nicely
                 val sb = StringBuilder()
                 val keys = jsonObject.keys()
                 while (keys.hasNext()) {
                     val key = keys.next()
-                    sb.append("**$key:** ${jsonObject.opt(key)}\n\n")
+                    val value = jsonObject.opt(key)
+                    sb.append("**$key:** $value\n\n")
                 }
                 sb.toString().trim()
             }
         } catch (_: Exception) {
-            json
+            "```json\n$json\n```"
         }
     }
 

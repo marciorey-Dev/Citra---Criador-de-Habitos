@@ -88,11 +88,12 @@ object AutoDeviceStorageManager {
             }
             root.put("habits", habitsArr)
 
-            // Notes (full notes including pins, background image, blur, brightness)
+            // Notes (full notes including pins, background image, blur, brightness, uuid, and 3MB media attachments)
             val notesArr = JSONArray()
             notes.forEach { n ->
                 notesArr.put(JSONObject().apply {
                     put("id", n.id)
+                    put("uuid", n.uuid)
                     put("title", n.title)
                     put("content", n.content)
                     put("category", n.category)
@@ -105,6 +106,11 @@ object AutoDeviceStorageManager {
                     put("isDeleted", n.isDeleted)
                     put("deletedAt", n.deletedAt ?: JSONObject.NULL)
                     put("updatedAt", n.updatedAt)
+
+                    val attachments = com.example.util.MediaStorageHelper.extractMediaAttachmentsForNote(context, n.content)
+                    if (attachments.length() > 0) {
+                        put("attachments", attachments)
+                    }
                 })
             }
             root.put("notes", notesArr)
@@ -209,16 +215,30 @@ object AutoDeviceStorageManager {
                 if (habits.isNotEmpty()) database.habitDao().insertHabits(habits)
             }
 
-            // Restore Notes
+            // Restore Notes with UUID upsert and silent 3MB media restoration
             if (root.has("notes")) {
                 val notesArr = root.getJSONArray("notes")
-                val notes = mutableListOf<Note>()
                 for (i in 0 until notesArr.length()) {
                     val o = notesArr.getJSONObject(i)
-                    notes.add(Note(
-                        id = o.optLong("id", 0L),
+                    var contentText = o.optString("content", "")
+
+                    if (o.has("attachments")) {
+                        contentText = com.example.util.MediaStorageHelper.restoreMediaAttachments(
+                            context,
+                            o.optJSONArray("attachments"),
+                            contentText
+                        )
+                    }
+
+                    val noteUuid = o.optString("uuid").ifBlank {
+                        java.util.UUID.randomUUID().toString()
+                    }
+
+                    val note = Note(
+                        id = 0L,
+                        uuid = noteUuid,
                         title = o.getString("title"),
-                        content = o.optString("content", ""),
+                        content = contentText,
                         category = o.optString("category", "Geral"),
                         iconEmoji = o.optString("iconEmoji", "📝"),
                         associatedDate = if (o.isNull("associatedDate")) null else o.optString("associatedDate"),
@@ -229,9 +249,17 @@ object AutoDeviceStorageManager {
                         isDeleted = o.optBoolean("isDeleted", false),
                         deletedAt = if (o.isNull("deletedAt")) null else o.optLong("deletedAt"),
                         updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
-                    ))
+                    )
+
+                    val existing = database.noteDao().getNoteByUuid(noteUuid)
+                    if (existing != null) {
+                        if (note.updatedAt >= existing.updatedAt) {
+                            database.noteDao().updateNote(note.copy(id = existing.id))
+                        }
+                    } else {
+                        database.noteDao().insertNote(note)
+                    }
                 }
-                if (notes.isNotEmpty()) database.noteDao().insertNotes(notes)
             }
 
             // Restore Focus Sessions
