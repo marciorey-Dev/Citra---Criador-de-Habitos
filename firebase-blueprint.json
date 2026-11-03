@@ -7,8 +7,6 @@
         "displayName": { "type": "string" },
         "username": { "type": "string" },
         "photoUrl": { "type": "string" },
-        "friendId": { "type": "string" },
-        "isPrivate": { "type": "boolean" },
         "totalFocusMinutes": { "type": "number" },
         "completedTasksCount": { "type": "number" },
         "completedHabitsCount": { "type": "number" },

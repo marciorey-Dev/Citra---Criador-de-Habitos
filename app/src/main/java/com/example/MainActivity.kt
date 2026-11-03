@@ -61,7 +61,6 @@ import com.example.ui.screens.organization.OrganizationScreen
 import com.example.ui.screens.organization.QuickAddTaskDialog
 import com.example.ui.screens.profile.ProfileScreen
 import com.example.ui.screens.settings.SettingsDialog
-import com.example.util.QrCodeGenerator
 import com.example.ui.screens.timer.TimerScreen
 import com.example.ui.theme.CitraTheme
 import com.example.util.AmbientBreakMusicManager
@@ -247,7 +246,6 @@ class MainActivity : ComponentActivity() {
                 var showSettingsDialog by remember { mutableStateOf(false) }
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
                 var showAuthDialog by remember { mutableStateOf(false) }
-                var showQrCodeDialog by remember { mutableStateOf(false) }
 
                 val achievements by viewModel.achievements.collectAsState()
 
@@ -434,19 +432,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                             actions = {
-                                // Settings and QR buttons ONLY on "Eu" screen (page 4) per request
+                                // Settings button on "Eu" screen (page 4) per request
                                 if (pagerState.currentPage == 4) {
-                                    IconButton(
-                                        onClick = { showQrCodeDialog = true },
-                                        modifier = Modifier.testTag("top_qr_code_btn")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.QrCode,
-                                            contentDescription = "Código QR",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
                                     IconButton(
                                         onClick = { showSettingsDialog = true },
                                         modifier = Modifier.testTag("top_settings_gear_btn")
@@ -729,57 +716,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (showQrCodeDialog) {
-                    val friendId = currentUser?.friendId ?: "CTR-CITRA"
-                    val qrBitmap = remember(friendId) {
-                        QrCodeGenerator.generateQrBitmap("citra://user/$friendId")
-                    }
-
-                    AlertDialog(
-                        onDismissRequest = { showQrCodeDialog = false },
-                        title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.QrCode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Código QR Citra", fontWeight = FontWeight.Bold)
-                            }
-                        },
-                        text = {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Image(
-                                    bitmap = qrBitmap.asImageBitmap(),
-                                    contentDescription = "QR Code",
-                                    modifier = Modifier
-                                        .size(200.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("ID: $friendId", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-                                Text("Apresente aos seus amigos para adicionarem você no Citra.", fontSize = 11.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        },
-                        confirmButton = {
-                            Button(onClick = {
-                                val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Citra ID", friendId))
-                                android.widget.Toast.makeText(this@MainActivity, "ID copiado!", android.widget.Toast.LENGTH_SHORT).show()
-                                showQrCodeDialog = false
-                            }) {
-                                Text("Copiar ID")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showQrCodeDialog = false }) {
-                                Text("Fechar")
-                            }
-                        }
-                    )
-                }
-
                 if (showSettingsDialog) {
                     SettingsDialog(
                         viewModel = viewModel,
@@ -835,7 +771,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AmbientBreakMusicManager.onAppForegrounded(this)
-        viewModel.syncSocialUpdates()
     }
 
     override fun onPause() {

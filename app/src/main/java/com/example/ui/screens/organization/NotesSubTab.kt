@@ -159,8 +159,6 @@ fun NotesSubTab(
 
     val allTasks by viewModel.tasks.collectAsState()
     val allHabits by viewModel.habits.collectAsState()
-    val allGroups by viewModel.allGroups.collectAsState()
-    val allFriends by viewModel.allFriends.collectAsState()
     val currentNoteVersions by if (activeNoteToEdit != null) {
         viewModel.getVersionsForNote(activeNoteToEdit!!.id).collectAsState(initial = emptyList())
     } else {
@@ -171,83 +169,27 @@ fun NotesSubTab(
     if (isEditingNote) {
         key(activeNoteToEdit?.id ?: if (isCreatingNew) -1L else 0L) {
             FullScreenNoteEditor(
-            initialNote = activeNoteToEdit,
-            categories = categories,
-            allNotes = notes,
-            tasks = allTasks,
-            habits = allHabits,
-            pomodoroState = pomodoroState,
-            onNavigateToTimer = null,
-            groups = allGroups,
-            friends = allFriends,
-            onShareWithGroup = { group ->
-                activeNoteToEdit?.let { note ->
-                    viewModel.shareNoteWithGroup(note, group)
-                    activeNoteToEdit = note.copy(
-                        isShared = true,
-                        sharedGroupId = group.id,
-                        sharedGroupName = group.name,
-                        sharedGroupType = group.groupType
-                    )
-                }
-            },
-            onCreateGroupAndShare = { groupName, groupType, invitedFriends ->
-                activeNoteToEdit?.let { note ->
-                    viewModel.createGroup(groupName, null, groupType, invitedFriends)
-                    val dummyGroup = com.example.data.model.CitraGroup(
-                        name = groupName,
-                        groupType = groupType,
-                        imageUri = null,
-                        ownerId = "me"
-                    )
-                    viewModel.shareNoteWithGroup(note, dummyGroup)
-                    activeNoteToEdit = note.copy(
-                        isShared = true,
-                        sharedGroupName = groupName,
-                        sharedGroupType = groupType
-                    )
-                }
-            },
-            onSendSync = { newContent ->
-                activeNoteToEdit?.let { note ->
-                    viewModel.sendNoteSync(note, newContent, "Você")
-                }
-            },
-            onAcceptSync = {
-                activeNoteToEdit?.let { note ->
-                    viewModel.acceptNoteSync(note)
-                }
-            },
-            onToggleAutoAcceptSync = { enabled ->
-                activeNoteToEdit?.let { note ->
-                    viewModel.toggleAutoAcceptSync(note, enabled)
-                    activeNoteToEdit = note.copy(autoAcceptSync = enabled)
-                }
-            },
-            onUnshareNote = {
-                activeNoteToEdit?.let { note ->
-                    viewModel.unshareNoteFromGroup(note)
-                    activeNoteToEdit = note.copy(
-                        isShared = false,
-                        sharedGroupId = null,
-                        sharedGroupName = null
-                    )
-                }
-            },
-            noteVersions = currentNoteVersions,
-            onRestoreVersion = { version ->
-                activeNoteToEdit?.let { note ->
-                    viewModel.restoreNoteVersion(note, version)
-                    activeNoteToEdit = note.copy(
-                        title = version.title,
-                        content = version.content
-                    )
-                }
-            },
-            onCreateLocalCopy = { version ->
-                viewModel.createLocalCopyOfVersion(version)
-            },
-            onClose = {
+                initialNote = activeNoteToEdit,
+                categories = categories,
+                allNotes = notes,
+                tasks = allTasks,
+                habits = allHabits,
+                pomodoroState = pomodoroState,
+                onNavigateToTimer = null,
+                noteVersions = currentNoteVersions,
+                onRestoreVersion = { version ->
+                    activeNoteToEdit?.let { note ->
+                        viewModel.restoreNoteVersion(note, version)
+                        activeNoteToEdit = note.copy(
+                            title = version.title,
+                            content = version.content
+                        )
+                    }
+                },
+                onCreateLocalCopy = { version ->
+                    viewModel.createLocalCopyOfVersion(version)
+                },
+                onClose = {
                 isCreatingNew = false
                 activeNoteToEdit = null
                 viewModel.setNoteEditorOpen(false)
@@ -879,36 +821,6 @@ fun SquareNoteCard(
                             )
                         }
                     }
-
-                    if (note.isShared) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E88E5).copy(alpha = 0.15f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Public,
-                                    contentDescription = "Nota Compartilhada em Grupo",
-                                    tint = Color(0xFF1E88E5),
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                if (!note.sharedGroupName.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Text(
-                                        text = note.sharedGroupName,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF1E88E5),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1080,14 +992,6 @@ fun SmallSquareNoteCard(
                         )
                     }
 
-                    if (note.isShared) {
-                        Icon(
-                            imageVector = Icons.Default.Public,
-                            contentDescription = "Nota Compartilhada em Grupo",
-                            tint = Color(0xFF1E88E5),
-                            modifier = Modifier.size(11.dp)
-                        )
-                    }
                 }
 
                 if (note.isPinned) {
@@ -1204,33 +1108,6 @@ fun DetailNoteCard(
                         )
                     }
 
-                    if (note.isShared) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E88E5).copy(alpha = 0.15f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Public,
-                                    contentDescription = "Nota Compartilhada em Grupo",
-                                    tint = Color(0xFF1E88E5),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                if (!note.sharedGroupName.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = note.sharedGroupName,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF1E88E5)
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1340,16 +1217,6 @@ fun ListNoteCard(
                         fontWeight = FontWeight.Bold,
                         color = if (note.isPinned) categoryColor else MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-
-                if (note.isShared) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.Default.Public,
-                        contentDescription = "Nota Compartilhada em Grupo",
-                        tint = Color(0xFF1E88E5),
-                        modifier = Modifier.size(13.dp)
                     )
                 }
 

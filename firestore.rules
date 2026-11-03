@@ -10,64 +10,30 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    function isModerator() {
-      return isAuthenticated() && (
-        request.auth.token.email == 'marcioafonsorey@gmail.com' ||
-        request.auth.uid == 'moderator_admin'
-      );
-    }
-
-    // User profile: readable by authenticated users so friends and search work reliably
+    // User profile: private to owner
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isOwner(userId) || isModerator();
-      allow delete: if isOwner(userId) || isModerator();
+      allow read, write: if isOwner(userId);
 
-      // User subcollections: private to owner or accessible by moderator
+      // User private subcollections
       match /tasks/{taskId} {
-        allow read, write: if isOwner(userId) || isModerator();
+        allow read, write: if isOwner(userId);
       }
 
       match /habits/{habitId} {
-        allow read, write: if isOwner(userId) || isModerator();
+        allow read, write: if isOwner(userId);
       }
 
       match /notes/{noteId} {
-        allow read, write: if isOwner(userId) || isModerator();
-      }
-
-      match /friends/{friendId} {
-        allow read, write: if isAuthenticated() && (request.auth.uid == userId || request.auth.uid == friendId || isModerator());
+        allow read, write: if isOwner(userId);
       }
 
       match /settings/{settingId} {
-        allow read, write: if isOwner(userId) || isModerator();
+        allow read, write: if isOwner(userId);
       }
 
       match /cloudSync/{docId} {
-        allow read, write: if isOwner(userId) || isModerator();
+        allow read, write: if isOwner(userId);
       }
-    }
-
-    // Groups collection
-    match /groups/{groupId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-
-      match /notes/{noteId} {
-        allow read, write: if isAuthenticated();
-      }
-    }
-
-    // Friend requests collection
-    match /friendRequests/{requestId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.fromUserId;
-      allow update, delete: if isAuthenticated() && (
-        request.auth.uid == resource.data.fromUserId ||
-        request.auth.uid == resource.data.toUserId ||
-        isModerator()
-      );
     }
   }
 }

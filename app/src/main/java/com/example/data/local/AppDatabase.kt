@@ -14,12 +14,9 @@ import com.example.data.model.*
         FocusSession::class,
         Category::class,
         Achievement::class,
-        Friend::class,
-        CitraGroup::class,
-        GroupMember::class,
         NoteVersion::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,8 +26,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun focusSessionDao(): FocusSessionDao
     abstract fun categoryDao(): CategoryDao
     abstract fun achievementDao(): AchievementDao
-    abstract fun friendDao(): FriendDao
-    abstract fun groupDao(): GroupDao
     abstract fun noteVersionDao(): NoteVersionDao
 
     companion object {

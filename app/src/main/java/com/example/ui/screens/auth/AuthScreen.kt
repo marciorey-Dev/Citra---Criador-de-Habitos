@@ -45,7 +45,6 @@ fun AuthScreen(
     var name by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var isPrivateProfile by remember { mutableStateOf(false) }
     var showPassword by remember { mutableStateOf(false) }
 
     var isLoading by remember { mutableStateOf(false) }
@@ -205,40 +204,6 @@ fun AuthScreen(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-
-                // Privacy choice
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (isPrivateProfile) "Perfil Privado 🔒" else "Perfil Público 🌐",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                text = if (isPrivateProfile) "Apenas amigos com seu ID de 9 dígitos poderão te encontrar" else "Aparece na busca de amigos e no ranking global de foco",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = isPrivateProfile,
-                            onCheckedChange = { isPrivateProfile = it }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
             } else {
                 OutlinedTextField(
                     value = username,
@@ -300,8 +265,7 @@ fun AuthScreen(
                             authRepository.createAccountWithEmailOrUsername(
                                 name = name.trim(),
                                 username = username.trim(),
-                                pass = password,
-                                isPrivate = isPrivateProfile
+                                pass = password
                             )
                         } else {
                             if (username.isBlank()) {

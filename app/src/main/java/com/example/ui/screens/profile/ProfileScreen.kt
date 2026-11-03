@@ -10,17 +10,15 @@ import android.os.StatFs
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,22 +26,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.R
 import com.example.data.auth.AuthRepository
-import com.example.data.auth.FriendItem
-import com.example.data.auth.UserProfile
-import com.example.data.model.Note
 import com.example.ui.MainViewModel
 import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.theme.GreenAccent
@@ -51,10 +42,6 @@ import com.example.ui.theme.RedAction
 import com.example.ui.components.AppTutorialDialog
 import com.example.ui.components.BackupDialog
 import com.example.ui.components.ConfirmDeleteDialog
-import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
-import com.example.util.MediaStorageHelper
-import com.example.util.NoteExportHelper
-import com.example.util.QrCodeGenerator
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -72,9 +59,6 @@ fun ProfileScreen(
     val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
 
     val user by authRepository.currentUser.collectAsState()
-    val friends by authRepository.friends.collectAsState()
-    val pendingRequests by authRepository.pendingRequests.collectAsState()
-    val suggestedUsers by authRepository.suggestedUsers.collectAsState()
     val notes by viewModel.notes.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
     val habits by viewModel.habits.collectAsState()
@@ -84,68 +68,73 @@ fun ProfileScreen(
     val keepScreenOn by viewModel.keepScreenOn.collectAsState()
     val notificationSettings by viewModel.notificationSettings.collectAsState()
 
-    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: Amigos, 2: Dados
+    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: Dados
 
     // Modals
-    var showQrDialog by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
-    var showEditBioDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var resetTarget by remember { mutableStateOf<String?>(null) } // "tasks", "habits", "notes", "all"
 
-    // Friend Share / Delete state
-    var friendToRemove by remember { mutableStateOf<FriendItem?>(null) }
-    var friendToShareNoteWith by remember { mutableStateOf<FriendItem?>(null) }
-    var selectedNoteToShare by remember { mutableStateOf<Note?>(null) }
-    var selectedShareFormat by remember { mutableStateOf("md") } // "md", "pdf", "txt", "html"
-
-    // Friend Search
-    var friendSearchQuery by remember { mutableStateOf("") }
-    var searchResults by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
-    var isSearching by remember { mutableStateOf(false) }
-    var hasSearched by remember { mutableStateOf(false) }
-
-    LaunchedEffect(selectedSubTab) {
-        if (selectedSubTab == 1) {
-            authRepository.loadPublicSuggestions()
-        }
-    }
-
-    // Photo pickers with permanent internal storage persistence
+    // Photo picker launcher (Gallery)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            val uid = user?.uid ?: "guest_local_user"
-            val localPath = MediaStorageHelper.saveUserAvatar(context, uid, uri) ?: uri.toString()
-            authRepository.updateProfile(photoUrl = localPath)
+            coroutineScope.launch {
+                try {
+                    val uid = user?.uid ?: "guest"
+                    val avatarDir = File(context.filesDir, "avatars").apply { mkdirs() }
+                    val targetFile = File(avatarDir, "user_${uid}.jpg")
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        targetFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    authRepository.updateProfile(photoUrl = targetFile.absolutePath)
+                    Toast.makeText(context, "Foto de perfil atualizada!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Erro ao salvar imagem local.", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
+    // Camera capture launcher
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            val uid = user?.uid ?: "guest_local_user"
-            val localPath = MediaStorageHelper.saveUserAvatarBitmap(context, uid, bitmap)
-            authRepository.updateProfile(photoUrl = localPath)
+            coroutineScope.launch {
+                try {
+                    val uid = user?.uid ?: "guest"
+                    val avatarDir = File(context.filesDir, "avatars").apply { mkdirs() }
+                    val targetFile = File(avatarDir, "user_${uid}.jpg")
+                    targetFile.outputStream().use { out ->
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                    }
+                    authRepository.updateProfile(photoUrl = targetFile.absolutePath)
+                    Toast.makeText(context, "Foto capturada com sucesso!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Erro ao salvar foto da câmera.", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Scaffold { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(paddingValues)
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. USER PROFILE HEADER CARD
+            // 1. TOP PROFILE HEADER CARD
             item {
                 Card(
-                    shape = RoundedCornerShape(22.dp),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -185,91 +174,6 @@ fun ProfileScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
-
-                                // User BIO row (max 25 chars)
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    Text(
-                                        text = user?.bio?.ifBlank { "..." } ?: "...",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    IconButton(
-                                        onClick = { showEditBioDialog = true },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "Editar Bio",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                if (user?.isModerator == true) {
-                                    // Moderator Badge (No public ID, invisible in searches)
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Shield,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "Conta de Moderador",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    // 9-Character Friend ID pill
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.clickable {
-                                            val id = user?.friendId ?: "CTR-XXXXX"
-                                            clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra ID", id))
-                                            Toast.makeText(context, "ID copiado: $id", Toast.LENGTH_SHORT).show()
-                                        }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "ID: ${user?.friendId ?: "CTR-XXXXX"}",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(
-                                                imageVector = Icons.Default.ContentCopy,
-                                                contentDescription = "Copiar ID",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                        }
-                                    }
-                                }
                             }
 
                             Spacer(modifier = Modifier.width(12.dp))
@@ -321,37 +225,6 @@ fun ProfileScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Privacy Mode Switch
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = if (user?.isPrivate == true) Icons.Default.Lock else Icons.Default.Public,
-                                    contentDescription = null,
-                                    tint = if (user?.isPrivate == true) RedAction else GreenAccent,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (user?.isPrivate == true) "Perfil Privado (Só com ID de 9 dígitos)" else "Perfil Público (Visível na busca e ranking)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Switch(
-                                checked = user?.isPrivate ?: false,
-                                onCheckedChange = { authRepository.updateProfile(isPrivate = it) },
-                                modifier = Modifier.height(24.dp)
-                            )
-                        }
-
                         // Guest mode warning & sign in link
                         if (user?.isGuest == true) {
                             Spacer(modifier = Modifier.height(10.dp))
@@ -394,7 +267,7 @@ fun ProfileScreen(
                 }
             }
 
-            // 3. SUB-TABS SELECTOR: [Estatísticas] [Amigos] [Dados]
+            // 3. SUB-TABS SELECTOR: [Estatísticas] [Dados]
             item {
                 TabRow(
                     selectedTabIndex = selectedSubTab,
@@ -411,13 +284,7 @@ fun ProfileScreen(
                     Tab(
                         selected = selectedSubTab == 1,
                         onClick = { selectedSubTab = 1 },
-                        text = { Text(if (user?.isModerator == true) "Monitoramento" else "Amigos", fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Normal) },
-                        icon = { Icon(if (user?.isModerator == true) Icons.Default.AdminPanelSettings else Icons.Default.Group, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    )
-                    Tab(
-                        selected = selectedSubTab == 2,
-                        onClick = { selectedSubTab = 2 },
-                        text = { Text("Dados", fontWeight = if (selectedSubTab == 2) FontWeight.Bold else FontWeight.Normal) },
+                        text = { Text("Dados", fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Normal) },
                         icon = { Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp)) }
                     )
                 }
@@ -426,27 +293,13 @@ fun ProfileScreen(
             // 4. SUB-TAB CONTENT
             when (selectedSubTab) {
                 0 -> {
-                    // ESTATÍSTICAS (Directly embedded as requested)
+                    // ESTATÍSTICAS
                     item {
                         StatsScreen(viewModel = viewModel)
                     }
                 }
 
                 1 -> {
-                    // AMIGOS & GRUPOS ou MONITORAMENTO (para moderador)
-                    item {
-                        SocialView(
-                            viewModel = viewModel,
-                            authRepository = authRepository,
-                            onOpenNote = { note ->
-                                viewModel.openNote(note)
-                                onNavigateToNotes()
-                            }
-                        )
-                    }
-                }
-
-                2 -> {
                     // DADOS (Technical info, storage usage, share app, tutorial, accessibility)
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -549,7 +402,7 @@ fun ProfileScreen(
                                         text = if (user?.isGuest == false)
                                             "Tarefas, hábitos, notas, conquistas e sessões são sincronizados em tempo real no seu Firestore."
                                         else
-                                            "Conecte sua conta para fazer backup contínuo na nuvem e compartilhar com amigos.",
+                                            "Conecte sua conta para fazer backup contínuo na nuvem.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         lineHeight = 15.sp
@@ -675,7 +528,7 @@ fun ProfileScreen(
                                 }
                             }
 
-                            // Local Backup Card (Abaixo da Sincronização)
+                            // Local Backup Card
                             Card(
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
@@ -731,7 +584,7 @@ fun ProfileScreen(
                                         Text("Onde estão as suas notas?", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.secondary)
                                     }
                                     Text(
-                                        text = "As notas do Citra não são salvas dentro do banco do app ou no arquivo de backup: elas são documentos Markdown (.md) puros gravados em 'Documentos/Citra Docs/' na raiz do seu celular. Você tem 100% de posse dos seus arquivos e pode abri-los no Obsidian, Word ou em qualquer outro programa.",
+                                        text = "As notas do Citra são documentos Markdown (.md) puros gravados em 'Documentos/Citra Docs/' na raiz do seu celular. Você tem 100% de posse dos seus arquivos e pode abri-los no Obsidian, Word ou em qualquer outro programa.",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer,
                                         lineHeight = 15.sp
@@ -891,7 +744,7 @@ fun ProfileScreen(
                                             putExtra(Intent.EXTRA_SUBJECT, "Conheça o Citra!")
                                             putExtra(
                                                 Intent.EXTRA_TEXT,
-                                                "Estou usando o Citra para focar, organizar tarefas, hábitos e notas! Baixe agora e adicione meu ID: ${user?.friendId ?: "CTR-CITRA"}"
+                                                "Estou usando o Citra para focar, organizar tarefas, hábitos e notas! Baixe agora!"
                                             )
                                         }
                                         context.startActivity(Intent.createChooser(shareIntent, "Compartilhar Citra"))
@@ -900,7 +753,7 @@ fun ProfileScreen(
                                 Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Compartilhar o Citra com Amigos", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Compartilhar o Citra", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
                             }
 
@@ -931,7 +784,7 @@ fun ProfileScreen(
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Desconectar Conta")
                                 }
@@ -941,57 +794,6 @@ fun ProfileScreen(
                 }
             }
         }
-    }
-
-    // QR Code Dialog
-    if (showQrDialog) {
-        val friendId = user?.friendId ?: "CTR-CITRA"
-        val qrBitmap = remember(friendId) {
-            QrCodeGenerator.generateQrBitmap("citra://user/$friendId")
-        }
-
-        AlertDialog(
-            onDismissRequest = { showQrDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.QrCode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Código QR de Amigo", fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Image(
-                        bitmap = qrBitmap.asImageBitmap(),
-                        contentDescription = "QR Code",
-                        modifier = Modifier
-                            .size(200.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("ID: $friendId", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-                    Text("Peça a um amigo para escanear ou digitar este ID para se conectarem.", fontSize = 11.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra ID", friendId))
-                    Toast.makeText(context, "ID copiado!", Toast.LENGTH_SHORT).show()
-                    showQrDialog = false
-                }) {
-                    Text("Copiar ID")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showQrDialog = false }) {
-                    Text("Fechar")
-                }
-            }
-        )
     }
 
     // Edit Name Dialog
@@ -1023,43 +825,6 @@ fun ProfileScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showEditNameDialog = false }) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
-
-    // Edit Bio Dialog (Max 50 characters)
-    if (showEditBioDialog) {
-        var newBio by remember { mutableStateOf(user?.bio ?: "...") }
-        AlertDialog(
-            onDismissRequest = { showEditBioDialog = false },
-            title = { Text("Alterar Bio do Perfil", fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = newBio,
-                        onValueChange = { if (it.length <= 50) newBio = it },
-                        label = { Text("Bio (Mensagem de Status)") },
-                        supportingText = { Text("${newBio.length}/50 caracteres (máx. 50)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val clean = newBio.trim().take(50)
-                        authRepository.updateProfile(bio = clean.ifBlank { "..." })
-                        showEditBioDialog = false
-                    }
-                ) {
-                    Text("Salvar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditBioDialog = false }) {
                     Text("Cancelar")
                 }
             }
@@ -1114,207 +879,6 @@ fun ProfileScreen(
 
     if (showTutorialDialog) {
         AppTutorialDialog(onDismiss = { showTutorialDialog = false })
-    }
-
-    // Remover Amigo Dialog
-    if (friendToRemove != null) {
-        val f = friendToRemove!!
-        AlertDialog(
-            onDismissRequest = { friendToRemove = null },
-            title = { Text("Eliminar Amigo", fontWeight = FontWeight.Bold) },
-            text = { Text("Tem a certeza que deseja eliminar ${f.displayName} da sua lista de amigos?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        coroutineScope.launch {
-                            authRepository.removeFriend(f.friendUserId)
-                            friendToRemove = null
-                            Toast.makeText(context, "${f.displayName} foi removido dos seus amigos.", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RedAction)
-                ) {
-                    Text("Eliminar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { friendToRemove = null }) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
-
-    // Partilhar Nota com Amigo Dialog
-    if (friendToShareNoteWith != null) {
-        val friend = friendToShareNoteWith!!
-        var noteSelectionExpanded by remember { mutableStateOf(false) }
-
-        AlertDialog(
-            onDismissRequest = { friendToShareNoteWith = null },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Partilhar Nota", fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Escolha a nota e o formato para enviar para ${friend.displayName}:",
-                        fontSize = 13.sp
-                    )
-
-                    // Note picker
-                    if (notes.isEmpty()) {
-                        Text(
-                            "Você ainda não possui notas criadas.",
-                            color = MaterialTheme.colorScheme.error,
-                            fontSize = 12.sp
-                        )
-                    } else {
-                        Text("Nota selecionada:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { noteSelectionExpanded = true }
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = selectedNoteToShare?.title ?: "Escolha uma nota...",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                            }
-                        }
-
-                        DropdownMenu(
-                            expanded = noteSelectionExpanded,
-                            onDismissRequest = { noteSelectionExpanded = false }
-                        ) {
-                            notes.forEach { n ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(n.title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            Text(n.category, fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedNoteToShare = n
-                                        noteSelectionExpanded = false
-                                    }
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text("Formato de exportação:", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-
-                        val formatOptions = listOf(
-                            "md" to "Markdown (.md) - O amigo pode importar",
-                            "pdf" to "PDF (.pdf) - Salvo em Downloads/Citra",
-                            "txt" to "Texto (.txt) - Salvo em Downloads/Citra",
-                            "html" to "Web (.html) - Salvo em Downloads/Citra"
-                        )
-
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            formatOptions.forEach { (fmt, label) ->
-                                val isFmtSelected = selectedShareFormat == fmt
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isFmtSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { selectedShareFormat = fmt }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        RadioButton(
-                                            selected = isFmtSelected,
-                                            onClick = { selectedShareFormat = fmt },
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(label, fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val note = selectedNoteToShare
-                        if (note != null) {
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            when (selectedShareFormat) {
-                                "md" -> {
-                                    val uri = NoteExportHelper.exportToMdFile(context, note.title, blocks)
-                                    NoteExportHelper.shareUri(context, uri, "text/markdown", "Enviar nota para ${friend.displayName}")
-                                    Toast.makeText(context, "Nota (.md) exportada e pronta para partilhar!", Toast.LENGTH_SHORT).show()
-                                }
-                                "pdf" -> {
-                                    val uri = NoteExportHelper.exportToPdf(context, note.title, note.category, blocks)
-                                    try {
-                                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                        if (bytes != null) {
-                                            MediaStorageHelper.saveExportToDownloads(context, "${note.title}.pdf", "application/pdf", bytes)
-                                        }
-                                    } catch (_: Exception) {}
-                                    NoteExportHelper.shareUri(context, uri, "application/pdf", "Enviar PDF para ${friend.displayName}")
-                                    Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
-                                }
-                                "txt" -> {
-                                    val uri = NoteExportHelper.exportToTxtFile(context, note.title, note.category, blocks)
-                                    try {
-                                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                        if (bytes != null) {
-                                            MediaStorageHelper.saveExportToDownloads(context, "${note.title}.txt", "text/plain", bytes)
-                                        }
-                                    } catch (_: Exception) {}
-                                    NoteExportHelper.shareUri(context, uri, "text/plain", "Enviar Texto para ${friend.displayName}")
-                                    Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
-                                }
-                                "html" -> {
-                                    val uri = NoteExportHelper.exportToHtmlFile(context, note.title, note.category, blocks)
-                                    MediaStorageHelper.copyExportToDownloads(context, "${note.title}.html", "text/html", uri)
-                                    NoteExportHelper.shareUri(context, uri, "text/html", "Enviar HTML para ${friend.displayName}")
-                                    Toast.makeText(context, "Salvo em Downloads/Citra e pronto para partilhar!", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            friendToShareNoteWith = null
-                        } else {
-                            Toast.makeText(context, "Por favor selecione uma nota.", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    enabled = selectedNoteToShare != null
-                ) {
-                    Text("Partilhar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { friendToShareNoteWith = null }) {
-                    Text("Cancelar")
-                }
-            }
-        )
     }
 
     if (showBackupDialog) {
