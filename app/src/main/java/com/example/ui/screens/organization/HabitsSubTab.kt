@@ -238,6 +238,45 @@ fun HabitItemCard(
                 .fillMaxWidth()
                 .padding(14.dp)
         ) {
+            // Etiqueta no extremo esquerdo da box do hábito
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Text(
+                        text = habit.category,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+
+                if (isExpiredToday) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            text = "⚠️ Expirado",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -265,50 +304,15 @@ fun HabitItemCard(
 
                 // Habit Info
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(
+                    Text(
+                        text = habit.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isExpiredToday && !isDoneToday) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = habit.title,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isExpiredToday && !isDoneToday) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f, fill = false),
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer
-                        ) {
-                            Text(
-                                text = habit.category,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-                        if (isExpiredToday) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.errorContainer
-                            ) {
-                                Text(
-                                    text = "⚠️ Expirado",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
 
                     Spacer(modifier = Modifier.height(3.dp))
 
@@ -680,14 +684,7 @@ private fun HabitEmojiSection(
     onSelectEmoji: (String) -> Unit
 ) {
     val suggestedEmojis = listOf(
-        "💧", "🏃", "📖", "🧘", "🍏", "💪", "🎯", "✍️",
-        "🌿", "🚶", "🚴", "💤", "🧼", "💊", "☕", "✨",
-        "🧠", "🍎", "🥗", "🏋️", "🏊", "🧗", "🤸", "🥊",
-        "📚", "💻", "🎨", "🎵", "🎸", "🌱", "☀️", "🌙",
-        "🔥", "⚡", "❤️", "🧹", "🪴", "🍳", "🥤", "🫁",
-        "🍵", "🥑", "🥕", "🍌", "🫖", "🥛", "🏃‍♀️", "🧘‍♂️",
-        "🚴‍♀️", "🛹", "⚽", "🏀", "🎾", "🏸", "♟️", "🧩",
-        "🎧", "🎤", "📝", "📊", "💡", "⏰", "🛡️", "🌟"
+        "💧", "🏃", "📖", "🧘", "🍏", "💪", "🎯", "✍️"
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

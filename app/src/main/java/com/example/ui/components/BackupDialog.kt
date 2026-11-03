@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
@@ -32,6 +33,7 @@ fun BackupDialog(
     val context = LocalContext.current
     var isRestoreMode by remember { mutableStateOf(false) }
     var jsonInput by remember { mutableStateOf("") }
+    var showCloudDialogFromBackup by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -120,6 +122,16 @@ fun BackupDialog(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Restaurar a partir de JSON")
                     }
+
+                    OutlinedButton(
+                        onClick = { showCloudDialogFromBackup = true },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Ver Dados Salvos na Nuvem")
+                    }
                 } else {
                     Text(
                         text = "Cole o conteúdo do backup JSON abaixo para restaurar seus dados:",
@@ -160,4 +172,12 @@ fun BackupDialog(
             }
         }
     )
+
+    if (showCloudDialogFromBackup) {
+        val authRepo = remember { com.example.data.auth.AuthRepository.getInstance(context) }
+        CloudSyncedDataDialog(
+            authRepository = authRepo,
+            onDismiss = { showCloudDialogFromBackup = false }
+        )
+    }
 }

@@ -33,6 +33,10 @@ class PreferencesManager(private val context: Context) {
     private val _themeAccent = MutableStateFlow(loadThemeAccent())
     val themeAccent: StateFlow<ThemeAccent> = _themeAccent.asStateFlow()
 
+    // Daily Random Theme Accent (at 00h / once per day)
+    private val _dailyRandomColor = MutableStateFlow(prefs.getBoolean("daily_random_color", false))
+    val dailyRandomColor: StateFlow<Boolean> = _dailyRandomColor.asStateFlow()
+
     // Persistent Theme Mode: null = system, true = dark, false = light
     private val _themeMode = MutableStateFlow<Boolean?>(loadThemeMode())
     val themeMode: StateFlow<Boolean?> = _themeMode.asStateFlow()
@@ -78,11 +82,41 @@ class PreferencesManager(private val context: Context) {
     }
 
     private fun loadThemeAccent(): ThemeAccent {
+        val dailyEnabled = prefs.getBoolean("daily_random_color", false)
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val lastDate = prefs.getString("last_daily_color_date", "")
+        if (dailyEnabled && today != lastDate) {
+            val nextAccent = ThemeAccent.entries.random()
+            prefs.edit().putString("theme_accent", nextAccent.name).putString("last_daily_color_date", today).apply()
+            return nextAccent
+        }
         val name = prefs.getString("theme_accent", ThemeAccent.TANGERINA.name) ?: ThemeAccent.TANGERINA.name
         return try {
             ThemeAccent.valueOf(name)
         } catch (_: Exception) {
             ThemeAccent.TANGERINA
+        }
+    }
+
+    fun setDailyRandomColor(enabled: Boolean) {
+        prefs.edit().putBoolean("daily_random_color", enabled).apply()
+        _dailyRandomColor.value = enabled
+        if (enabled) {
+            checkDailyRandomColor(force = true)
+        }
+    }
+
+    fun checkDailyRandomColor(force: Boolean = false) {
+        if (!_dailyRandomColor.value) return
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val lastDate = prefs.getString("last_daily_color_date", "")
+        if (force || today != lastDate) {
+            val allAccents = ThemeAccent.entries
+            val current = _themeAccent.value
+            val candidates = allAccents.filter { it != current }.ifEmpty { allAccents }
+            val nextAccent = candidates.random()
+            setThemeAccent(nextAccent)
+            prefs.edit().putString("last_daily_color_date", today).apply()
         }
     }
 
@@ -137,12 +171,17 @@ class PreferencesManager(private val context: Context) {
             "notify_achievements" to s.notifyAchievements,
             "notify_missed_habits" to s.notifyMissedHabits,
             "ambient_music_in_app" to s.ambientBreakMusicInApp,
-            "ambient_music_volume" to s.ambientMusicVolume
+            "ambient_music_volume" to s.ambientMusicVolume,
+            "daily_random_color" to _dailyRandomColor.value
         )
     }
 
     fun importPreferencesMap(map: Map<String, Any>) {
         val editor = prefs.edit()
+        (map["daily_random_color"] as? Boolean)?.let {
+            editor.putBoolean("daily_random_color", it)
+            _dailyRandomColor.value = it
+        }
         (map["theme_mode"] as? String)?.let {
             editor.putString("theme_mode", it)
             _themeMode.value = when (it) {

@@ -82,6 +82,7 @@ import com.example.data.model.Habit
 import com.example.data.model.Note
 import com.example.data.model.NoteVersion
 import com.example.data.model.Task
+import com.example.ui.screens.organization.QuickAddTaskDialog
 import com.example.ui.FlexiblePomodoroState
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
@@ -213,11 +214,23 @@ fun FullScreenNoteEditor(
     // Undo / Redo history
     val undoStack = remember { mutableStateListOf<TextFieldValue>() }
     val redoStack = remember { mutableStateListOf<TextFieldValue>() }
+    var lastSnapshotValue by remember { mutableStateOf(editorValue) }
+    var lastTypingTime by remember { mutableLongStateOf(0L) }
+
+    var showSaveFeedback by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showSaveFeedback) {
+        if (showSaveFeedback) {
+            kotlinx.coroutines.delay(2200)
+            showSaveFeedback = false
+        }
+    }
 
     fun pushHistory() {
         undoStack.add(editorValue)
-        if (undoStack.size > 40) undoStack.removeAt(0)
+        if (undoStack.size > 50) undoStack.removeAt(0)
         redoStack.clear()
+        lastSnapshotValue = editorValue
     }
 
     fun undo() {
@@ -225,6 +238,7 @@ fun FullScreenNoteEditor(
             val prev = undoStack.removeAt(undoStack.lastIndex)
             redoStack.add(editorValue)
             editorValue = prev
+            lastSnapshotValue = prev
         }
     }
 
@@ -233,6 +247,7 @@ fun FullScreenNoteEditor(
             val next = redoStack.removeAt(redoStack.lastIndex)
             undoStack.add(editorValue)
             editorValue = next
+            lastSnapshotValue = next
         }
     }
 
@@ -244,7 +259,9 @@ fun FullScreenNoteEditor(
             bgUri = initialNote.backgroundImageUri
             bgBlur = initialNote.backgroundBlur
             bgBrightness = initialNote.backgroundBrightness
-            editorValue = TextFieldValue(initialNote.content)
+            val initialTfv = TextFieldValue(initialNote.content)
+            editorValue = initialTfv
+            lastSnapshotValue = initialTfv
             undoStack.clear()
             redoStack.clear()
         }
@@ -320,6 +337,7 @@ fun FullScreenNoteEditor(
                 bgBrightness
             )
         } else {
+            showSaveFeedback = true
             if (onSaveOnly != null) {
                 onSaveOnly(
                     finalTitle,
@@ -858,7 +876,7 @@ fun FullScreenNoteEditor(
                             HorizontalDivider()
 
                             DropdownMenuItem(
-                                text = { Text("Importar ficheiro (.md)") },
+                                text = { Text("Importar ficheiro (.md, .txt, .json, .html, .tex)") },
                                 leadingIcon = { Icon(Icons.Default.FileUpload, contentDescription = null) },
                                 onClick = {
                                     showMenu = false
@@ -1112,6 +1130,45 @@ fun FullScreenNoteEditor(
                         BasicTextField(
                             value = editorValue,
                             onValueChange = { newVal ->
+                                if (newVal.text != editorValue.text) {
+                                    val now = System.currentTimeMillis()
+                                    val textDiff = newVal.text.length - editorValue.text.length
+                                    val isSpaceOrNewline = newVal.text.endsWith(" ") || newVal.text.endsWith("\n") || 
+                                                           newVal.text.endsWith(".") || newVal.text.endsWith(",")
+                                    val isBigJump = kotlin.math.abs(newVal.text.length - lastSnapshotValue.text.length) >= 4 || kotlin.math.abs(textDiff) > 1
+                                    val isTimeElapsed = (now - lastTypingTime) > 750L
+
+                                    if (isSpaceOrNewline || isBigJump || isTimeElapsed) {
+                                        undoStack.add(lastSnapshotValue)
+                                        if (undoStack.size > 50) undoStack.removeAt(0)
+                                        redoStack.clear()
+                                        lastSnapshotValue = newVal
+                                    }
+                                    lastTypingTime = now
+
+                                    // Detect checklist toggles in live preview mode
+                                    val oldLines = editorValue.text.lines()
+                                    val newLines = newVal.text.lines()
+                                    if (oldLines.size == newLines.size) {
+                                        for (i in oldLines.indices) {
+                                            val o = oldLines[i].trim()
+                                            val n = newLines[i].trim()
+                                            if (o != n) {
+                                                val oChecked = o.startsWith("- [x]", ignoreCase = true) || o.startsWith("* [x]", ignoreCase = true)
+                                                val nChecked = n.startsWith("- [x]", ignoreCase = true) || n.startsWith("* [x]", ignoreCase = true)
+                                                val oUnchecked = o.startsWith("- [ ]") || o.startsWith("* [ ]")
+                                                val nUnchecked = n.startsWith("- [ ]") || n.startsWith("* [ ]")
+                                                if (oUnchecked && nChecked) {
+                                                    val text = n.substring(5).trim()
+                                                    onToggleChecklistTaskSync?.invoke(text, true)
+                                                } else if (oChecked && nUnchecked) {
+                                                    val text = n.substring(5).trim()
+                                                    onToggleChecklistTaskSync?.invoke(text, false)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 editorValue = newVal
                             },
                             textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -1640,9 +1697,6 @@ fun FullScreenNoteEditor(
                                     pushHistory()
                                     editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
                                 }
-                                ToolbarToolButton(label = "Link", icon = Icons.Default.Link) {
-                                    showLinkDialog = true
-                                }
 
                                 VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -1883,6 +1937,42 @@ fun FullScreenNoteEditor(
                     }
                 }
             }
+
+            // Bottom-center pop-up feedback when saving note
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showSaveFeedback,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 72.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color(0xFF1E293B),
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF4ADE80),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Nota salva com sucesso! 💾",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -2014,21 +2104,21 @@ fun FullScreenNoteEditor(
         )
     }
 
-    // Convert Checklist to Task modal (Direct Task Creation)
+    // Convert Checklist to Task modal (Direct Task Creation using identical task creation form)
     if (checklistItemToConvert != null) {
-        ConvertChecklistToTaskDialog(
-            initialTitle = checklistItemToConvert!!,
+        QuickAddTaskDialog(
             categories = categories,
+            initialTitle = checklistItemToConvert!!,
             onDismiss = { checklistItemToConvert = null },
-            onConfirm = { taskTitle, taskCategory, taskPriority, dueDate ->
+            onConfirm = { taskTitle, taskCategory, taskPriority, dueDateText, dueTimestamp, reminderMinutesBefore ->
                 checklistItemToConvert = null
                 if (onConvertChecklistToDirectTask != null) {
-                    onConvertChecklistToDirectTask(taskTitle, taskCategory, taskPriority, dueDate)
+                    onConvertChecklistToDirectTask(taskTitle, taskCategory, taskPriority.name, dueDateText)
                 } else {
-                    onConvertChecklistToTask?.invoke(taskTitle, dueDate)
+                    onConvertChecklistToTask?.invoke(taskTitle, dueDateText)
                 }
                 coroutineScope.launch {
-                    snackbarHostState.showSnackbar("Tarefa criada com sucesso: $taskTitle ($dueDate)")
+                    snackbarHostState.showSnackbar("Tarefa criada com sucesso: $taskTitle ($dueDateText)")
                 }
             }
         )

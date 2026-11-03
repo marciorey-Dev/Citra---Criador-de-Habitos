@@ -45,6 +45,7 @@ fun SettingsDialog(
     val keepScreenOn by viewModel.keepScreenOn.collectAsState()
     val notificationSettings by viewModel.notificationSettings.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val dailyRandomColor by viewModel.dailyRandomColor.collectAsState()
 
     var tempNotificationSettings by remember(notificationSettings) {
         mutableStateOf(notificationSettings)
@@ -53,6 +54,7 @@ fun SettingsDialog(
     var selectedTab by remember(defaultTab) { mutableStateOf(defaultTab) }
     var selectedAccent by remember(currentAccent) { mutableStateOf(currentAccent) }
     var screenOnState by remember(keepScreenOn) { mutableStateOf(keepScreenOn) }
+    var showAllColorsDialog by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -177,7 +179,8 @@ fun SettingsDialog(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(ThemeAccent.entries) { accent ->
+                            // First 10 theme colors
+                            items(ThemeAccent.entries.take(10)) { accent ->
                                 val isSelected = selectedAccent == accent
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
@@ -211,6 +214,96 @@ fun SettingsDialog(
                                         )
                                     }
                                 }
+                            }
+
+                            // '+' Button styled with the current color to open full 30-color palette
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = selectedAccent.container,
+                                    modifier = Modifier
+                                        .clickable { showAllColorsDialog = true }
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = selectedAccent.primary,
+                                            shape = RoundedCornerShape(14.dp)
+                                        )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Mais cores",
+                                            tint = selectedAccent.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Mais Cores (30)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = selectedAccent.onContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Daily Random Color Toggle (at 00h)
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.setDailyRandomColor(!dailyRandomColor) }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .background(selectedAccent.container, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Casino,
+                                            contentDescription = null,
+                                            tint = selectedAccent.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "Trocar cor aleatoriamente às 00h",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Alterna a cada dia entre as 30 cores do app",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = dailyRandomColor,
+                                    onCheckedChange = { viewModel.setDailyRandomColor(it) }
+                                )
                             }
                         }
                     }
@@ -583,6 +676,119 @@ fun SettingsDialog(
                     Icon(Icons.Default.Save, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Salvar Configurações", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+            }
+        }
+    }
+
+    if (showAllColorsDialog) {
+        Dialog(
+            onDismissRequest = { showAllColorsDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.92f)
+                    .fillMaxHeight(0.85f),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Paleta de Cores (30)",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Escolha sua cor preferida para todo o aplicativo",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = { showAllColorsDialog = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Fechar")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(ThemeAccent.entries) { accent ->
+                            val isSelected = selectedAccent == accent
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isSelected) accent.container else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedAccent = accent
+                                        viewModel.setThemeAccent(accent)
+                                        showAllColorsDialog = false
+                                    }
+                                    .border(
+                                        width = if (isSelected) 2.dp else 1.dp,
+                                        color = if (isSelected) accent.primary else Color.Transparent,
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .background(accent.primary, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = accent.displayName,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) accent.onContainer else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Selecionado",
+                                            tint = accent.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = { showAllColorsDialog = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Fechar")
+                    }
                 }
             }
         }

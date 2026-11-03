@@ -41,7 +41,9 @@ import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
 import com.example.ui.components.AppTutorialDialog
 import com.example.ui.components.BackupDialog
+import com.example.ui.components.CloudSyncedDataDialog
 import com.example.ui.components.ConfirmDeleteDialog
+import com.example.ui.components.LatexManualDialog
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -74,7 +76,9 @@ fun ProfileScreen(
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showTutorialDialog by remember { mutableStateOf(false) }
+    var showLatexManualDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
+    var showCloudDataDialog by remember { mutableStateOf(false) }
     var resetTarget by remember { mutableStateOf<String?>(null) } // "tasks", "habits", "notes", "all"
 
     // Photo picker launcher (Gallery)
@@ -472,6 +476,16 @@ fun ProfileScreen(
                                             }
                                         }
 
+                                        FilledTonalButton(
+                                            onClick = { showCloudDataDialog = true },
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Ver Dados Salvos na Nuvem (Notas, Tarefas, Hábitos)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+
                                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                                         Text(
@@ -732,6 +746,25 @@ fun ProfileScreen(
                                 }
                             }
 
+                            // Action: Manual de Fórmulas LaTeX
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showLatexManualDialog = true }
+                            ) {
+                                Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Functions, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Manual de Fórmulas LaTeX", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("Regras de cálculo, sintaxe e fórmulas prontas para copiar", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                                }
+                            }
+
                             // Action: Compartilhar Citra
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
@@ -881,11 +914,22 @@ fun ProfileScreen(
         AppTutorialDialog(onDismiss = { showTutorialDialog = false })
     }
 
+    if (showLatexManualDialog) {
+        LatexManualDialog(onDismiss = { showLatexManualDialog = false })
+    }
+
     if (showBackupDialog) {
         BackupDialog(
             onExportBackup = { viewModel.exportBackupJson() },
             onRestoreBackup = { json -> viewModel.restoreBackupJson(json) },
             onDismiss = { showBackupDialog = false }
+        )
+    }
+
+    if (showCloudDataDialog) {
+        CloudSyncedDataDialog(
+            authRepository = authRepository,
+            onDismiss = { showCloudDataDialog = false }
         )
     }
 

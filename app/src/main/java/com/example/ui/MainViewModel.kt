@@ -70,6 +70,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // User Preferences
     val themeAccent: StateFlow<ThemeAccent> = preferencesManager.themeAccent
+    val dailyRandomColor: StateFlow<Boolean> = preferencesManager.dailyRandomColor
     val defaultStartTab: StateFlow<String> = preferencesManager.defaultStartTab
     val keepScreenOn: StateFlow<Boolean> = preferencesManager.keepScreenOn
     val notificationSettings: StateFlow<NotificationSettings> = preferencesManager.settings
@@ -80,6 +81,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setThemeAccent(accent: ThemeAccent) {
         preferencesManager.setThemeAccent(accent)
+    }
+
+    fun setDailyRandomColor(enabled: Boolean) {
+        preferencesManager.setDailyRandomColor(enabled)
     }
 
     fun setDefaultStartTab(tab: String) {
@@ -228,6 +233,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        preferencesManager.checkDailyRandomColor()
         NotificationHelper.initNotificationChannels(application)
         restoreTimerSnapshotOnStartup()
         if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.11") {
@@ -671,30 +677,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val cleanTitle = task.title.trim()
                 if (cleanTitle.isNotEmpty()) {
                     for (note in notes.value) {
-                        var updated = false
-                        var newContent = note.content
-                        if (isDone) {
-                            // Replace - [ ] TaskTitle with - [x] TaskTitle (flexible matching at start of item)
-                            val regex = Regex("(?m)^(\\s*-\\s*\\[\\s*\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\b.*)$", RegexOption.IGNORE_CASE)
-                            if (regex.containsMatchIn(newContent)) {
-                                newContent = regex.replace(newContent) { m ->
-                                    val prefix = m.groupValues[1].replace(Regex("\\[\\s*\\]"), "[x]")
-                                    "$prefix${m.groupValues[2]}${m.groupValues[3]}"
+                        val lines = note.content.lines().toMutableList()
+                        var noteModified = false
+                        for (i in lines.indices) {
+                            val line = lines[i]
+                            val trimmed = line.trimStart()
+                            val indent = line.substring(0, line.length - trimmed.length)
+                            if (isDone) {
+                                if (trimmed.startsWith("- [ ]") || trimmed.startsWith("* [ ]")) {
+                                    val itemText = trimmed.substring(5).trim()
+                                    if (itemText.equals(cleanTitle, ignoreCase = true) ||
+                                        itemText.startsWith(cleanTitle, ignoreCase = true) ||
+                                        cleanTitle.startsWith(itemText, ignoreCase = true)) {
+                                        lines[i] = "$indent- [x] $itemText"
+                                        noteModified = true
+                                    }
                                 }
-                                updated = true
-                            }
-                        } else {
-                            // Replace - [x] TaskTitle with - [ ] TaskTitle
-                            val regex = Regex("(?m)^(\\s*-\\s*\\[[xX]\\]\\s*)(" + Regex.escape(cleanTitle) + ")(\\b.*)$", RegexOption.IGNORE_CASE)
-                            if (regex.containsMatchIn(newContent)) {
-                                newContent = regex.replace(newContent) { m ->
-                                    val prefix = m.groupValues[1].replace(Regex("\\[[xX]\\]"), "[ ]")
-                                    "$prefix${m.groupValues[2]}${m.groupValues[3]}"
+                            } else {
+                                if (trimmed.startsWith("- [x]", ignoreCase = true) || trimmed.startsWith("- [X]") ||
+                                    trimmed.startsWith("* [x]", ignoreCase = true) || trimmed.startsWith("* [X]")) {
+                                    val itemText = trimmed.substring(5).trim()
+                                    if (itemText.equals(cleanTitle, ignoreCase = true) ||
+                                        itemText.startsWith(cleanTitle, ignoreCase = true) ||
+                                        cleanTitle.startsWith(itemText, ignoreCase = true)) {
+                                        lines[i] = "$indent- [ ] $itemText"
+                                        noteModified = true
+                                    }
                                 }
-                                updated = true
                             }
                         }
-                        if (updated) {
+                        if (noteModified) {
+                            val newContent = lines.joinToString("\n")
                             repository.updateNote(note.copy(content = newContent, updatedAt = System.currentTimeMillis()))
                             com.example.util.CitraDocsFileManager.saveNoteMarkdown(getApplication(), note.title, newContent)
                         }
@@ -707,7 +720,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun syncChecklistToTask(checklistText: String, isChecked: Boolean) {
         val clean = checklistText.trim()
             .removePrefix("- [ ]").removePrefix("- [x]").removePrefix("- [X]")
+            .removePrefix("* [ ]").removePrefix("* [x]").removePrefix("* [X]")
             .trim()
+            .replace(Regex("~~"), "")
         if (clean.isBlank()) return
         val matchingTask = tasks.value.firstOrNull {
             val tTitle = it.title.trim()
@@ -717,7 +732,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (matchingTask != null && matchingTask.isCompleted != isChecked) {
             viewModelScope.launch {
-                repository.toggleTaskCompleted(matchingTask)
+                val toggled = repository.toggleTaskCompleted(matchingTask)
+                if (toggled) {
+                    _userMessage.emit("Tarefa '${matchingTask.title}' concluída!")
+                }
             }
         }
     }

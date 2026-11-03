@@ -189,12 +189,7 @@ fun FullScreenBlockDialog(
                                 }
                             }
                         } else {
-                            Text(
-                                text = "Editor Matemático Focado",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            // Removido o nome "Editor Matemático Focado" para não obstruir os botões de ação
                         }
                     }
 
@@ -210,7 +205,11 @@ fun FullScreenBlockDialog(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Undo,
                                 contentDescription = "Desfazer",
-                                tint = if (historyUndo.isNotEmpty()) Color.White else Color.Gray.copy(alpha = 0.4f),
+                                tint = if (block is CodeBlock) {
+                                    if (historyUndo.isNotEmpty()) Color.White else Color.Gray.copy(alpha = 0.4f)
+                                } else {
+                                    if (historyUndo.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                },
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -222,7 +221,11 @@ fun FullScreenBlockDialog(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Redo,
                                 contentDescription = "Refazer",
-                                tint = if (historyRedo.isNotEmpty()) Color.White else Color.Gray.copy(alpha = 0.4f),
+                                tint = if (block is CodeBlock) {
+                                    if (historyRedo.isNotEmpty()) Color.White else Color.Gray.copy(alpha = 0.4f)
+                                } else {
+                                    if (historyRedo.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                },
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -231,7 +234,7 @@ fun FullScreenBlockDialog(
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Copiar",
-                                tint = Color(0xFF38BDF8),
+                                tint = if (block is CodeBlock) Color(0xFF38BDF8) else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -240,22 +243,26 @@ fun FullScreenBlockDialog(
                             Icon(
                                 imageVector = Icons.Default.ContentPaste,
                                 contentDescription = "Colar",
-                                tint = Color(0xFF4ADE80),
+                                tint = if (block is CodeBlock) Color(0xFF4ADE80) else MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
 
                         IconButton(
                             onClick = onDismiss,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            modifier = if (block is CodeBlock) {
+                                Modifier
+                                    .size(36.dp)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            } else {
+                                Modifier.size(36.dp)
+                            }
                         ) {
                             Icon(
                                 imageVector = Icons.Default.FullscreenExit,
                                 contentDescription = "Sair da Tela Cheia",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
+                                tint = if (block is CodeBlock) Color.White else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }

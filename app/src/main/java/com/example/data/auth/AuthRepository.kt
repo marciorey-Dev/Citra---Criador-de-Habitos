@@ -490,6 +490,19 @@ class AuthRepository(private val context: Context) {
         }
     }
 
+    suspend fun deleteCloudBackup(): Boolean {
+        val user = _currentUser.value ?: return false
+        if (user.isGuest) return false
+        val currentFirestore = firestore ?: return false
+        return try {
+            currentFirestore.collection("users").document(user.uid)
+                .collection("cloudSync").document("current").delete().await()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     companion object {
         @Volatile
         private var INSTANCE: AuthRepository? = null

@@ -334,7 +334,7 @@ fun NotesSubTab(
                 ) {
                     Icon(
                         imageVector = Icons.Default.FileOpen,
-                        contentDescription = "Importar Várias Notas (.md)",
+                        contentDescription = "Importar Ficheiros Suportados (.md, .txt, .json, .html, .tex)",
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }

@@ -524,7 +524,7 @@ fun TimerScreen(
                             enabled = !isRunning,
                             label = { Text(cat.name, fontSize = 12.sp) },
                             leadingIcon = { Text(cat.emoji, fontSize = 14.sp) },
-                            trailingIcon = if (isCategoryTrashVisible && cat.isCustom) {
+                            trailingIcon = if (isCategoryTrashVisible) {
                                 {
                                     IconButton(
                                         onClick = { categoryToDelete = cat },

@@ -32,9 +32,7 @@ class CitraRepository(
     }
 
     suspend fun deleteCategory(category: Category) {
-        if (category.isCustom) {
-            categoryDao.deleteCategory(category)
-        }
+        categoryDao.deleteCategory(category)
     }
 
     // Tasks

@@ -855,25 +855,14 @@ fun CitraLoadingScreen(loadingText: String = "Carregando...") {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Surface(
+            Image(
+                painter = painterResource(id = R.drawable.citra_logo),
+                contentDescription = "Citra Logo",
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .size(96.dp)
-                    .graphicsLayer(scaleX = scale, scaleY = scale),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shadowElevation = 8.dp
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Image(
-                        painter = painterResource(id = R.drawable.citra_logo),
-                        contentDescription = "Citra Logo",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(96.dp)
-                            .clip(CircleShape)
-                    )
-                }
-            }
+                    .graphicsLayer(scaleX = scale, scaleY = scale)
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 

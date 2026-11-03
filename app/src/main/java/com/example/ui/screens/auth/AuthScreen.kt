@@ -69,11 +69,8 @@ fun AuthScreen(
             Image(
                 painter = painterResource(id = R.drawable.citra_logo),
                 contentDescription = "Logo Citra",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(88.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(96.dp)
             )
 
             Spacer(modifier = Modifier.height(16.dp))
