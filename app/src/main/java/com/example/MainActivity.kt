@@ -73,11 +73,23 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private val authRepository by lazy { AuthRepository.getInstance(this) }
+    private var pendingWidgetAction by mutableStateOf<String?>(null)
+    private var pendingWidgetNoteId by mutableStateOf<Long?>(null)
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         checkAlarmIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        if (action != null && action.startsWith("com.example.citra.")) {
+            pendingWidgetAction = action
+            pendingWidgetNoteId = intent.getLongExtra(com.example.widget.CitraWidgetHelper.EXTRA_NOTE_ID, -1L).takeIf { it > 0 }
+        }
     }
 
     private fun checkAlarmIntent(intent: android.content.Intent?) {
@@ -109,6 +121,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         checkAlarmIntent(intent)
+        handleWidgetIntent(intent)
 
         setContent {
             val isDarkThemeSetting by viewModel.isDarkTheme.collectAsState()
@@ -238,6 +251,41 @@ class MainActivity : ComponentActivity() {
                     initialPage = initialPageIndex,
                     pageCount = { screens.size }
                 )
+
+                // Handle Widget Actions
+                LaunchedEffect(pendingWidgetAction, pendingWidgetNoteId) {
+                    val action = pendingWidgetAction ?: return@LaunchedEffect
+                    when (action) {
+                        com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_TIMER -> {
+                            pagerState.scrollToPage(1)
+                        }
+                        com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_HABITS -> {
+                            viewModel.setOrganizationSubTab(0)
+                            pagerState.scrollToPage(2)
+                        }
+                        com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_NEW_NOTE -> {
+                            pagerState.scrollToPage(3)
+                            viewModel.triggerCreateNote()
+                        }
+                        com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_OPEN_NOTE -> {
+                            val noteId = pendingWidgetNoteId
+                            if (noteId != null && noteId > 0) {
+                                val targetNote = viewModel.notes.value.find { it.id == noteId }
+                                    ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        viewModel.repository.noteDao.getNoteById(noteId)
+                                    }
+                                if (targetNote != null) {
+                                    viewModel.openNote(targetNote)
+                                    pagerState.scrollToPage(3)
+                                }
+                            } else {
+                                pagerState.scrollToPage(3)
+                            }
+                        }
+                    }
+                    pendingWidgetAction = null
+                    pendingWidgetNoteId = null
+                }
 
                 var showMenu by remember { mutableStateOf(false) }
                 var showAchievementsDialog by remember { mutableStateOf(false) }

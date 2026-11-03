@@ -305,28 +305,34 @@ fun NotesSubTab(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Pesquisar", fontSize = 14.sp) },
+                    placeholder = { Text("Pesquisar", fontSize = 13.sp) },
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Pesquisar",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Limpar", modifier = Modifier.size(18.dp))
+                            IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Clear, contentDescription = "Limpar", modifier = Modifier.size(16.dp))
                             }
                         }
                     },
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    contentPadding = OutlinedTextFieldDefaults.contentPadding(
+                        start = 12.dp,
+                        top = 0.dp,
+                        end = 8.dp,
+                        bottom = 0.dp
+                    ),
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
+                        .height(42.dp)
                         .testTag("notes_search_input")
                 )
 
@@ -335,14 +341,15 @@ fun NotesSubTab(
                 IconButton(
                     onClick = { importMultipleNotesLauncher.launch("*/*") },
                     modifier = Modifier
-                        .size(48.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
+                        .size(42.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
                         .testTag("notes_import_multiple_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.FileOpen,
                         contentDescription = "Importar Ficheiros Suportados (.md, .txt, .json, .html, .tex)",
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 

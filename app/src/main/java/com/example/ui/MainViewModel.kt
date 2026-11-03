@@ -1041,6 +1041,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     loopAlarm = loopAlarm
                 )
             )
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             _userMessage.emit("Hábito '$title' adicionado (lembrete às $reminderTime)!")
         }
     }
@@ -1048,6 +1049,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateHabit(habit: Habit) {
         viewModelScope.launch {
             repository.updateHabit(habit)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             _userMessage.emit("Hábito atualizado!")
         }
     }
@@ -1056,6 +1058,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             vibrate(40)
             val isDone = repository.toggleHabitToday(habit)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             if (isDone) {
                 _userMessage.emit("Hábito cumprido hoje! Sequência de ${habit.currentStreak + 1} dias!")
             } else {
@@ -1067,6 +1070,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteHabit(habit: Habit) {
         viewModelScope.launch {
             repository.deleteHabit(habit)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             if (_pomodoroState.value.linkedHabit?.id == habit.id) {
                 _pomodoroState.update { it.copy(linkedHabit = null) }
             }
@@ -1083,6 +1087,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val updated = note.copy(isPinned = !note.isPinned, updatedAt = System.currentTimeMillis())
             repository.updateNote(updated)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             _userMessage.emit(if (updated.isPinned) "Nota fixada no topo!" else "Nota desafixada.")
         }
     }
@@ -1140,6 +1145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 oldTitle = previousTitle
             )
 
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             onSaved?.invoke(resultId)
         }
     }
@@ -1147,6 +1153,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteNote(note: Note) {
         viewModelScope.launch {
             repository.moveToTrash(note)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             _userMessage.emit("Anotação movida para a Lixeira (30 dias).")
         }
     }

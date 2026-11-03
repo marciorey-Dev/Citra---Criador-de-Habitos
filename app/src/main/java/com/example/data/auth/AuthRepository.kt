@@ -120,7 +120,7 @@ class AuthRepository(private val context: Context) {
 
     private fun loadGuestProfile() {
         val savedName = prefs.getString("guest_name", "Viajante Citra") ?: "Viajante Citra"
-        val savedUsername = prefs.getString("guest_username", "@viajante") ?: "@viajante"
+        val savedUsername = (prefs.getString("guest_username", "viajante") ?: "viajante").removePrefix("@")
         val localAvatar = java.io.File(context.filesDir, "avatars/user_guest.jpg")
         val savedPhoto = if (localAvatar.exists()) localAvatar.absolutePath else prefs.getString("guest_photo", null)
         val isPrivate = prefs.getBoolean("guest_is_private", false)
@@ -146,7 +146,7 @@ class AuthRepository(private val context: Context) {
                     _currentUser.value = UserProfile(
                         uid = uid,
                         displayName = authDisplayName ?: "Usuário Citra",
-                        username = "@" + uid.take(6),
+                        username = uid.take(6),
                         photoUrl = defaultPhoto,
                         isPrivate = false,
                         isGuest = false
@@ -162,7 +162,7 @@ class AuthRepository(private val context: Context) {
                     val profile = UserProfile(
                         uid = uid,
                         displayName = doc.getString("displayName") ?: authDisplayName ?: "Usuário Citra",
-                        username = doc.getString("username") ?: ("@" + uid.take(6)),
+                        username = (doc.getString("username") ?: uid.take(6)).removePrefix("@"),
                         photoUrl = effectivePhoto,
                         isPrivate = doc.getBoolean("isPrivate") ?: false,
                         isGuest = false,
@@ -173,7 +173,7 @@ class AuthRepository(private val context: Context) {
                     )
                     _currentUser.value = profile
                 } else {
-                    val autoUsername = "@" + (authDisplayName?.replace(" ", "")?.lowercase()?.take(10) ?: uid.take(6))
+                    val autoUsername = (authDisplayName?.replace(" ", "")?.lowercase()?.take(10) ?: uid.take(6))
                     val newProfile = UserProfile(
                         uid = uid,
                         displayName = authDisplayName ?: "Usuário Citra",
@@ -200,7 +200,7 @@ class AuthRepository(private val context: Context) {
                 _currentUser.value = UserProfile(
                     uid = uid,
                     displayName = authDisplayName ?: "Usuário Citra",
-                    username = "@" + uid.take(6),
+                    username = uid.take(6),
                     photoUrl = defaultPhoto,
                     isPrivate = false,
                     isGuest = false
@@ -273,7 +273,7 @@ class AuthRepository(private val context: Context) {
                 _currentUser.value ?: UserProfile(
                     uid = user.uid,
                     displayName = user.displayName ?: "Usuário Citra",
-                    username = "@" + user.uid.take(6),
+                    username = user.uid.take(6),
                     photoUrl = user.photoUrl?.toString(),
                     isPrivate = false,
                     isGuest = false
@@ -305,7 +305,7 @@ class AuthRepository(private val context: Context) {
             Result.success(_currentUser.value ?: UserProfile(
                 uid = user.uid,
                 displayName = user.displayName ?: "Usuário Citra",
-                username = "@" + user.uid.take(6),
+                username = user.uid.take(6),
                 isPrivate = false,
                 isGuest = false
             ))
@@ -323,8 +323,8 @@ class AuthRepository(private val context: Context) {
         val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
         val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firebase Firestore não está inicializado."))
         return try {
-            val cleanUsername = if (username.startsWith("@")) username.trim() else "@${username.trim()}"
-            val email = "${cleanUsername.removePrefix("@").lowercase()}@citra.app"
+            val cleanUsername = username.trim().removePrefix("@")
+            val email = "${cleanUsername.lowercase()}@citra.app"
             val authResult = currentAuth.createUserWithEmailAndPassword(email, pass).await()
             val user = authResult.user ?: throw IllegalStateException("User null")
 

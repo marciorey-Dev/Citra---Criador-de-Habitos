@@ -26,7 +26,7 @@ object AmbientBreakMusicManager {
     fun onBreakStateChanged(context: Context, isBreak: Boolean) {
         isBreakActive = isBreak
         // The user requested: "no timer quando alguém entrar no modo pausa toca uma música eu quero que essa música não toque mais."
-        if (!isAlwaysPlayingInApp) {
+        if (isBreak && !isAlwaysPlayingInApp) {
             stopPlaying()
         }
     }
@@ -46,7 +46,7 @@ object AmbientBreakMusicManager {
 
     fun onAppForegrounded(context: Context) {
         isAppInBackground = false
-        val shouldPlay = isAlwaysPlayingInApp || (isBreakActive && wasPlayingBeforeBackground)
+        val shouldPlay = isAlwaysPlayingInApp
         if (shouldPlay) {
             if (mediaPlayer != null) {
                 try {

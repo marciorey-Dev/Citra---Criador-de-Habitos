@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Citra</string>
+    <string name="widget_habits_name">Citra Hábitos</string>
+    <string name="widget_habits_desc">Acompanhe seus hábitos e faça check-in rápido direto da tela inicial.</string>
+    <string name="widget_timer_name">Citra Pomodoro</string>
+    <string name="widget_timer_desc">Controle e inicie suas sessões de foco com um toque.</string>
+    <string name="widget_note_preview_name">Citra Nota em Destaque</string>
+    <string name="widget_note_preview_desc">Veja uma prévia dos primeiros parágrafos da sua nota mais recente ou fixada.</string>
+    <string name="widget_notes_list_name">Citra Lista de Notas</string>
+    <string name="widget_notes_list_desc">Miniatura da lista das suas notas recentes com atalho para criar nova nota.</string>
 </resources>

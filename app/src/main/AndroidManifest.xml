@@ -59,6 +59,69 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Citra App Widgets -->
+        <receiver
+            android:name=".widget.CitraHabitsWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_habits_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/citra_habits_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.CitraTimerWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_timer_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/citra_timer_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.CitraNotePreviewWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_note_preview_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/citra_note_preview_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.CitraNotesListWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_notes_list_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/citra_notes_list_widget_info" />
+        </receiver>
+
+        <service
+            android:name=".widget.CitraNotesListWidgetService"
+            android:permission="android.permission.BIND_REMOTEVIEWS"
+            android:exported="false" />
+
+        <receiver
+            android:name=".widget.CitraWidgetActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.citra.TOGGLE_HABIT" />
+                <action android:name="com.example.citra.UPDATE_WIDGETS" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

@@ -102,8 +102,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 enum class NoteEditorMode(val label: String) {
-    LIVE_PREVIEW("Live Preview"),
-    READING("Modo Leitura")
+    LIVE_PREVIEW("Edição"),
+    READING("Leitura")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -243,7 +243,7 @@ fun FullScreenNoteEditor(
 
     LaunchedEffect(showSaveFeedback) {
         if (showSaveFeedback) {
-            kotlinx.coroutines.delay(2000)
+            kotlinx.coroutines.delay(1000)
             showSaveFeedback = false
         }
     }
@@ -732,9 +732,9 @@ fun FullScreenNoteEditor(
                             modifier = Modifier.weight(1f, fill = false)
                         )
 
-                        // Mode selector pill (Toggle strictly between Live Preview & Modo Leitura - Icon only)
+                        // Mode selector pill (Toggle strictly between Edição & Leitura with Pencil & Book icons and text)
                         Surface(
-                            shape = CircleShape,
+                            shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                             modifier = Modifier.clickable {
                                 val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
@@ -745,19 +745,26 @@ fun FullScreenNoteEditor(
                                 switchEditorMode(newMode)
                             }
                         ) {
-                            Box(
-                                modifier = Modifier.padding(6.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
                                     imageVector = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
-                                        Icons.Default.AutoAwesome
+                                        Icons.Default.Edit
                                     } else {
                                         Icons.AutoMirrored.Filled.MenuBook
                                     },
                                     contentDescription = editorMode.label,
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(18.dp),
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = editorMode.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }

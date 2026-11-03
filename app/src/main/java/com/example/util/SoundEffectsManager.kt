@@ -90,9 +90,24 @@ object SoundEffectsManager {
     }
 
     /**
+     * Checks if the device is currently in Silent or Vibrate mode.
+     */
+    fun isDeviceSilentOrVibrate(context: Context): Boolean {
+        return try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            val ringerMode = audioManager?.ringerMode ?: android.media.AudioManager.RINGER_MODE_NORMAL
+            ringerMode == android.media.AudioManager.RINGER_MODE_SILENT || ringerMode == android.media.AudioManager.RINGER_MODE_VIBRATE
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
      * Plays sound immediately (for in-app events like checking in habit or finishing task).
+     * Respects device silent and vibrate states.
      */
     fun playSound(context: Context, resId: Int) {
+        if (isDeviceSilentOrVibrate(context)) return
         try {
             val player = MediaPlayer.create(context, resId)
             player?.setAudioAttributes(
@@ -114,11 +129,15 @@ object SoundEffectsManager {
     }
 
     /**
-     * Dedicated alarm playback engine using USAGE_ALARM.
-     * Guarantees audible playback on the Alarm audio stream even in silent / DND modes.
+     * Dedicated alarm playback engine.
+     * Respects device silent/vibrate modes when user has muted the device.
      */
     @Synchronized
     fun playAlarmAudio(context: Context, soundIdOrUri: String, loop: Boolean = false) {
+        if (isDeviceSilentOrVibrate(context)) {
+            stopAlarmAudio()
+            return
+        }
         try {
             stopAlarmAudio()
             val uri = getSoundUri(context, soundIdOrUri)
@@ -127,7 +146,6 @@ object SoundEffectsManager {
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
                         .build()
                 )
                 setDataSource(context, uri)

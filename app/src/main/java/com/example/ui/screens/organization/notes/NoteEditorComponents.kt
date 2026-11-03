@@ -612,16 +612,7 @@ fun VisualBlockItem(
                             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                     )
 
-                    // Exit code button (hidden in reading mode)
-                    if (showPlaceholder) {
-                        TextButton(
-                            onClick = onEnterPressed,
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.align(Alignment.End)
-                        ) {
-                            Text("Sair do bloco de código ↵", fontSize = 10.sp, color = Color(0xFF38BDF8))
-                        }
-                    }
+
                 }
             }
         }
