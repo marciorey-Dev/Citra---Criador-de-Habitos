@@ -1,7 +1,10 @@
 package com.example.data.auth
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.SharedPreferences
+import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -211,11 +214,27 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    suspend fun signInWithGoogle(): Result<UserProfile> {
+    suspend fun signInWithGoogle(callerContext: Context? = null): Result<UserProfile> {
         val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
         return try {
-            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-            val serverClientId = if (resId != 0) context.getString(resId) else ""
+            val resolvedContext: Context = callerContext ?: context
+            var activity: Activity? = null
+            var tempContext: Context? = resolvedContext
+            while (tempContext is ContextWrapper) {
+                if (tempContext is Activity) {
+                    activity = tempContext
+                    break
+                }
+                tempContext = tempContext.baseContext
+            }
+
+            val targetContext: Context = activity ?: resolvedContext
+            val serverClientId = try {
+                targetContext.getString(R.string.default_web_client_id)
+            } catch (_: Exception) {
+                val resId = targetContext.resources.getIdentifier("default_web_client_id", "string", targetContext.packageName)
+                if (resId != 0) targetContext.getString(resId) else ""
+            }
             if (serverClientId.isBlank() || serverClientId == "default_web_client_id") {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))
             }
@@ -225,7 +244,8 @@ class AuthRepository(private val context: Context) {
                 .addCredentialOption(signInOption)
                 .build()
 
-            val result = credentialManager.getCredential(context, request)
+            val cm = CredentialManager.create(targetContext)
+            val result = cm.getCredential(targetContext, request)
             val credential = result.credential
 
             val idToken: String = when {
@@ -398,6 +418,11 @@ class AuthRepository(private val context: Context) {
 
     fun signOut() {
         auth?.signOut()
+        scope.launch {
+            try {
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+            } catch (_: Exception) {}
+        }
         _isGuestMode.value = false
         prefs.edit().apply {
             putBoolean("is_guest_mode", false)

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.habitcraft.krqpmv"
     minSdk = 24
     targetSdk = 36
-    versionCode = 8
-    versionName = "0.10.3"
+    versionCode = 9
+    versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

@@ -69,7 +69,7 @@ fun WhatsNewDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Citra Versão 0.10.3",
+                    text = "Citra Versão V1.0",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
                     color = MaterialTheme.colorScheme.primary

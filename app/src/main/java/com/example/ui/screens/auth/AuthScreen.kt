@@ -19,8 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import android.util.Log
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -39,6 +42,7 @@ fun AuthScreen(
     onAuthSuccess: () -> Unit,
     onContinueAsGuest: () -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isSignUp by remember { mutableStateOf(false) }
 
@@ -134,12 +138,18 @@ fun AuthScreen(
                     isLoading = true
                     errorMessage = null
                     coroutineScope.launch {
-                        val result = authRepository.signInWithGoogle()
+                        val result = authRepository.signInWithGoogle(context)
                         isLoading = false
                         if (result.isSuccess) {
                             onAuthSuccess()
                         } else {
-                            errorMessage = result.exceptionOrNull()?.localizedMessage ?: "Falha ao entrar com o Google"
+                            val ex = result.exceptionOrNull()
+                            if (ex is GetCredentialCancellationException) {
+                                Log.w("AuthScreen", "Google Sign-In cancelado ou fechado pelo usuário: ${ex.message}")
+                                errorMessage = null
+                            } else {
+                                errorMessage = ex?.localizedMessage ?: "Falha ao entrar com o Google"
+                            }
                         }
                     }
                 },

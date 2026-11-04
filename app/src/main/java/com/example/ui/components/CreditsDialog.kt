@@ -66,7 +66,7 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
-                    text = "Versão 0.7.10 • Foco, Hábitos e Produtividade com Backup na Nuvem",
+                    text = "Versão V1.0 • Foco, Hábitos e Produtividade com Backup na Nuvem",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

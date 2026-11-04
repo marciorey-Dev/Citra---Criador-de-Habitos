@@ -279,7 +279,7 @@ Basta utilizar as barras verticais e a sintaxe markdown convencional. As colunas
 ## 📦 Ficheiro APK
 
 Para instalação e testes diretos no dispositivo, o arquivo compilado está disponível na raiz do repositório:
-- **Ficheiro:** `Citra 0.7.10.1.apk` (ou `Citra 0.7.10.1`)
+- **Ficheiro:** `Citra-V1.0.apk` (V1.0)
 
 ---
 
