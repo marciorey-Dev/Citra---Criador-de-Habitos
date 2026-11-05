@@ -209,13 +209,13 @@ object NotificationHelper {
             // Pre-create initial sound channels & silent fallback channel
             getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound, isAlarmUsage = settings.overrideSilentMode)
             getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound, isAlarmUsage = settings.overrideSilentMode)
-            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Arancia & Conquistas", pomodoroSound, isAlarmUsage = settings.overrideSilentMode)
             getOrCreateSilentChannel(context)
 
             // Low priority channel for ongoing countdown
             val timerOngoingChannel = NotificationChannel(
                 CHANNEL_TIMER_ONGOING,
-                "Contador Pomodoro Ativo",
+                "Contador Arancia Ativo",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Mostra a contagem regressiva enquanto o timer estiver em execução"
@@ -236,7 +236,7 @@ object NotificationHelper {
 
             getOrCreateSoundChannel(context, CHANNEL_TASKS, "Lembretes de Tarefas", taskSound, isAlarmUsage = settings.overrideSilentMode)
             getOrCreateSoundChannel(context, CHANNEL_HABITS, "Lembretes de Hábitos", habitSound, isAlarmUsage = settings.overrideSilentMode)
-            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Pomodoro & Conquistas", pomodoroSound, isAlarmUsage = settings.overrideSilentMode)
+            getOrCreateSoundChannel(context, CHANNEL_ALERTS, "Arancia & Conquistas", pomodoroSound, isAlarmUsage = settings.overrideSilentMode)
             getOrCreateSilentChannel(context)
         }
     }
@@ -283,7 +283,7 @@ object NotificationHelper {
         }
         val channelName = when {
             channelId.contains("habit") -> "Lembretes de Hábitos"
-            channelId.contains("alert") -> "Pomodoro & Conquistas"
+            channelId.contains("alert") -> "Arancia & Conquistas"
             else -> "Lembretes de Tarefas"
         }
 
@@ -407,7 +407,7 @@ object NotificationHelper {
 
         val notification = NotificationCompat.Builder(context, CHANNEL_TIMER_ONGOING)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Pomodoro: $phaseLabel ($timeFormatted)")
+            .setContentTitle("Arancia: $phaseLabel ($timeFormatted)")
             .setContentText("Status: $statusText • Toque para retornar ao app")
             .setOngoing(!isPaused)
             .setAutoCancel(false)

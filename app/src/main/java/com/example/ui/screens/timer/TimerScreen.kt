@@ -1,16 +1,13 @@
 package com.example.ui.screens.timer
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,6 +15,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -26,21 +26,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.MainViewModel
 import com.example.ui.PomodoroPhase
 import com.example.ui.components.AddCategoryDialog
-import com.example.ui.theme.*
+import com.example.ui.theme.RedAction
+import com.example.ui.tutorial.tutorialTarget
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,13 +57,12 @@ fun TimerScreen(
 ) {
     val pomodoroState by viewModel.pomodoroState.collectAsState()
     val categories by viewModel.categories.collectAsState()
-    val tasks by viewModel.tasks.collectAsState()
-    val habits by viewModel.habits.collectAsState()
+    val citraTimerBallsJson by viewModel.citraTimerBallsJson.collectAsState()
     val scrollState = rememberScrollState()
 
     var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
-    var showPauseConfirmDialog by remember { mutableStateOf(false) }
     var showSelectCategoryBeforeStartDialog by remember { mutableStateOf(false) }
     var isCategoryTrashVisible by remember { mutableStateOf(false) }
     var categoryToDelete by remember { mutableStateOf<com.example.data.model.Category?>(null) }
@@ -70,662 +75,867 @@ fun TimerScreen(
         }
     }
 
-    // Presets for quick selection
     val focusPresets = remember { listOf(10, 15, 20, 25, 30, 45, 60, 90, 120) }
     val breakPresets = remember { listOf(5, 10, 15, 20, 25, 30) }
     val cyclePresets = remember { listOf(1, 2, 3, 4, 6, 8, 12) }
 
     val isRunning = pomodoroState.isRunning
+    val isSessionActive = pomodoroState.isRunning || pomodoroState.isPaused
 
-    Column(
+    // Smoothly expand the citrus dial when entering immersive full-screen focus mode
+    val dialScale by animateFloatAsState(
+        targetValue = if (isSessionActive) 1.12f else 1.0f,
+        animationSpec = tween(durationMillis = 450),
+        label = "citrusDialExpand"
+    )
+
+    val selectedCatObj = remember(categories, pomodoroState.selectedCategory) {
+        categories.find { it.name == pomodoroState.selectedCategory }
+    }
+
+    // Progress & time calculation for Timer vs Cronômetro
+    val totalSec = pomodoroState.totalPhaseSeconds.coerceAtLeast(1)
+    val currentProgress = if (pomodoroState.isStopwatchMode) {
+        ((pomodoroState.stopwatchSeconds % 60).toFloat() / 60f).coerceIn(0.04f, 1f)
+    } else {
+        (pomodoroState.remainingSeconds.toFloat() / totalSec.toFloat()).coerceIn(0f, 1f)
+    }
+    val animatedProgress by animateFloatAsState(
+        targetValue = currentProgress,
+        animationSpec = tween(500),
+        label = "citrusPomodoroProgress"
+    )
+
+    val seedCount = 12
+    val visibleSeeds = (seedCount * currentProgress).roundToInt().coerceIn(0, seedCount)
+
+    val displaySeconds = if (pomodoroState.isStopwatchMode) {
+        pomodoroState.stopwatchSeconds
+    } else {
+        pomodoroState.remainingSeconds
+    }
+    val minutes = displaySeconds / 60
+    val seconds = displaySeconds % 60
+    val formattedTime = String.format("%02d:%02d", minutes, seconds)
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        // Phase and Cycle Indicator Header
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (pomodoroState.currentPhase == PomodoroPhase.FOCUS)
-                    MaterialTheme.colorScheme.primaryContainer
-                else GreenContainer
-            ),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = if (pomodoroState.currentPhase == PomodoroPhase.FOCUS) "🎯 Modo Foco" else "☕ Modo Pausa",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 15.sp,
-                        color = if (pomodoroState.currentPhase == PomodoroPhase.FOCUS)
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        else OnGreenContainer
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
-                ) {
-                    Text(
-                        text = "Ciclo ${pomodoroState.currentCycle} de ${pomodoroState.totalCycles}",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // Citrus Countdown Clock
-        val totalSec = pomodoroState.totalPhaseSeconds.coerceAtLeast(1)
-        val currentProgress = (pomodoroState.remainingSeconds.toFloat() / totalSec.toFloat()).coerceIn(0f, 1f)
-        val animatedProgress by animateFloatAsState(
-            targetValue = currentProgress,
-            animationSpec = tween(500),
-            label = "citrusPomodoroProgress"
-        )
-
-        val seedCount = if (pomodoroState.focusMinutes <= 30) 12 else 24
-        val visibleSeeds = (seedCount * currentProgress).roundToInt().coerceIn(0, seedCount)
-
-        val minutes = pomodoroState.remainingSeconds / 60
-        val seconds = pomodoroState.remainingSeconds % 60
-        val formattedTime = String.format("%02d:%02d", minutes, seconds)
-
-        Box(
+        Column(
             modifier = Modifier
-                .size(260.dp)
-                .padding(4.dp),
-            contentAlignment = Alignment.Center
+                .fillMaxSize()
+                .then(if (!isSessionActive) Modifier.verticalScroll(scrollState) else Modifier)
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = if (isSessionActive) Arrangement.Center else Arrangement.Top
         ) {
-            val trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-            val strokeColor = if (pomodoroState.currentPhase == PomodoroPhase.FOCUS)
-                MaterialTheme.colorScheme.primary
-            else GreenAccent
-            val strokeSecondary = if (pomodoroState.currentPhase == PomodoroPhase.FOCUS)
-                RedAction
-            else GreenLight
-
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val peelThickness = 14.dp.toPx()
-                val diameter = size.minDimension - peelThickness
-                val centerOffset = Offset(size.width / 2, size.height / 2)
-                val outerRadius = diameter / 2
-                val topLeft = Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
-                val arcSize = Size(diameter, diameter)
-
-                // 1. Soft citrus pulp background
-                drawCircle(
-                    color = strokeColor.copy(alpha = 0.12f),
-                    radius = outerRadius,
-                    center = centerOffset
-                )
-
-                // 2. Citrus segment membrane lines
-                val segmentCount = 10
-                for (s in 0 until segmentCount) {
-                    val segAngle = Math.toRadians((s * 360.0 / segmentCount) - 90.0)
-                    val segStartX = centerOffset.x + (38.dp.toPx() * kotlin.math.cos(segAngle)).toFloat()
-                    val segStartY = centerOffset.y + (38.dp.toPx() * kotlin.math.sin(segAngle)).toFloat()
-                    val segEndX = centerOffset.x + ((outerRadius - peelThickness) * kotlin.math.cos(segAngle)).toFloat()
-                    val segEndY = centerOffset.y + ((outerRadius - peelThickness) * kotlin.math.sin(segAngle)).toFloat()
-                    drawLine(
-                        color = strokeColor.copy(alpha = 0.22f),
-                        start = Offset(segStartX, segStartY),
-                        end = Offset(segEndX, segEndY),
-                        strokeWidth = 1.5.dp.toPx()
-                    )
-                }
-
-                // 3. Inner pith rim
-                drawCircle(
-                    color = Color(0xFFFFD180).copy(alpha = 0.5f),
-                    radius = outerRadius - peelThickness + 1.dp.toPx(),
-                    center = centerOffset,
-                    style = Stroke(width = 2.dp.toPx())
-                )
-
-                // 4. Background rind track
-                drawArc(
-                    color = trackColor,
-                    startAngle = 0f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = peelThickness, cap = StrokeCap.Round)
-                )
-
-                // 5. Active Citrus Peel progress arc
-                val sweepAngle = animatedProgress * 360f
-                drawArc(
-                    brush = Brush.sweepGradient(listOf(strokeColor, strokeSecondary, strokeColor)),
-                    startAngle = -90f,
-                    sweepAngle = sweepAngle,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = peelThickness, cap = StrokeCap.Round)
-                )
-
-                // 6. Analog Citrus Seeds disappearing clockwise
-                val seedRadius = outerRadius - peelThickness - 18.dp.toPx()
-                for (i in 0 until seedCount) {
-                    if (i < visibleSeeds) {
-                        val angleDeg = (i * 360.0 / seedCount) - 90.0
-                        val angleRad = Math.toRadians(angleDeg)
-                        val sx = centerOffset.x + (seedRadius * kotlin.math.cos(angleRad)).toFloat()
-                        val sy = centerOffset.y + (seedRadius * kotlin.math.sin(angleRad)).toFloat()
-
-                        rotate(degrees = angleDeg.toFloat() + 90f, pivot = Offset(sx, sy)) {
-                            drawOval(
-                                color = Color(0xFFFFF9C4),
-                                topLeft = Offset(sx - 3.5.dp.toPx(), sy - 6.5.dp.toPx()),
-                                size = Size(7.dp.toPx(), 13.dp.toPx())
+            // 1. IDLE TOP BANNER + OPTIONAL SETTINGS ICON (Fades out when active)
+            AnimatedVisibility(
+                visible = !isSessionActive,
+                enter = fadeIn(tween(350)),
+                exit = fadeOut(tween(280))
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = if (pomodoroState.currentPhase == PomodoroPhase.BREAK && !pomodoroState.isStopwatchMode) {
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                    } else {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                            RoundedCornerShape(24.dp)
+                        )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = when {
+                                    pomodoroState.isStopwatchMode -> "⏱️"
+                                    pomodoroState.currentPhase == PomodoroPhase.BREAK -> "☕"
+                                    else -> "🎯"
+                                },
+                                fontSize = 18.sp
                             )
-                            drawOval(
-                                color = strokeColor,
-                                topLeft = Offset(sx - 3.5.dp.toPx(), sy - 6.5.dp.toPx()),
-                                size = Size(7.dp.toPx(), 13.dp.toPx()),
-                                style = Stroke(width = 1.2.dp.toPx())
+                            Text(
+                                text = when {
+                                    pomodoroState.isStopwatchMode -> "Modo Cronômetro"
+                                    pomodoroState.currentPhase == PomodoroPhase.BREAK -> "Pausa Opcional"
+                                    else -> "Modo Foco"
+                                },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.5.sp,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (pomodoroState.currentPhase == PomodoroPhase.BREAK && !pomodoroState.isStopwatchMode) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable { viewModel.skipOptionalBreak() }
+                                ) {
+                                    Text(
+                                        text = "Pular",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            } else {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                                ) {
+                                    Text(
+                                        text = if (pomodoroState.isStopwatchMode) {
+                                            "Sem ciclos"
+                                        } else {
+                                            "Ciclo ${pomodoroState.currentCycle} de ${pomodoroState.totalCycles}"
+                                        },
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+
+                            // Hidden optional settings icon button
+                            if (!pomodoroState.isStopwatchMode) {
+                                IconButton(
+                                    onClick = { showSettingsSheet = true },
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), CircleShape)
+                                        .tutorialTarget("timer_settings_btn")
+                                        .testTag("pomodoro_optional_settings_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tune,
+                                        contentDescription = "Definições da sessão",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-
-                // 7. Core circle
-                drawCircle(
-                    color = strokeColor.copy(alpha = 0.25f),
-                    radius = 36.dp.toPx(),
-                    center = centerOffset
-                )
             }
 
-            // Digital Time Display at center: touch directly to adjust dynamically (no pencil icon, no modal window)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (isEditingTimeInline && !isRunning) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        IconButton(
-                            onClick = {
-                                val currentM = inlineMinutesText.toIntOrNull() ?: pomodoroState.focusMinutes
-                                val newM = (currentM - 5).coerceAtLeast(1)
-                                inlineMinutesText = newM.toString()
-                                viewModel.setFocusDuration(newM)
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "Diminuir 5 min", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                        }
-
-                        BasicTextField(
-                            value = inlineMinutesText,
-                            onValueChange = { newVal ->
-                                val digits = newVal.filter { it.isDigit() }.take(3)
-                                inlineMinutesText = digits
-                                val m = digits.toIntOrNull()
-                                if (m != null && m in 1..240) {
-                                    viewModel.setFocusDuration(m)
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = {
-                                isEditingTimeInline = false
-                            }),
-                            textStyle = MaterialTheme.typography.headlineLarge.copy(
-                                fontSize = 42.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.primary,
-                                textAlign = TextAlign.Center
-                            ),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.widthIn(min = 55.dp, max = 95.dp)
+            // 2. IMMERSIVE CATEGORY TAG ABOVE DIAL (Fades in when active)
+            AnimatedVisibility(
+                visible = isSessionActive,
+                enter = fadeIn(tween(400)),
+                exit = fadeOut(tween(250))
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .padding(bottom = 28.dp)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                            CircleShape
                         )
-
-                        IconButton(
-                            onClick = {
-                                val currentM = inlineMinutesText.toIntOrNull() ?: pomodoroState.focusMinutes
-                                val newM = (currentM + 5).coerceAtMost(240)
-                                inlineMinutesText = newM.toString()
-                                viewModel.setFocusDuration(newM)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = selectedCatObj?.emoji ?: if (pomodoroState.isStopwatchMode) "⏱️" else "🎯",
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = pomodoroState.selectedCategory.ifBlank {
+                                if (pomodoroState.isStopwatchMode) "Cronômetro" else "Foco"
                             },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Aumentar 5 min", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+
+            if (!isSessionActive) {
+                Spacer(modifier = Modifier.height(22.dp))
+            }
+
+            // 3. CITRUS DIAL (Expands slightly when active)
+            Box(
+                modifier = Modifier
+                    .size(276.dp)
+                    .scale(dialScale)
+                    .tutorialTarget("timer_circle_display")
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val trackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                val strokeColor = if (pomodoroState.currentPhase == PomodoroPhase.BREAK && !pomodoroState.isStopwatchMode) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
+                val strokeSecondary = MaterialTheme.colorScheme.tertiary
+
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val peelThickness = 14.dp.toPx()
+                    val diameter = size.minDimension - peelThickness
+                    val centerOffset = Offset(size.width / 2, size.height / 2)
+                    val outerRadius = diameter / 2
+                    val topLeft = Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
+                    val arcSize = Size(diameter, diameter)
+
+                    // Soft citrus pulp background
+                    drawCircle(
+                        color = strokeColor.copy(alpha = 0.10f),
+                        radius = outerRadius,
+                        center = centerOffset
+                    )
+
+                    // 12 Citrus segment membrane lines
+                    val segmentCount = 12
+                    for (s in 0 until segmentCount) {
+                        val segAngle = Math.toRadians((s * 360.0 / segmentCount) - 90.0)
+                        val segStartX = centerOffset.x + (40.dp.toPx() * kotlin.math.cos(segAngle)).toFloat()
+                        val segStartY = centerOffset.y + (40.dp.toPx() * kotlin.math.sin(segAngle)).toFloat()
+                        val segEndX = centerOffset.x + ((outerRadius - peelThickness) * kotlin.math.cos(segAngle)).toFloat()
+                        val segEndY = centerOffset.y + ((outerRadius - peelThickness) * kotlin.math.sin(segAngle)).toFloat()
+                        drawLine(
+                            color = strokeColor.copy(alpha = 0.20f),
+                            start = Offset(segStartX, segStartY),
+                            end = Offset(segEndX, segEndY),
+                            strokeWidth = 1.4.dp.toPx()
+                        )
+                    }
+
+                    // Inner pith rim
+                    drawCircle(
+                        color = strokeSecondary.copy(alpha = 0.35f),
+                        radius = outerRadius - peelThickness + 1.dp.toPx(),
+                        center = centerOffset,
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+
+                    // Background rind track
+                    drawArc(
+                        color = trackColor,
+                        startAngle = 0f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = peelThickness, cap = StrokeCap.Round)
+                    )
+
+                    // Active Citrus Peel progress arc
+                    val sweepAngle = animatedProgress * 360f
+                    drawArc(
+                        brush = Brush.sweepGradient(listOf(strokeColor, strokeSecondary, strokeColor)),
+                        startAngle = -90f,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = peelThickness, cap = StrokeCap.Round)
+                    )
+
+                    // 12 Analog Citrus Seeds
+                    val seedRadius = outerRadius - peelThickness - 18.dp.toPx()
+                    for (i in 0 until seedCount) {
+                        if (i < visibleSeeds) {
+                            val angleDeg = (i * 360.0 / seedCount) - 90.0
+                            val angleRad = Math.toRadians(angleDeg)
+                            val sx = centerOffset.x + (seedRadius * kotlin.math.cos(angleRad)).toFloat()
+                            val sy = centerOffset.y + (seedRadius * kotlin.math.sin(angleRad)).toFloat()
+
+                            rotate(degrees = angleDeg.toFloat() + 90f, pivot = Offset(sx, sy)) {
+                                drawOval(
+                                    color = strokeSecondary.copy(alpha = 0.25f),
+                                    topLeft = Offset(sx - 3.5.dp.toPx(), sy - 6.5.dp.toPx()),
+                                    size = Size(7.dp.toPx(), 13.dp.toPx())
+                                )
+                                drawOval(
+                                    color = strokeColor,
+                                    topLeft = Offset(sx - 3.5.dp.toPx(), sy - 6.5.dp.toPx()),
+                                    size = Size(7.dp.toPx(), 13.dp.toPx()),
+                                    style = Stroke(width = 1.4.dp.toPx())
+                                )
+                            }
                         }
                     }
 
-                    Text(
-                        text = "min • Toque para confirmar ✓",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .clickable { isEditingTimeInline = false }
-                            .padding(vertical = 1.dp)
+                    // Core circle
+                    drawCircle(
+                        color = strokeColor.copy(alpha = 0.20f),
+                        radius = 38.dp.toPx(),
+                        center = centerOffset
                     )
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable(enabled = !isRunning) {
-                                inlineMinutesText = (pomodoroState.remainingSeconds / 60).coerceAtLeast(1).toString()
-                                isEditingTimeInline = true
-                            }
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
+                }
+
+                // Digital Time Display at center
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isEditingTimeInline && !isSessionActive && !pomodoroState.isStopwatchMode) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            BasicTextField(
+                                value = inlineMinutesText,
+                                onValueChange = { input ->
+                                    val digits = input.filter { it.isDigit() }.take(3)
+                                    inlineMinutesText = digits
+                                    val parsed = digits.toIntOrNull()
+                                    if (parsed != null && parsed in 1..180) {
+                                        viewModel.setFocusDuration(parsed)
+                                    }
+                                },
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 44.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    textAlign = TextAlign.Center
+                                ),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        val finalM = (inlineMinutesText.toIntOrNull() ?: pomodoroState.focusMinutes).coerceIn(1, 180)
+                                        viewModel.setFocusDuration(finalM)
+                                        inlineMinutesText = finalM.toString()
+                                        isEditingTimeInline = false
+                                    }
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.widthIn(min = 64.dp, max = 104.dp)
+                            )
+                            Text(
+                                text = "m",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
                         Text(
                             text = formattedTime,
-                            fontSize = 42.sp,
+                            fontSize = 48.sp,
                             fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-1).sp,
                             color = MaterialTheme.colorScheme.onSurface,
-                            letterSpacing = 1.sp
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(enabled = !isSessionActive && !pomodoroState.isStopwatchMode) {
+                                    inlineMinutesText = (pomodoroState.remainingSeconds / 60).coerceAtLeast(1).toString()
+                                    isEditingTimeInline = true
+                                }
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Surface(
+                        shape = CircleShape,
+                        color = if (pomodoroState.isRunning) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+                        }
+                    ) {
+                        Text(
+                            text = when {
+                                pomodoroState.isRunning && pomodoroState.isStopwatchMode -> "Contando..."
+                                pomodoroState.isRunning -> "Focando..."
+                                pomodoroState.isPaused -> "Pausado"
+                                pomodoroState.currentPhase == PomodoroPhase.BREAK -> "Pausa opcional"
+                                else -> "Pronto"
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (pomodoroState.isRunning) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (pomodoroState.isRunning) GreenContainer else MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    Text(
-                        text = if (pomodoroState.isRunning) "Em andamento" else if (pomodoroState.isPaused) "Pausado" else "Pronto",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (pomodoroState.isRunning) OnGreenContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
             }
-        }
 
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "🍊 Dial cítrico • $visibleSeeds/$seedCount sementes ativas",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-        )
-
-        Spacer(modifier = Modifier.height(18.dp))
-
-        // Main Controls: Only Reset and Play/Pause
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = {
-                    val isActive = pomodoroState.isRunning || pomodoroState.isPaused ||
-                            pomodoroState.remainingSeconds < pomodoroState.totalPhaseSeconds
-                    if (isActive) {
-                        showResetConfirmDialog = true
-                    } else {
-                        viewModel.resetPomodoro()
-                    }
-                },
-                modifier = Modifier
-                    .size(54.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                    .testTag("pomodoro_reset_button")
+            // 4. IDLE SUBTITLE & 3-BUTTON CONTROLS (Reset | Play | Cronômetro/Timer)
+            AnimatedVisibility(
+                visible = !isSessionActive,
+                enter = fadeIn(tween(350)),
+                exit = fadeOut(tween(280))
             ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Reiniciar",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(32.dp))
-
-            Button(
-                onClick = {
-                    if (pomodoroState.isRunning) {
-                        showPauseConfirmDialog = true
-                    } else {
-                        if (pomodoroState.selectedCategory.isBlank()) {
-                            showSelectCategoryBeforeStartDialog = true
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = if (pomodoroState.isStopwatchMode) {
+                            "⏱️ Cronômetro livre • Sobe até pausar"
                         } else {
-                            viewModel.toggleStartPausePomodoro()
+                            "🍊 Dial cítrico • $visibleSeeds/$seedCount sementes ativas"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(22.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left: Reset Button
+                        IconButton(
+                            onClick = { viewModel.resetPomodoro() },
+                            modifier = Modifier
+                                .size(58.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
+                                .testTag("pomodoro_reset_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Reiniciar",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(26.dp))
+
+                        // Center: Primary Play Button
+                        Button(
+                            onClick = {
+                                if (pomodoroState.selectedCategory.isBlank()) {
+                                    showSelectCategoryBeforeStartDialog = true
+                                } else {
+                                    viewModel.toggleStartPausePomodoro()
+                                }
+                            },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp),
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier
+                                .size(84.dp)
+                                .testTag("pomodoro_play_pause_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Iniciar",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(44.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(26.dp))
+
+                        // Right: Cronômetro / Timer Mode Toggle Button
+                        IconButton(
+                            onClick = { viewModel.toggleStopwatchMode() },
+                            modifier = Modifier
+                                .size(58.dp)
+                                .background(
+                                    color = if (pomodoroState.isStopwatchMode) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                                    },
+                                    shape = CircleShape
+                                )
+                                .border(
+                                    width = if (pomodoroState.isStopwatchMode) 1.5.dp else 0.dp,
+                                    color = if (pomodoroState.isStopwatchMode) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        Color.Transparent
+                                    },
+                                    shape = CircleShape
+                                )
+                                .tutorialTarget("timer_mode_toggle")
+                                .testTag("pomodoro_stopwatch_toggle_btn")
+                        ) {
+                            Icon(
+                                imageVector = if (pomodoroState.isStopwatchMode) {
+                                    Icons.Default.HourglassBottom
+                                } else {
+                                    Icons.Default.Timer
+                                },
+                                contentDescription = if (pomodoroState.isStopwatchMode) {
+                                    "Voltar para Timer"
+                                } else {
+                                    "Mudar para Cronômetro"
+                                },
+                                tint = if (pomodoroState.isStopwatchMode) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(26.dp)
+                            )
                         }
                     }
-                },
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (pomodoroState.isRunning) RedAction else MaterialTheme.colorScheme.primary
-                ),
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier
-                    .size(80.dp)
-                    .testTag("pomodoro_play_pause_button")
-            ) {
-                Icon(
-                    imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (pomodoroState.isRunning) "Pausar" else "Iniciar",
-                    tint = Color.White,
-                    modifier = Modifier.size(42.dp)
-                )
-            }
-        }
 
-        // Running hint
-        if (isRunning) {
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = "⏸️ Pause ou reinicie para alterar as configurações do timer",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium
-            )
-        }
+                    Spacer(modifier = Modifier.height(24.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // 1. CATEGORIA (Posicionada logo abaixo do timer conforme solicitado)
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Categoria",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        if (pomodoroState.selectedCategory.isNotBlank()) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer
+                    // Category Selector Card
+                    Card(
+                        shape = RoundedCornerShape(24.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                RoundedCornerShape(24.dp)
+                            )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = pomodoroState.selectedCategory,
-                                    fontSize = 11.sp,
+                                    text = "Categoria",
+                                    fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                            }
-                        }
-                    }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isCategoryTrashVisible) {
-                            IconButton(
-                                onClick = { isCategoryTrashVisible = false },
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(RedAction.copy(alpha = 0.15f), CircleShape)
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Lixeira de Categorias",
-                                    tint = RedAction,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                        }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isCategoryTrashVisible) {
+                                        TextButton(
+                                            onClick = { isCategoryTrashVisible = false },
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                        ) {
+                                            Text("Concluir", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    } else {
+                                        TextButton(
+                                            onClick = { isCategoryTrashVisible = true },
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                        ) {
+                                            Text(
+                                                "Gerenciar",
+                                                fontSize = 11.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
 
-                        TextButton(
-                            onClick = { showAddCategoryDialog = true },
-                            enabled = !isRunning,
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Nova", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(categories) { cat ->
-                        val isSelected = pomodoroState.selectedCategory == cat.name
-                        InputChip(
-                            selected = isSelected,
-                            onClick = { if (!isRunning) viewModel.setPomodoroCategory(cat.name) },
-                            enabled = !isRunning,
-                            label = { Text(cat.name, fontSize = 12.sp) },
-                            leadingIcon = { Text(cat.emoji, fontSize = 14.sp) },
-                            trailingIcon = if (isCategoryTrashVisible) {
-                                {
-                                    IconButton(
-                                        onClick = { categoryToDelete = cat },
-                                        modifier = Modifier.size(20.dp)
+                                    TextButton(
+                                        onClick = { showAddCategoryDialog = true },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
                                     ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Remover", tint = RedAction, modifier = Modifier.size(14.dp))
+                                        Icon(
+                                            Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Text(
+                                            "Nova",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
                                 }
-                            } else null
-                        )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(categories, key = { it.name }) { cat ->
+                                    val isSelected = pomodoroState.selectedCategory == cat.name
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = if (isSelected) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                        },
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .border(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                                },
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                            .clickable { viewModel.setPomodoroCategory(cat.name) }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(cat.emoji, fontSize = 15.sp)
+                                            Text(
+                                                text = cat.name,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                color = if (isSelected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurface
+                                                }
+                                            )
+                                            if (isCategoryTrashVisible) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Remover",
+                                                    tint = RedAction,
+                                                    modifier = Modifier
+                                                        .size(16.dp)
+                                                        .clickable { categoryToDelete = cat }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+            }
 
+            // 5. IMMERSIVE ACTIVE CONTROLS: ONLY PAUSE/RESUME & INTERROMPER
+            AnimatedVisibility(
+                visible = isSessionActive,
+                enter = fadeIn(tween(400)),
+                exit = fadeOut(tween(250))
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(top = 42.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (pomodoroState.selectedCategory.isBlank()) "⚠️ Nenhuma categoria definida" else "Selecione a categoria para pontuar o foco",
-                        fontSize = 11.sp,
-                        color = if (pomodoroState.selectedCategory.isBlank()) RedAction else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TextButton(
-                        onClick = { isCategoryTrashVisible = !isCategoryTrashVisible },
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                    // Pause / Resume Button
+                    Button(
+                        onClick = { viewModel.toggleStartPausePomodoro() },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+                        modifier = Modifier
+                            .height(54.dp)
+                            .testTag("pomodoro_play_pause_button")
                     ) {
-                        Text(if (isCategoryTrashVisible) "Concluir" else "Gerenciar", fontSize = 11.sp)
+                        Icon(
+                            imageVector = if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (isRunning) "Pausar" else "Retomar",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isRunning) "Pausar" else "Retomar",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+
+                    // Interromper (Stop) Button
+                    OutlinedButton(
+                        onClick = { showResetConfirmDialog = true },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = RedAction
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.5.dp,
+                            RedAction.copy(alpha = 0.5f)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                        modifier = Modifier
+                            .height(54.dp)
+                            .testTag("pomodoro_interrupt_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = "Interromper",
+                            tint = RedAction,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Interromper",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RedAction
+                        )
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        if (!pomodoroState.isStopwatchMode) {
+            CitraPhysicsOverlay(
+                ballsJson = citraTimerBallsJson,
+                onBallsChanged = { viewModel.saveTimerCitraBallsJson(it) }
+            )
+        }
+    }
 
-        // 2. CONFIGURAÇÃO DA SESSÃO: PRESETS RÁPIDOS
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.fillMaxWidth()
+    // Optional Session Settings Bottom Sheet (Focus Duration, Optional Break, Cycles)
+    if (showSettingsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSettingsSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Configuração da Sessão",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "⏱️ Ajuste Rápido",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+                Text(
+                    text = "Definições da Sessão",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
 
-                // 1. Tempo de Foco
-                Column {
+                // Tempo de Foco
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Text("Tempo de Foco", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            text = "Tempo de Foco",
+                            "${pomodoroState.focusMinutes} min",
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Text(
-                                text = "${pomodoroState.focusMinutes} min",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(focusPresets) { mins ->
-                            val isSelected = pomodoroState.focusMinutes == mins
                             FilterChip(
-                                selected = isSelected,
-                                onClick = { if (!isRunning) viewModel.setFocusDuration(mins) },
-                                enabled = !isRunning,
+                                selected = pomodoroState.focusMinutes == mins,
+                                onClick = { viewModel.setFocusDuration(mins) },
                                 label = { Text("${mins}m", fontSize = 12.sp) }
                             )
                         }
                     }
                 }
 
-                // 2. Tempo de Pausa
-                Column {
+                // Tempo de Pausa (Opcional)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Text("Pausa (Opcional)", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            text = "Tempo de Pausa",
+                            "${pomodoroState.breakMinutes} min",
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
                         )
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = GreenContainer
-                        ) {
-                            Text(
-                                text = "${pomodoroState.breakMinutes} min",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = OnGreenContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(breakPresets) { mins ->
-                            val isSelected = pomodoroState.breakMinutes == mins
                             FilterChip(
-                                selected = isSelected,
-                                onClick = { if (!isRunning) viewModel.setBreakDuration(mins) },
-                                enabled = !isRunning,
+                                selected = pomodoroState.breakMinutes == mins,
+                                onClick = { viewModel.setBreakDuration(mins) },
                                 label = { Text("${mins}m", fontSize = 12.sp) }
                             )
                         }
                     }
                 }
 
-                // 3. Ciclos de Repetição
-                Column {
+                // Ciclos de Repetição
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Text("Ciclos de Repetição", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            text = "Ciclos de Repetição",
+                            "${pomodoroState.totalCycles}x",
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = "${pomodoroState.totalCycles}x",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(cyclePresets) { cycles ->
-                            val isSelected = pomodoroState.totalCycles == cycles
                             FilterChip(
-                                selected = isSelected,
-                                onClick = { if (!isRunning) viewModel.setTotalCycles(cycles) },
-                                enabled = !isRunning,
+                                selected = pomodoroState.totalCycles == cycles,
+                                onClick = { viewModel.setTotalCycles(cycles) },
                                 label = { Text("${cycles}x", fontSize = 12.sp) }
                             )
                         }
                     }
                 }
+
+                Button(
+                    onClick = { showSettingsSheet = false },
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Concluir", fontWeight = FontWeight.Bold)
+                }
             }
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
     }
 
     if (showAddCategoryDialog) {
@@ -738,76 +948,29 @@ fun TimerScreen(
         )
     }
 
-    // Modal Empático para Pausar Sessão
-    if (showPauseConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showPauseConfirmDialog = false },
-            icon = { Text("🌿", fontSize = 34.sp) },
-            title = {
-                Text(
-                    text = "Pausa Consciente",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            },
-            text = {
-                Text(
-                    text = "Respire fundo! Pausas conscientes renovam o foco. Descanse um pouco e volte quando estiver pronto.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            },
-            confirmButton = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            showPauseConfirmDialog = false
-                            viewModel.toggleStartPausePomodoro()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = RedAction),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Pausar Sessão", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                    OutlinedButton(
-                        onClick = { showPauseConfirmDialog = false },
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Continuar Focado")
-                    }
-                }
-            }
-        )
-    }
-
-    // Confirmação de Reinício com Botões Centralizados Esticados
+    // Confirm Interromper (Stop & Reset)
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
             icon = { Text("🍊", fontSize = 32.sp) },
             title = {
                 Text(
-                    text = "Interromper Sessão de Foco?",
+                    text = if (pomodoroState.isStopwatchMode) "Encerrar Cronômetro?" else "Interromper Sessão?",
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = TextAlign.Center
                 )
             },
             text = {
                 Text(
-                    text = "Tem a certeza que deseja interromper agora? Você estava indo tão bem... Seu foco é muito valioso! Deseja mesmo pausar e zerar esta sessão?",
+                    text = if (pomodoroState.isStopwatchMode) {
+                        "Deseja parar e zerar o cronômetro atual?"
+                    } else {
+                        "Deseja mesmo interromper e zerar esta sessão de foco?"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = TextAlign.Center
                 )
             },
             confirmButton = {
@@ -823,7 +986,7 @@ fun TimerScreen(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Continuar Focado", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Continuar", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(
                         onClick = {
@@ -833,51 +996,38 @@ fun TimerScreen(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Interromper Mesmo", color = RedAction)
+                        Text("Interromper", color = RedAction, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         )
     }
 
-    // Exigência de Categoria Antes de Começar o Timer com Aviso
+    // Select Category Before Starting
     if (showSelectCategoryBeforeStartDialog) {
         AlertDialog(
             onDismissRequest = { showSelectCategoryBeforeStartDialog = false },
             icon = { Text("🎯", fontSize = 32.sp) },
             title = {
                 Text(
-                    text = "Defina a Categoria do Foco",
+                    text = "Defina a Categoria",
                     fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium
                 )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFFFFFBEB),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚠️", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Lembre-se: sempre defina a categoria antes de usar o timer para registrar suas estatísticas corretamente.",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFF78350F),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    Text("Toque em uma categoria para iniciar imediatamente:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Toque em uma categoria para iniciar imediatamente:",
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(categories) { cat ->
+                        items(categories, key = { it.name }) { cat ->
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant,
@@ -908,7 +1058,6 @@ fun TimerScreen(
         )
     }
 
-    // Exclusão de Categoria
     if (categoryToDelete != null) {
         AlertDialog(
             onDismissRequest = { categoryToDelete = null },
@@ -934,7 +1083,6 @@ fun TimerScreen(
         )
     }
 
-    // Session Completed Dialog
     if (pomodoroState.showCycleCompletedDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.dismissCycleCompletedDialog() },
@@ -947,7 +1095,7 @@ fun TimerScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Continuar", color = Color.White)
+                    Text("Continuar", color = MaterialTheme.colorScheme.onPrimary)
                 }
             }
         )

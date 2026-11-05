@@ -180,6 +180,13 @@ class MainActivity : ComponentActivity() {
             }
 
             CitraTheme(darkTheme = effectiveDark, accent = themeAccent) {
+                // Save any open note immediately before showing the 00:00 alarm screen
+                LaunchedEffect(activeAlarm) {
+                    if (activeAlarm != null && isNoteEditorOpen) {
+                        com.example.ui.screens.organization.notes.NoteEditorSaveBridge.requestSave()
+                    }
+                }
+
                 // If active alarm loop is ringing, display AlarmScreen immediately
                 activeAlarm?.let { currentAlarm ->
                     AlarmScreen(
@@ -208,6 +215,7 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(Unit) {
                     viewModel.performStartupFolderScan()
+                    viewModel.runDueFinanceLinksOnStartup()
                 }
 
                 // Organic Loading Screen: Wait until auth state and resources are resolved
@@ -228,8 +236,9 @@ class MainActivity : ComponentActivity() {
 
                 val snackbarHostState = remember { SnackbarHostState() }
                 val coroutineScope = rememberCoroutineScope()
+                val financesEnabled by viewModel.financesEnabled.collectAsState()
 
-                val screens = remember { Screen.allScreens }
+                val screens = remember(financesEnabled) { Screen.screensFor(financesEnabled) }
 
                 // Initial page based on defaultStartTab preference
                 val initialPageIndex = remember(defaultStartTab) {
@@ -305,18 +314,42 @@ class MainActivity : ComponentActivity() {
                 var processedAppBgBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
 
                 LaunchedEffect(appBgUri, appBgBlur) {
-                    if (!appBgUri.isNullOrBlank()) {
+                    val uriStr = appBgUri
+                    if (!uriStr.isNullOrBlank()) {
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             try {
-                                val stream = com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, appBgUri!!)
-                                val original = stream?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                val boundsOpts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                val localFile = java.io.File(uriStr)
+                                if (localFile.exists()) {
+                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, boundsOpts)
+                                } else {
+                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
+                                        android.graphics.BitmapFactory.decodeStream(it, null, boundsOpts)
+                                    }
+                                }
+                                var sampleSize = 1
+                                val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
+                                while (maxDim / sampleSize > 1080) {
+                                    sampleSize *= 2
+                                }
+                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
+                                    inSampleSize = sampleSize
+                                    inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                                }
+                                val original = if (localFile.exists()) {
+                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, decodeOpts)
+                                } else {
+                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
+                                        android.graphics.BitmapFactory.decodeStream(it, null, decodeOpts)
+                                    }
+                                }
                                 if (original != null) {
-                                    val radius = (appBgBlur * 24).toInt().coerceAtLeast(0)
+                                    val radius = (appBgBlur * 20).toInt().coerceAtLeast(0)
                                     processedAppBgBitmap = if (radius > 0) com.example.util.FastBlur.blur(original, radius) else original
                                 } else {
                                     processedAppBgBitmap = null
                                 }
-                            } catch (_: Exception) {
+                            } catch (_: Throwable) {
                                 processedAppBgBitmap = null
                             }
                         }
@@ -349,9 +382,10 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Auto-sync according to configured frequency (Default daily, or 1h, weekly, on app open)
-                LaunchedEffect(currentUser?.uid, syncFrequency) {
+                val syncEnabled by viewModel.syncEnabled.collectAsState()
+                LaunchedEffect(currentUser?.uid, syncFrequency, syncEnabled) {
                     val user = currentUser
-                    if (user != null && !user.isGuest) {
+                    if (syncEnabled && user != null && !user.isGuest) {
                         val now = System.currentTimeMillis()
                         val shouldSync = when (syncFrequency) {
                             "ON_APP_OPEN" -> true
@@ -398,18 +432,21 @@ class MainActivity : ComponentActivity() {
                 val organizationSubTab by viewModel.organizationSubTab.collectAsState()
 
                 // Trigger guided tutorial when entering each area for the first time
-                LaunchedEffect(pagerState.currentPage, organizationSubTab) {
-                    when (pagerState.currentPage) {
-                        0 -> viewModel.startTutorial(CitraTutorialArea.HOME)
-                        2 -> {
+                LaunchedEffect(pagerState.currentPage, organizationSubTab, screens) {
+                    when (screens.getOrNull(pagerState.currentPage)) {
+                        Screen.Home -> viewModel.startTutorial(CitraTutorialArea.HOME)
+                        Screen.Timer -> viewModel.startTutorial(CitraTutorialArea.TIMER)
+                        Screen.Organization -> {
                             if (organizationSubTab == 0) {
                                 viewModel.startTutorial(CitraTutorialArea.TASKS)
                             } else if (organizationSubTab == 1) {
                                 viewModel.startTutorial(CitraTutorialArea.HABITS)
                             }
                         }
-                        3 -> viewModel.startTutorial(CitraTutorialArea.NOTES)
-                        4 -> viewModel.startTutorial(CitraTutorialArea.STATS)
+                        Screen.Notes -> viewModel.startTutorial(CitraTutorialArea.NOTES)
+                        Screen.Finances -> if (financesEnabled) viewModel.startTutorial(CitraTutorialArea.FINANCES)
+                        Screen.Profile -> viewModel.startTutorial(CitraTutorialArea.STATS)
+                        else -> {}
                     }
                 }
 
@@ -418,7 +455,9 @@ class MainActivity : ComponentActivity() {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
-                        if (!isNoteEditorOpen) {
+                        val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
+                                screens[pagerState.currentPage] == Screen.Timer
+                        if (!isNoteEditorOpen && !isTimerImmersive) {
                             TopAppBar(
                                 navigationIcon = {
                                     if (screens[pagerState.currentPage] == Screen.Home) {
@@ -445,8 +484,9 @@ class MainActivity : ComponentActivity() {
                                                 )
                                                 if (isTimerActive) {
                                                     Spacer(modifier = Modifier.width(8.dp))
-                                                    val mins = pomodoroState.remainingSeconds / 60
-                                                    val secs = pomodoroState.remainingSeconds % 60
+                                                    val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
+                                                    val mins = displaySec / 60
+                                                    val secs = displaySec % 60
                                                     val formatted = String.format("%02d:%02d", mins, secs)
 
                                                     Surface(
@@ -489,8 +529,9 @@ class MainActivity : ComponentActivity() {
                                         ) {
                                             // Floating Top Mini-timer counter when timer is active outside the Timer tab
                                             if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
-                                                val mins = pomodoroState.remainingSeconds / 60
-                                                val secs = pomodoroState.remainingSeconds % 60
+                                                val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
+                                                val mins = displaySec / 60
+                                                val secs = displaySec % 60
                                                 val formatted = String.format("%02d:%02d", mins, secs)
 
                                                 Surface(
@@ -691,7 +732,9 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 bottomBar = {
-                    if (!isNoteEditorOpen) {
+                    val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
+                            screens[pagerState.currentPage] == Screen.Timer
+                    if (!isNoteEditorOpen && !isTimerImmersive) {
                         NavigationBar(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MaterialTheme.colorScheme.primary,
@@ -829,6 +872,10 @@ class MainActivity : ComponentActivity() {
                                     coroutineScope.launch { pagerState.scrollToPage(1) }
                                 }
                             )
+                            Screen.Finances -> com.example.ui.screens.finances.FinancesScreen(
+                                viewModel = viewModel,
+                                onOpenFinanceSettings = { showSettingsDialog = true }
+                            )
                         }
                     }
                 }
@@ -873,6 +920,31 @@ class MainActivity : ComponentActivity() {
 
                 if (showCreditsDialog) {
                     CreditsDialog(onDismiss = { showCreditsDialog = false })
+                }
+
+                val pendingCloudFinanceRestoreJson by viewModel.pendingCloudFinanceRestoreJson.collectAsState()
+                if (pendingCloudFinanceRestoreJson != null) {
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissCloudFinanceRestore() },
+                        icon = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                        title = { Text("Restaurar os dados da nuvem?", fontWeight = FontWeight.Bold) },
+                        text = {
+                            Text(
+                                "Encontramos um backup de Finanças guardado na sua conta Google. Deseja restaurar os lançamentos, categorias, configurações e vínculos?",
+                                fontSize = 14.sp
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = { viewModel.confirmRestoreCloudFinances() }) {
+                                Text("Restaurar")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.dismissCloudFinanceRestore() }) {
+                                Text("Agora não")
+                            }
+                        }
+                    )
                 }
 
                 // Quick Add Task Dialog from Home shortcut
@@ -926,9 +998,9 @@ class MainActivity : ComponentActivity() {
 
         viewModel.triggerAutoBackup()
 
-        // Sync all user data to Firebase Firestore if logged in
+        // Sync all user data to Firebase Firestore if logged in and sync is enabled
         val user = authRepository.currentUser.value
-        if (user != null && !user.isGuest) {
+        if (viewModel.syncEnabled.value && user != null && !user.isGuest) {
             val settingsMap = mapOf<String, Any>(
                 "themeAccent" to viewModel.themeAccent.value.name,
                 "keepScreenOn" to viewModel.keepScreenOn.value,
@@ -946,6 +1018,7 @@ class MainActivity : ComponentActivity() {
                     settingsMap = settingsMap
                 )
             }
+            viewModel.backupFinancesNow(showToast = false)
         }
 
         // Ongoing floating notification when user leaves app while timer is running

@@ -4,10 +4,12 @@ import androidx.compose.ui.Alignment
 
 enum class CitraTutorialArea(val id: String, val title: String) {
     HOME("HOME", "Início"),
+    TIMER("TIMER", "Timer Arancia"),
     TASKS("TASKS", "Tarefas"),
     HABITS("HABITS", "Hábitos"),
     NOTES("NOTES", "Notas"),
     STATS("STATS", "Dados"),
+    FINANCES("FINANCES", "Finanças"),
     MENU("MENU", "Menu de Opções")
 }
 
@@ -22,8 +24,8 @@ object CitraTutorialData {
     val tutorialsByArea: Map<CitraTutorialArea, List<CitraTutorialStep>> = mapOf(
         CitraTutorialArea.HOME to listOf(
             CitraTutorialStep(
-                title = "Foco Pomodoro",
-                text = "Inicie sessões de foco diretamente do Início. O relógio cítrico marca o tempo e as pausas de forma fluida.",
+                title = "Sessão Arancia",
+                text = "Inicie sessões de foco diretamente do Início. O relógio cítrico marca o tempo e as pausas de forma fluida e sem distrações.",
                 targetKey = "home_pomodoro_card",
                 preferBelow = true
             ),
@@ -41,8 +43,29 @@ object CitraTutorialData {
             ),
             CitraTutorialStep(
                 title = "Navegação Rápida",
-                text = "Alterne entre o Timer, suas Tarefas, Notas e painel de Dados através desta barra inferior.",
+                text = "Alterne entre Início, Timer, Organização, Notas, Finanças (quando ativadas) e Dados através da barra inferior.",
                 targetKey = "bottom_navigation_bar",
+                preferBelow = false
+            )
+        ),
+
+        CitraTutorialArea.TIMER to listOf(
+            CitraTutorialStep(
+                title = "Modo Arancia & Cronômetro",
+                text = "Use o botão ao lado do Play para alternar entre o Timer Arancia (ciclos de foco) e o Cronômetro livre.",
+                targetKey = "timer_mode_toggle",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "Ajustes Opcionais",
+                text = "Toque no ícone de ajustes para personalizar a duração da sessão, pausa e repetições quando desejar.",
+                targetKey = "timer_settings_btn",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "Mascotes Citra Interativos",
+                text = "Cada sessão concluída no Timer gera um mascote Citra proporcional ao tempo focado. Incline o celular para vê-los rolar e dê um toque duplo em um Citra para fazê-lo explodir!",
+                targetKey = "timer_circle_display",
                 preferBelow = false
             )
         ),
@@ -50,7 +73,7 @@ object CitraTutorialData {
         CitraTutorialArea.TASKS to listOf(
             CitraTutorialStep(
                 title = "Criar Nova Tarefa",
-                text = "Toque no botão '+' para adicionar tarefas com prazos, prioridades (Alta, Média ou Baixa) e categorias.",
+                text = "Toque no botão '+' para adicionar tarefas com prazos, prioridades (Alta, Média ou Baixa), alarme e categorias.",
                 targetKey = "tasks_add_button",
                 preferBelow = true
             ),
@@ -62,7 +85,7 @@ object CitraTutorialData {
             ),
             CitraTutorialStep(
                 title = "Foco Vinculado",
-                text = "Toque no ícone de play ao lado de uma tarefa para iniciar um Pomodoro focado especialmente nela.",
+                text = "Toque no ícone de play ao lado de uma tarefa para iniciar uma sessão Arancia focada especialmente nela.",
                 targetKey = "tasks_list_first_item",
                 preferBelow = true
             ),
@@ -98,19 +121,19 @@ object CitraTutorialData {
         CitraTutorialArea.NOTES to listOf(
             CitraTutorialStep(
                 title = "Criar Nova Anotação",
-                text = "Crie notas com suporte a Markdown, tabelas, fórmulas matemáticas, checklists e gravações de áudio.",
+                text = "Crie notas com Markdown, tabelas, fórmulas matemáticas, callouts, checklists e gravações de áudio. A barra de formatação fica fixada na parte inferior e pode ser desafixada no menu avançado.",
                 targetKey = "notes_add_button",
                 preferBelow = true
             ),
             CitraTutorialStep(
-                title = "Pesquisa Instantânea",
-                text = "Encontre qualquer anotação ou trecho de texto rapidamente usando o campo de busca no topo.",
+                title = "Rascunho Rápido & Modelos",
+                text = "Use o botão de rascunho rápido para escolher modelos prontos (Diário, Reunião, Estudos, Projeto) e começar a escrever na hora.",
                 targetKey = "notes_search_input",
                 preferBelow = true
             ),
             CitraTutorialStep(
-                title = "Pastas e Categorias",
-                text = "Filtre suas anotações por categorias ou acesse a lixeira para restaurar notas apagadas em até 30 dias.",
+                title = "Pastas, Organização e Lixeira",
+                text = "Alterne entre visualização em grade ou lista, filtre por categorias e acesse a Lixeira para restaurar todas ou esvaziar com um toque.",
                 targetKey = "notes_category_bar",
                 preferBelow = true
             )
@@ -137,10 +160,61 @@ object CitraTutorialData {
             )
         ),
 
+        CitraTutorialArea.FINANCES to listOf(
+            CitraTutorialStep(
+                title = "1. Bem-vindo às Finanças do Citra",
+                text = "Aqui você controla receitas, despesas, transferências, orçamentos mensais, recorrências, lista de compras e notas vinculadas — tudo integrado ao seu fluxo diário.",
+                targetKey = "finances_summary_card",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "2. Carteiras e Contas",
+                text = "Organize seu dinheiro por carteiras (Carteira, Banco, Poupança, Cartão) e registre transferências entre contas sem distorcer seus gastos.",
+                targetKey = "finances_wallets_bar",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "3. Registrar Lançamentos",
+                text = "Toque no botão '+' para adicionar uma receita, despesa ou transferência. Você pode escolher categoria, carteira, moeda, data, método de pagamento e anexar comprovante.",
+                targetKey = "finances_add_button",
+                preferBelow = false
+            ),
+            CitraTutorialStep(
+                title = "4. Orçamentos e Alertas",
+                text = "Defina limites mensais por categoria na aba Orçamentos. O Citra avisa automaticamente quando você atingir 80% e 100% do limite definido.",
+                targetKey = "finances_tabs_row",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "5. Recorrências e Lembretes",
+                text = "Cadastre contas fixas ou salários recorrentes (diário, semanal, mensal ou anual) e receba lembretes antecipados antes do vencimento.",
+                targetKey = "finances_tabs_row",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "6. Lista de Compras (Planejado vs. Real)",
+                text = "Monte sua lista de compras com valor estimado. Ao marcar um item como comprado, informe o valor real pago e ele é lançado automaticamente nas suas despesas!",
+                targetKey = "finances_tabs_row",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "7. Notas Vinculadas",
+                text = "Vincule qualquer lançamento a uma nota Markdown! O Citra insere um resumo financeiro atualizado automaticamente na nota (em bloco protegido) sem apagar suas anotações pessoais.",
+                targetKey = "finances_list_area",
+                preferBelow = false
+            ),
+            CitraTutorialStep(
+                title = "8. Câmbio, Privacidade e Backup",
+                text = "Use o botão de olho para ocultar valores na tela, configure taxas de câmbio manuais e mantenha seus dados protegidos por PIN/biometria e backup na nuvem.",
+                targetKey = "finances_header_actions",
+                preferBelow = true
+            )
+        ),
+
         CitraTutorialArea.MENU to listOf(
             CitraTutorialStep(
                 title = "Configurações Gerais",
-                text = "Ajuste toques de alarme personalizados, temas de cores, modo escuro e comportamento no modo silencioso.",
+                text = "Ajuste toques de alarme, imagem de fundo, sincronização na nuvem, reset dos mascotes do Timer e preferências das Finanças.",
                 targetKey = "top_menu_settings",
                 preferBelow = true
             ),

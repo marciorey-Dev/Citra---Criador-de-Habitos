@@ -56,7 +56,7 @@ object NoteExportHelper {
                     val inner = rawText.substring(cursor + 2, end)
                     val rendered = LatexFormulaRenderer.renderFormulaToText(inner)
                     val startPos = sb.length
-                    sb.append(" 📐 $rendered ")
+                    sb.append(" $rendered ")
                     sb.setSpan(StyleSpan(Typeface.BOLD_ITALIC), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                     sb.setSpan(ForegroundColorSpan(themeColor), startPos, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                     cursor = end + 2

@@ -256,7 +256,7 @@ object LatexFormulaRenderer {
                     color = textCol
                 )
             ) {
-                append("   📐 $rendered   ")
+                append("   $rendered   ")
             }
             append("\n")
         }

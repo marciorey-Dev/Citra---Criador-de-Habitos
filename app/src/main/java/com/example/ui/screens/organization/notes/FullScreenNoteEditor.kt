@@ -106,6 +106,13 @@ enum class NoteEditorMode(val label: String) {
     READING("Leitura")
 }
 
+object NoteEditorSaveBridge {
+    var onSaveOpenNote: (() -> Unit)? = null
+    fun requestSave() {
+        onSaveOpenNote?.invoke()
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenNoteEditor(
@@ -128,7 +135,9 @@ fun FullScreenNoteEditor(
     onConvertChecklistToDirectTask: ((title: String, category: String, priority: String, dueDate: String, dueTimestamp: Long?, reminderMinutesBefore: Int) -> Unit)? = null,
     noteVersions: List<NoteVersion> = emptyList(),
     onRestoreVersion: ((NoteVersion) -> Unit)? = null,
-    onCreateLocalCopy: ((NoteVersion) -> Unit)? = null
+    onCreateLocalCopy: ((NoteVersion) -> Unit)? = null,
+    financesEnabled: Boolean = false,
+    onInsertFinanceBlock: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -223,8 +232,9 @@ fun FullScreenNoteEditor(
     var isHistoryApplying by remember { mutableStateOf(false) }
 
     // Tracking unsaved changes for Save button state (colored when dirty, neutral gray when saved)
-    var lastSavedTitle by remember { mutableStateOf(initialNote?.title ?: "") }
-    var lastSavedContent by remember { mutableStateOf(initialNote?.content ?: "") }
+    val isUnsavedTemplate = initialNote?.id == 0L
+    var lastSavedTitle by remember { mutableStateOf(if (isUnsavedTemplate) "" else initialNote?.title ?: "") }
+    var lastSavedContent by remember { mutableStateOf(if (isUnsavedTemplate) "" else initialNote?.content ?: "") }
     var lastSavedCategory by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
     var lastSavedIsPinned by remember { mutableStateOf(initialNote?.isPinned ?: false) }
     var lastSavedBgUri by remember { mutableStateOf(initialNote?.backgroundImageUri) }
@@ -417,6 +427,15 @@ fun FullScreenNoteEditor(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        NoteEditorSaveBridge.onSaveOpenNote = {
+            saveCurrent(close = false)
+        }
+        onDispose {
+            NoteEditorSaveBridge.onSaveOpenNote = null
         }
     }
 
@@ -658,6 +677,7 @@ fun FullScreenNoteEditor(
     var showLinkToEntityDialog by remember { mutableStateOf(false) }
     var showBgSettingsSheet by remember { mutableStateOf(false) }
     var showAdvancedToolbar by remember { mutableStateOf(false) }
+    var isToolbarPinnedToBottom by remember { mutableStateOf(true) }
     var checklistItemToConvert by remember { mutableStateOf<String?>(null) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     var fullscreenBlockIndex by remember { mutableStateOf<Int?>(null) }
@@ -723,31 +743,47 @@ fun FullScreenNoteEditor(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = if (title.isBlank()) "Nova Nota" else title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = textColor,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-
-                        // Mode selector pill (Toggle strictly between Edição & Leitura with Pencil & Book icons and text)
+                        // Save Status Pill
                         Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                            modifier = Modifier.clickable {
-                                val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
-                                    NoteEditorMode.READING
-                                } else {
-                                    NoteEditorMode.LIVE_PREVIEW
-                                }
-                                switchEditorMode(newMode)
-                            }
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDirty) Icons.Default.Edit else Icons.Default.CloudDone,
+                                    contentDescription = null,
+                                    tint = if (isDirty) primaryColor else MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = if (isDirty) "Editando" else "Salvo",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isDirty) primaryColor else MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+
+                        // Mode selector pill (Edição & Leitura)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable {
+                                    val newMode = if (editorMode == NoteEditorMode.LIVE_PREVIEW) {
+                                        NoteEditorMode.READING
+                                    } else {
+                                        NoteEditorMode.LIVE_PREVIEW
+                                    }
+                                    switchEditorMode(newMode)
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
@@ -758,13 +794,15 @@ fun FullScreenNoteEditor(
                                         Icons.AutoMirrored.Filled.MenuBook
                                     },
                                     contentDescription = editorMode.label,
-                                    modifier = Modifier.size(18.dp),
+                                    modifier = Modifier.size(16.dp),
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                                 Text(
                                     text = editorMode.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
@@ -789,7 +827,7 @@ fun FullScreenNoteEditor(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Undo,
                             contentDescription = "Desfazer",
-                            tint = if (undoStack.isNotEmpty()) primaryColor else Color.Gray.copy(alpha = 0.35f)
+                            tint = if (undoStack.isNotEmpty()) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                         )
                     }
 
@@ -801,7 +839,7 @@ fun FullScreenNoteEditor(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Redo,
                             contentDescription = "Refazer",
-                            tint = if (redoStack.isNotEmpty()) primaryColor else Color.Gray.copy(alpha = 0.35f)
+                            tint = if (redoStack.isNotEmpty()) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                         )
                     }
 
@@ -812,7 +850,7 @@ fun FullScreenNoteEditor(
                         Icon(
                             imageVector = Icons.Default.Save,
                             contentDescription = "Salvar",
-                            tint = if (isDirty) primaryColor else Color.Gray.copy(alpha = 0.5f)
+                            tint = if (isDirty) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                         )
                     }
 
@@ -852,6 +890,17 @@ fun FullScreenNoteEditor(
                                     }
                                 }
                             )
+
+                            if (financesEnabled && onInsertFinanceBlock != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Inserir bloco de finanças") },
+                                    leadingIcon = { Icon(Icons.Default.TableChart, contentDescription = null, tint = primaryColor) },
+                                    onClick = {
+                                        showMenu = false
+                                        onInsertFinanceBlock()
+                                    }
+                                )
+                            }
 
                             HorizontalDivider()
 
@@ -1016,7 +1065,134 @@ fun FullScreenNoteEditor(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
 
-                // 1. Note Title Input
+                // 1. Dynamic Meta Strip: Category Pills & Focus Session Chip
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(categories) { cat ->
+                        val isSelected = category == cat.name
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            },
+                            shadowElevation = if (isSelected) 1.dp else 0.dp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { category = cat.name }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSelected) Icons.Default.Lightbulb else Icons.Default.Label,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                    tint = if (isSelected) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = cat.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    if (pomodoroState != null && (pomodoroState.isRunning || pomodoroState.remainingSeconds > 0)) {
+                        item {
+                            val mins = (pomodoroState.remainingSeconds / 60).coerceAtLeast(1)
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Timer,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        text = "Foco • $mins min",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Editorial Timestamp & Reading Pulse
+                val wordCount = remember(editorValue.text) {
+                    editorValue.text.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                }
+                val readMinutes = remember(wordCount) {
+                    (wordCount / 180).coerceAtLeast(1)
+                }
+                val formattedTimestamp = remember(initialNote?.updatedAt) {
+                    val ts = initialNote?.updatedAt ?: System.currentTimeMillis()
+                    java.text.SimpleDateFormat("d 'de' MMMM, HH:mm", java.util.Locale("pt", "BR")).format(java.util.Date(ts))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CalendarToday,
+                            contentDescription = null,
+                            tint = primaryColor,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = formattedTimestamp,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(MaterialTheme.colorScheme.secondary, CircleShape)
+                        )
+                        Text(
+                            text = "$wordCount palavras • $readMinutes min de leitura",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // 3. Expressive Cozy Note Title Input
                 OutlinedTextField(
                     value = title,
                     onValueChange = { input ->
@@ -1033,85 +1209,28 @@ fun FullScreenNoteEditor(
                     }),
                     placeholder = {
                         Text(
-                            "Título da nota...",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = textColor.copy(alpha = 0.45f)
+                            "Título acolhedor...",
+                            style = MaterialTheme.typography.headlineLarge.copy(
+                                fontWeight = FontWeight.ExtraBold,
+                                color = textColor.copy(alpha = 0.4f)
                             )
                         )
                     },
-                    textStyle = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Bold,
+                    textStyle = MaterialTheme.typography.headlineLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
                         color = textColor
                     ),
-                    singleLine = true,
+                    maxLines = 2,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("note_full_title_input")
                 )
-
-                // 2. Categories selector immediately after Title (Direct & easily accessible)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Label,
-                        contentDescription = "Categoria da Nota",
-                        modifier = Modifier.size(16.dp),
-                        tint = primaryColor
-                    )
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(categories) { cat ->
-                            val isSelected = category == cat.name
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                                modifier = Modifier
-                                    .clickable { category = cat.name }
-                                    .border(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = if (isSelected) primaryColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                                        shape = RoundedCornerShape(16.dp)
-                                    )
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (isSelected) {
-                                        Icon(
-                                            Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(13.dp),
-                                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                    }
-                                    Text(
-                                        text = cat.name,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
                 // 3. Interactive Media Widgets Strip in Live Preview (WhatsApp Audio & Resizable Images)
                 if (parsedMediaTokens.isNotEmpty() && editorMode == NoteEditorMode.LIVE_PREVIEW) {
@@ -1635,27 +1754,40 @@ fun FullScreenNoteEditor(
                 )
             }
 
-            // Floating Obsidian Formatting Toolbar that accompanies the user while scrolling down the note
+            // Obsidian Formatting Toolbar (pinned to bottom by default, or floating when unpinned)
             AnimatedVisibility(
                 visible = isToolbarVisible,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .imePadding()
-                    .padding(bottom = if (isRecordingAudio) 72.dp else 12.dp, start = 8.dp, end = 8.dp)
-                    .offset {
-                        IntOffset(toolbarOffsetX.roundToInt(), toolbarOffsetY.roundToInt())
-                    }
+                modifier = if (isToolbarPinnedToBottom) {
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .imePadding()
+                        .navigationBarsPadding()
+                        .padding(bottom = if (isRecordingAudio) 64.dp else 0.dp)
+                } else {
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .imePadding()
+                        .padding(bottom = if (isRecordingAudio) 72.dp else 12.dp, start = 8.dp, end = 8.dp)
+                        .offset {
+                            IntOffset(toolbarOffsetX.roundToInt(), toolbarOffsetY.roundToInt())
+                        }
+                }
             ) {
+                val toolbarShape = if (isToolbarPinnedToBottom) {
+                    RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                } else {
+                    RoundedCornerShape(26.dp)
+                }
                 Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surface,
+                    shape = toolbarShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
                     tonalElevation = 8.dp,
-                    shadowElevation = 8.dp,
+                    shadowElevation = 10.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(22.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), toolbarShape)
                 ) {
                     if (isToolbarMinimized) {
                         Row(
@@ -1720,32 +1852,34 @@ fun FullScreenNoteEditor(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                // Mobility Drag Handle
-                                Box(
-                                    modifier = Modifier
-                                        .pointerInput(Unit) {
-                                            detectTapGestures(
-                                                onDoubleTap = {
-                                                    toolbarOffsetX = 0f
-                                                    toolbarOffsetY = 0f
-                                                }
-                                            )
-                                        }
-                                        .pointerInput(Unit) {
-                                            detectDragGestures { change, dragAmount ->
-                                                change.consume()
-                                                toolbarOffsetX += dragAmount.x
-                                                toolbarOffsetY += dragAmount.y
+                                // Mobility Drag Handle (only shown when unpinned / floating)
+                                if (!isToolbarPinnedToBottom) {
+                                    Box(
+                                        modifier = Modifier
+                                            .pointerInput(Unit) {
+                                                detectTapGestures(
+                                                    onDoubleTap = {
+                                                        toolbarOffsetX = 0f
+                                                        toolbarOffsetY = 0f
+                                                    }
+                                                )
                                             }
-                                        }
-                                        .padding(horizontal = 4.dp, vertical = 4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DragHandle,
-                                        contentDescription = "Arrastar menu flutuante (duplo clique para resetar)",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                            .pointerInput(Unit) {
+                                                detectDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    toolbarOffsetX += dragAmount.x
+                                                    toolbarOffsetY += dragAmount.y
+                                                }
+                                            }
+                                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DragHandle,
+                                            contentDescription = "Arrastar menu flutuante (duplo clique para resetar)",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
 
                                 // Minimize toggle
@@ -1941,11 +2075,21 @@ fun FullScreenNoteEditor(
                                         }
                                         ToolbarToolButton(label = "Bloco Código", icon = Icons.Default.Code) {
                                             pushHistory()
-                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "```kotlin\n// código\n```")
+                                            editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                editorValue,
+                                                "```kotlin\n",
+                                                "\n```",
+                                                "```kotlin\n// código\n```"
+                                            )
                                         }
                                         ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
                                             pushHistory()
-                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "$$ E = mc^2 $$")
+                                            editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                editorValue,
+                                                "$$\n",
+                                                "\n$$",
+                                                "$$ E = mc^2 $$"
+                                            )
                                         }
 
                                         VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -1956,16 +2100,21 @@ fun FullScreenNoteEditor(
                                                 showCalloutMenu = true
                                             }
                                             DropdownMenu(expanded = showCalloutMenu, onDismissRequest = { showCalloutMenu = false }) {
-                                                DropdownMenuItem(text = { Text("ℹ️ Info") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!INFO] Informação...") })
-                                                DropdownMenuItem(text = { Text("💡 Dica") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!TIP] Dica importante...") })
-                                                DropdownMenuItem(text = { Text("⚠️ Aviso") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!WARNING] Atenção...") })
-                                                DropdownMenuItem(text = { Text("🚨 Importante") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "> [!IMPORTANT] Crítico...") })
+                                                DropdownMenuItem(text = { Text("ℹ️ Info") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "INFO", "Informação...") })
+                                                DropdownMenuItem(text = { Text("💡 Dica") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "TIP", "Dica importante...") })
+                                                DropdownMenuItem(text = { Text("⚠️ Aviso") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "WARNING", "Atenção...") })
+                                                DropdownMenuItem(text = { Text("🚨 Importante") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "IMPORTANT", "Crítico...") })
                                             }
                                         }
 
                                         ToolbarToolButton(label = "Recolhível", icon = Icons.Default.UnfoldMore) {
                                             pushHistory()
-                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "<details><summary>Resumo</summary>\nConteúdo recolhível\n</details>")
+                                            editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                editorValue,
+                                                "<details><summary>Resumo</summary>\n\n",
+                                                "\n\n</details>",
+                                                "<details><summary>Resumo</summary>\nConteúdo recolhível\n</details>"
+                                            )
                                         }
 
                                         ToolbarToolButton(label = "Buscar/Substituir", icon = Icons.Default.FindReplace) {
@@ -1974,6 +2123,19 @@ fun FullScreenNoteEditor(
 
                                         ToolbarToolButton(label = "Vincular", icon = Icons.Default.Share) {
                                             showLinkToEntityDialog = true
+                                        }
+
+                                        VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                        ToolbarToolButton(
+                                            label = if (isToolbarPinnedToBottom) "Desafixar" else "Fixar barra",
+                                            icon = if (isToolbarPinnedToBottom) Icons.Default.OpenWith else Icons.Default.PushPin
+                                        ) {
+                                            isToolbarPinnedToBottom = !isToolbarPinnedToBottom
+                                            if (isToolbarPinnedToBottom) {
+                                                toolbarOffsetX = 0f
+                                                toolbarOffsetY = 0f
+                                            }
                                         }
                                     }
                                 }

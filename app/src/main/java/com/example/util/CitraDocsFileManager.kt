@@ -126,8 +126,14 @@ object CitraDocsFileManager {
                 content
             }
 
-            FileOutputStream(file).use { fos ->
+            val tempFile = File(folder, ".${sanitizeFilename(title)}_${System.currentTimeMillis()}.tmp")
+            FileOutputStream(tempFile).use { fos ->
                 fos.write(textToWrite.toByteArray(StandardCharsets.UTF_8))
+                fos.flush()
+            }
+            if (!tempFile.renameTo(file)) {
+                tempFile.copyTo(file, overwrite = true)
+                tempFile.delete()
             }
 
             // Notify Android media scanner so the file is visible over USB MTP and file managers

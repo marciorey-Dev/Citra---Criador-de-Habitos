@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>Citra - Modo Foco Timer</title>
+<!-- Tailwind CSS CDN com plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Plus Jakarta Sans / Nunito -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface": "#fff8f5",
+            "surface-dim": "#edd6c7",
+            "surface-bright": "#fff8f5",
+            "surface-container-lowest": "#ffffff",
+            "surface-container-low": "#fff1e9",
+            "surface-container": "#ffeadd",
+            "surface-container-high": "#fbe4d5",
+            "surface-container-highest": "#f5decf",
+            "on-surface": "#251910",
+            "on-surface-variant": "#5a4136",
+            "outline": "#8e7164",
+            "outline-variant": "#e2bfb0",
+            "primary": "#a04100",
+            "primary-container": "#ff6b00",
+            "on-primary": "#ffffff",
+            "on-primary-container": "#572000",
+            "secondary": "#006d34",
+            "secondary-container": "#8af6a4",
+            "tertiary": "#8e4e00",
+            "tertiary-container": "#dc8428",
+            citrus: {
+              50: '#FFF9F5',
+              100: '#FFEDE1',
+              200: '#FFD7BD',
+              300: '#FFB88A',
+              500: '#FF6B1A',
+              600: '#F25807',
+              700: '#D94800',
+              dark: '#1E293B',
+              navy: '#0F1E36',
+              seed: '#D9822B'
+            }
+          },
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="base-layout">
+    body {
+      background-color: #FAFAF7;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    /* Estilo sutil para scrollbars horizontais */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+<style data-purpose="dial-tactile-effects">
+    .citrus-shadow {
+      box-shadow: 0 16px 36px -10px rgba(242, 88, 7, 0.28), 0 4px 12px rgba(0, 0, 0, 0.04);
+      transition: box-shadow 0.6s ease, transform 0.6s ease;
+    }
+    .tactile-button {
+      box-shadow: 0 8px 20px -4px rgba(242, 88, 7, 0.4), inset 0 2px 3px rgba(255, 255, 255, 0.4);
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .tactile-button:active {
+      transform: scale(0.92);
+      box-shadow: 0 3px 8px -2px rgba(242, 88, 7, 0.5);
+    }
+    .soft-tactile-btn {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05), inset 0 1px 2px rgba(255, 255, 255, 0.8);
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .soft-tactile-btn:active {
+      transform: scale(0.90);
+      background-color: #E2E8F0;
+    }
+
+    /* Pulso solar sutil de respiração orgânica */
+    @keyframes citrus-breathe {
+      0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 14px 28px rgba(255, 107, 0, 0.22));
+      }
+      50% {
+        transform: scale(1.022);
+        filter: drop-shadow(0 20px 38px rgba(255, 107, 0, 0.36));
+      }
+    }
+
+    /* Brilho e pulso nos gomos ativos */
+    @keyframes seed-glow {
+      0%, 100% {
+        stroke-width: 2.2;
+        filter: drop-shadow(0 0 1px rgba(216, 120, 35, 0.5));
+      }
+      50% {
+        stroke-width: 2.8;
+        filter: drop-shadow(0 0 4px rgba(255, 107, 0, 0.9));
+      }
+    }
+
+    .dial-breathe {
+      animation: citrus-breathe 4.2s ease-in-out infinite;
+    }
+
+    .seed-pulse {
+      animation: seed-glow 2.4s ease-in-out infinite;
+    }
+
+    .citrus-progress-ring {
+      transition: stroke-dashoffset 0.85s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .segment-path {
+      transition: fill 0.5s ease, opacity 0.5s ease;
+    }
+
+    .seed-dot {
+      transition: fill 0.4s ease, stroke 0.4s ease, opacity 0.4s ease, transform 0.3s ease;
+    }
+
+    /* Animação rápida de rotação para reset */
+    .spin-reset {
+      animation: spin-once 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    @keyframes spin-once {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(-360deg); }
+    }
+
+    /* Redução de movimento acessível */
+    @media (prefers-reduced-motion: reduce) {
+      .dial-breathe,
+      .seed-pulse,
+      .spin-reset {
+        animation: none !important;
+      }
+      .citrus-progress-ring,
+      .segment-path,
+      .seed-dot,
+      .tactile-button,
+      .soft-tactile-btn {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen text-slate-800 flex justify-center items-start antialiased">
+<!-- BEGIN: MobileDeviceFrame -->
+<main class="w-full max-w-[420px] min-h-screen bg-[#FFFDFB] flex flex-col justify-between relative pb-20 shadow-2xl border-x border-orange-50/50">
+<!-- BEGIN: TopBar -->
+<header class="pt-4 px-6 flex items-center justify-between z-10" data-purpose="status-header">
+<!-- Espaço reservado / indicador sutil -->
+<div class="text-xs font-semibold tracking-wider text-slate-400 uppercase">Citra Focus</div>
+<!-- Menu de mais opções (três pontos) -->
+<button aria-label="Mais opções" class="w-8 h-8 rounded-full flex items-center justify-center text-slate-700 hover:bg-orange-100/50 transition-colors">
+<svg class="w-5 h-5 fill-current" viewbox="0 0 24 24">
+<circle cx="12" cy="5" r="2"></circle>
+<circle cx="12" cy="12" r="2"></circle>
+<circle cx="12" cy="19" r="2"></circle>
+</svg>
+</button>
+</header>
+<!-- END: TopBar -->
+<!-- BEGIN: MainContent -->
+<div class="px-5 flex-1 flex flex-col items-center">
+<!-- BEGIN: FocusModeBanner -->
+<div class="w-full mt-3 bg-[#FFF1E6]/90 border border-orange-200/60 rounded-3xl py-3 px-4 flex items-center justify-between shadow-sm transition-all duration-300" data-purpose="session-banner" id="session-banner">
+<div class="flex items-center space-x-2">
+<span class="text-xl leading-none" id="mode-icon">🎯</span>
+<span class="font-bold text-slate-800 text-[15px] tracking-tight" id="mode-title">Modo Foco</span>
+</div>
+<div class="bg-white/95 px-3 py-1 rounded-full text-xs font-semibold text-slate-700 shadow-sm border border-orange-100" id="cycle-badge">
+          Ciclo 1 de 1
+        </div>
+</div>
+<!-- END: FocusModeBanner -->
+<!-- BEGIN: CitrusDialSection -->
+<div class="mt-6 flex flex-col items-center justify-center w-full" data-purpose="citrus-timer-dial">
+<!-- Dial Container com Aspect Ratio Quadrado e Respiração Tátil -->
+<div class="relative w-[290px] h-[290px] flex items-center justify-center citrus-shadow rounded-full dial-breathe" id="citrus-dial-container">
+<!-- Representação Vetorial de Rodela Cítrica (Laranja/Tangerina Fatiada) -->
+<svg class="w-full h-full transform" viewbox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<!-- Gradiente solar para o anel de progresso -->
+<lineargradient id="solarGlow" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#FF9E44"></stop>
+<stop offset="50%" stop-color="#FF6B00"></stop>
+<stop offset="100%" stop-color="#E23E00"></stop>
+</lineargradient>
+<filter height="140%" id="softGlow" width="140%" x="-20%" y="-20%">
+<fegaussianblur result="blur" stddeviation="3.5"></fegaussianblur>
+<fecomposite in="SourceGraphic" in2="blur" operator="over"></fecomposite>
+</filter>
+</defs>
+<!-- Anel externo da Casca (Albedo e Flavedo) -->
+<circle cx="160" cy="160" fill="#F15A24" r="150" stroke="#EB521B" stroke-width="2"></circle>
+<circle cx="160" cy="160" fill="#FFF3E8" r="134"></circle>
+<circle cx="160" cy="160" fill="#FDE3CE" r="130"></circle>
+<!-- Anel de Progresso Cítrico Solar Suave (Circunferência r=138 -> C ≈ 867) -->
+<circle cx="160" cy="160" fill="none" id="progress-ring-bg" opacity="0.6" r="138" stroke="#FFE3CD" stroke-width="5"></circle>
+<circle class="citrus-progress-ring" cx="160" cy="160" fill="none" filter="url(#softGlow)" id="citrus-progress-ring" r="138" stroke="url(#solarGlow)" stroke-dasharray="867" stroke-dashoffset="0" stroke-linecap="round" stroke-width="5" transform="rotate(-90 160 160)"></circle>
+<!-- Gomos da Polpa Cítrica (12 Segmentos com divisões precisas) -->
+<g id="citrus-segments">
+<!-- Segmento 0 (12h) -->
+<path class="segment-path" d="M 160 160 L 169 39 A 122 122 0 0 1 217 52 L 160 160 Z" data-seg="0" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 1 (1h) -->
+<path class="segment-path" d="M 160 160 L 221 55 A 122 122 0 0 1 262 96 L 160 160 Z" data-seg="1" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 2 (2h) -->
+<path class="segment-path" d="M 160 160 L 265 101 A 122 122 0 0 1 281 151 L 160 160 Z" data-seg="2" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 3 (3h) -->
+<path class="segment-path" d="M 160 160 L 281 169 A 122 122 0 0 1 265 219 L 160 160 Z" data-seg="3" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 4 (4h) -->
+<path class="segment-path" d="M 160 160 L 262 224 A 122 122 0 0 1 221 265 L 160 160 Z" data-seg="4" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 5 (5h) -->
+<path class="segment-path" d="M 160 160 L 217 268 A 122 122 0 0 1 169 281 L 160 160 Z" data-seg="5" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 6 (6h) -->
+<path class="segment-path" d="M 160 160 L 151 281 A 122 122 0 0 1 103 268 L 160 160 Z" data-seg="6" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 7 (7h) -->
+<path class="segment-path" d="M 160 160 L 99 265 A 122 122 0 0 1 58 224 L 160 160 Z" data-seg="7" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 8 (8h) -->
+<path class="segment-path" d="M 160 160 L 55 219 A 122 122 0 0 1 39 169 L 160 160 Z" data-seg="8" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 9 (9h) -->
+<path class="segment-path" d="M 160 160 L 39 151 A 122 122 0 0 1 55 101 L 160 160 Z" data-seg="9" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 10 (10h) -->
+<path class="segment-path" d="M 160 160 L 58 96 A 122 122 0 0 1 99 55 L 160 160 Z" data-seg="10" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+<!-- Segmento 11 (11h) -->
+<path class="segment-path" d="M 160 160 L 103 52 A 122 122 0 0 1 151 39 L 160 160 Z" data-seg="11" fill="#FFEFE2" stroke="#FCDCC4" stroke-width="1.2"></path>
+</g>
+<!-- As 12 Sementes Douradas Alinhadas em Círculo nos Gomos -->
+<g fill="none" id="citrus-seeds" stroke="#D87823" stroke-width="2">
+<!-- Semente 0 (12h) -->
+<ellipse class="seed-dot seed-pulse" cx="160" cy="72" id="seed-0" rx="4" ry="7.5" transform="rotate(0 160 72)"></ellipse>
+<!-- Semente 1 -->
+<ellipse class="seed-dot" cx="204" cy="84" id="seed-1" rx="4" ry="7.5" transform="rotate(30 204 84)"></ellipse>
+<!-- Semente 2 -->
+<ellipse class="seed-dot" cx="236" cy="116" id="seed-2" rx="4" ry="7.5" transform="rotate(60 236 116)"></ellipse>
+<!-- Semente 3 (3h) -->
+<ellipse class="seed-dot" cx="248" cy="160" id="seed-3" rx="4" ry="7.5" transform="rotate(90 248 160)"></ellipse>
+<!-- Semente 4 -->
+<ellipse class="seed-dot" cx="236" cy="204" id="seed-4" rx="4" ry="7.5" transform="rotate(120 236 204)"></ellipse>
+<!-- Semente 5 -->
+<ellipse class="seed-dot" cx="204" cy="236" id="seed-5" rx="4" ry="7.5" transform="rotate(150 204 236)"></ellipse>
+<!-- Semente 6 (6h) -->
+<ellipse class="seed-dot" cx="160" cy="248" id="seed-6" rx="4" ry="7.5" transform="rotate(180 160 248)"></ellipse>
+<!-- Semente 7 -->
+<ellipse class="seed-dot" cx="116" cy="236" id="seed-7" rx="4" ry="7.5" transform="rotate(210 116 236)"></ellipse>
+<!-- Semente 8 -->
+<ellipse class="seed-dot" cx="84" cy="204" id="seed-8" rx="4" ry="7.5" transform="rotate(240 84 204)"></ellipse>
+<!-- Semente 9 (9h) -->
+<ellipse class="seed-dot" cx="72" cy="160" id="seed-9" rx="4" ry="7.5" transform="rotate(270 72 160)"></ellipse>
+<!-- Semente 10 -->
+<ellipse class="seed-dot" cx="84" cy="116" id="seed-10" rx="4" ry="7.5" transform="rotate(300 84 116)"></ellipse>
+<!-- Semente 11 -->
+<ellipse class="seed-dot" cx="116" cy="84" id="seed-11" rx="4" ry="7.5" transform="rotate(330 116 84)"></ellipse>
+</g>
+<!-- Centro Macio e Suave do Miolo Cítrico -->
+<circle cx="160" cy="160" fill="#FDD6BA" r="42"></circle>
+</svg>
+<!-- Conteúdo Tipográfico Central sobreposto ao Dial -->
+<div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none select-none">
+<!-- Dígitos Grandes do Cronômetro -->
+<div class="text-[52px] font-extrabold text-[#0D1F38] tracking-tight leading-none drop-shadow-sm font-sans transition-all duration-300" id="timer-display">
+              15:00
+            </div>
+<!-- Pílula de Status Central "Pronto" / "Focando..." -->
+<div class="mt-2 bg-[#FFF3E9] border border-[#F8CBB0] text-[#7A3E15] text-[11px] font-bold px-3 py-0.5 rounded-full shadow-xs transition-all duration-300" id="status-pill">
+              Pronto
+            </div>
+</div>
+</div>
+<!-- Legenda Inferior Charmosa com contador dinâmico -->
+<div class="mt-3.5 flex items-center justify-center space-x-1.5 text-xs text-slate-500 font-medium">
+<span id="citrus-sub-icon">🍊</span>
+<span id="seeds-count-label">Dial cítrico • 12/12 sementes ativas</span>
+</div>
+</div>
+<!-- END: CitrusDialSection -->
+<!-- BEGIN: PrimaryActionControls -->
+<div class="mt-6 flex items-center justify-center space-x-7" data-purpose="timer-action-buttons">
+<!-- Botão Reiniciar / Reset -->
+<button aria-label="Reiniciar ciclo" class="w-16 h-16 rounded-full bg-[#EAEFEF]/80 text-slate-700 flex items-center justify-center soft-tactile-btn hover:bg-slate-200 transition-all duration-150" id="btn-reset">
+<svg class="w-6 h-6 stroke-[2.4] text-slate-800 transition-transform duration-500" fill="none" id="icon-reset" stroke="currentColor" viewbox="0 0 24 24">
+<path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</button>
+<!-- Botão Play Principal -->
+<button aria-label="Iniciar cronômetro" class="w-[84px] h-[84px] rounded-full bg-[#FF6A00] text-white flex items-center justify-center tactile-button hover:bg-[#F25E00] shadow-lg shadow-orange-500/30" id="btn-play">
+<!-- Ícone Play (Inicial) -->
+<svg class="w-9 h-9 fill-current ml-1" id="icon-play" viewbox="0 0 24 24">
+<polygon points="6 4 20 12 6 20 6 4"></polygon>
+</svg>
+<!-- Ícone Pause (Oculto inicialmente) -->
+<svg class="w-9 h-9 fill-current hidden" id="icon-pause" viewbox="0 0 24 24">
+<rect height="16" rx="1.5" width="4" x="6" y="4"></rect>
+<rect height="16" rx="1.5" width="4" x="14" y="4"></rect>
+</svg>
+</button>
+</div>
+<!-- END: PrimaryActionControls -->
+<!-- BEGIN: CategorySection -->
+<section class="w-full mt-7 bg-white rounded-3xl p-4 shadow-sm border border-slate-100" data-purpose="category-selector">
+<div class="flex items-center justify-between mb-3 px-1">
+<h2 class="font-bold text-slate-900 text-sm tracking-tight">Categoria</h2>
+<button class="text-xs font-bold text-citrus-500 hover:text-citrus-600 flex items-center space-x-0.5 active:scale-95 transition-transform" id="btn-new-category">
+<span>+</span>
+<span>Nova</span>
+</button>
+</div>
+<!-- Seletor Horizontal de Pílulas de Categorias -->
+<div class="flex items-center space-x-2.5 overflow-x-auto no-scrollbar py-0.5" id="category-list">
+<!-- Categoria: Criatividade (Selecionada por padrão) -->
+<button class="category-chip flex-shrink-0 flex items-center space-x-2 bg-orange-50/90 border border-orange-300 text-citrus-700 rounded-2xl px-3.5 py-2.5 shadow-sm transition-all duration-200 active:scale-95" data-cat="criatividade">
+<span class="text-base leading-none">🎨</span>
+<span class="text-xs font-bold text-slate-800">Criatividade</span>
+</button>
+<!-- Categoria: Estudos -->
+<button class="category-chip flex-shrink-0 flex items-center space-x-2 bg-slate-50/80 border border-slate-200/60 rounded-2xl px-3.5 py-2.5 shadow-xs hover:bg-slate-100 text-slate-700 transition-all duration-200 active:scale-95" data-cat="estudos">
+<span class="text-base leading-none">📚</span>
+<span class="text-xs font-semibold text-slate-700">Estudos</span>
+</button>
+<!-- Categoria: Leitura -->
+<button class="category-chip flex-shrink-0 flex items-center space-x-2 bg-slate-50/80 border border-slate-200/60 rounded-2xl px-3.5 py-2.5 shadow-xs hover:bg-slate-100 text-slate-700 transition-all duration-200 active:scale-95" data-cat="leitura">
+<span class="text-base leading-none">📖</span>
+<span class="text-xs font-semibold text-slate-700">Leitura</span>
+</button>
+<!-- Categoria: Saúde -->
+<button class="category-chip flex-shrink-0 flex items-center space-x-2 bg-slate-50/80 border border-slate-200/60 rounded-2xl px-3.5 py-2.5 shadow-xs hover:bg-slate-100 text-slate-700 transition-all duration-200 active:scale-95" data-cat="saude">
+<span class="text-base leading-none">🏃</span>
+<span class="text-xs font-semibold text-slate-700">Saúde</span>
+</button>
+</div>
+</section>
+<!-- END: CategorySection -->
+</div>
+<!-- END: MainContent -->
+<!-- BEGIN: BottomNavigationBar -->
+<nav class="fixed bottom-0 max-w-[420px] w-full bg-[#FFFDFB]/95 backdrop-blur-md border-t border-orange-100/70 py-2 px-3 z-30 flex items-center justify-around" data-purpose="bottom-nav">
+<!-- Tab 1: Início -->
+<a class="flex flex-col items-center justify-center flex-1 py-1 text-slate-600 hover:text-citrus-500 transition-colors" href="#">
+<svg class="w-5 h-5 fill-none stroke-current stroke-[2]" viewbox="0 0 24 24">
+<path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="text-[10px] font-semibold mt-1">Início</span>
+</a>
+<!-- Tab 2: Timer (Ativa em Destaque Cítrico) -->
+<a class="flex flex-col items-center justify-center flex-1 py-1 text-citrus-500" href="#">
+<div class="w-6 h-6 flex items-center justify-center">
+<!-- Ícone do Cronômetro / Timer Laranja -->
+<svg class="w-5 h-5 fill-citrus-500" viewbox="0 0 24 24">
+<path d="M12 2a1 1 0 0 1 1 1v1.055A9.002 9.002 0 0 1 12 22a9 9 0 0 1-1-17.945V3a1 1 0 0 1 1-1zm0 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm1 3v4.586l3.293 3.293a1 1 0 0 1-1.414 1.414l-3.586-3.586A1 1 0 0 1 11 14V9a1 1 0 0 1 2 0z"></path>
+</svg>
+</div>
+<span class="text-[10px] font-bold mt-1 text-citrus-600">Timer</span>
+</a>
+<!-- Tab 3: Tarefas -->
+<a class="flex flex-col items-center justify-center flex-1 py-1 text-slate-600 hover:text-citrus-500 transition-colors" href="#">
+<svg class="w-5 h-5 fill-none stroke-current stroke-[2.2]" viewbox="0 0 24 24">
+<path d="M4 6h16M4 12h10M4 18h7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="text-[10px] font-semibold mt-1">Tarefas</span>
+</a>
+<!-- Tab 4: Notas -->
+<a class="flex flex-col items-center justify-center flex-1 py-1 text-slate-600 hover:text-citrus-500 transition-colors" href="#">
+<svg class="w-5 h-5 fill-none stroke-current stroke-[2]" viewbox="0 0 24 24">
+<path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="text-[10px] font-semibold mt-1">Notas</span>
+</a>
+<!-- Tab 5: Eu -->
+<a class="flex flex-col items-center justify-center flex-1 py-1 text-slate-600 hover:text-citrus-500 transition-colors" href="#">
+<svg class="w-5 h-5 fill-none stroke-current stroke-[2]" viewbox="0 0 24 24">
+<path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+<span class="text-[10px] font-semibold mt-1">Eu</span>
+</a>
+</nav>
+<!-- END: BottomNavigationBar -->
+</main>
+<!-- END: MobileDeviceFrame -->
+<!-- Vanilla JavaScript: Interatividade Tátil do Cronômetro Cítrico -->
+<script>
+  (function () {
+    const TOTAL_SECONDS = 15 * 60; // 15 minutos = 900s
+    let remainingSeconds = TOTAL_SECONDS;
+    let timerInterval = null;
+    let isRunning = false;
+
+    // Elementos DOM
+    const timerDisplay = document.getElementById('timer-display');
+    const statusPill = document.getElementById('status-pill');
+    const btnPlay = document.getElementById('btn-play');
+    const btnReset = document.getElementById('btn-reset');
+    const iconPlay = document.getElementById('icon-play');
+    const iconPause = document.getElementById('icon-pause');
+    const iconReset = document.getElementById('icon-reset');
+    const progressRing = document.getElementById('citrus-progress-ring');
+    const seedsCountLabel = document.getElementById('seeds-count-label');
+    const dialContainer = document.getElementById('citrus-dial-container');
+    const categoryChips = document.querySelectorAll('.category-chip');
+
+    const TOTAL_SEEDS = 12;
+    const RING_CIRCUMFERENCE = 867; // 2 * PI * 138
+
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    function updateVisuals() {
+      // 1. Atualizar display de dígitos
+      timerDisplay.textContent = formatTime(remainingSeconds);
+
+      // 2. Progresso do anel solar (867 = vazio, 0 = cheio)
+      const fraction = remainingSeconds / TOTAL_SECONDS;
+      const offset = RING_CIRCUMFERENCE * (1 - fraction);
+      progressRing.style.strokeDashoffset = offset;
+
+      // 3. Segmentos e Sementes ativas (12 segmentos)
+      const activeSeedsCount = Math.ceil(fraction * TOTAL_SEEDS);
+      seedsCountLabel.textContent = `Dial cítrico • ${activeSeedsCount}/${TOTAL_SEEDS} sementes ativas`;
+
+      for (let i = 0; i < TOTAL_SEEDS; i++) {
+        const seed = document.getElementById(`seed-${i}`);
+        const seg = document.querySelector(`.segment-path[data-seg="${i}"]`);
+
+        if (i < activeSeedsCount) {
+          if (seed) {
+            seed.setAttribute('stroke', '#D87823');
+            seed.setAttribute('fill', '#FFE3CD');
+            seed.style.opacity = '1';
+          }
+          if (seg) {
+            seg.setAttribute('fill', '#FFEFE2');
+            seg.setAttribute('stroke', '#FCDCC4');
+            seg.style.opacity = '1';
+          }
+        } else {
+          // Gomos e sementes já consumidos
+          if (seed) {
+            seed.setAttribute('stroke', '#E2BFB0');
+            seed.setAttribute('fill', 'transparent');
+            seed.style.opacity = '0.35';
+          }
+          if (seg) {
+            seg.setAttribute('fill', '#FFF9F5');
+            seg.setAttribute('stroke', '#F3E1D5');
+            seg.style.opacity = '0.45';
+          }
+        }
+      }
+
+      // Adicionar pulso na semente atualmente no ciclo
+      const currentActiveIndex = Math.max(0, activeSeedsCount - 1);
+      document.querySelectorAll('.seed-dot').forEach((el, idx) => {
+        if (isRunning && idx === currentActiveIndex) {
+          el.classList.add('seed-pulse');
+        } else {
+          el.classList.remove('seed-pulse');
+        }
+      });
+    }
+
+    function toggleTimer() {
+      if (isRunning) {
+        pauseTimer();
+      } else {
+        startTimer();
+      }
+    }
+
+    function startTimer() {
+      if (remainingSeconds <= 0) {
+        remainingSeconds = TOTAL_SECONDS;
+      }
+      isRunning = true;
+      iconPlay.classList.add('hidden');
+      iconPause.classList.remove('hidden');
+
+      // Feedback de status
+      statusPill.textContent = 'Focando...';
+      statusPill.className = 'mt-2 bg-[#FFF3E9] border border-[#FF6B00] text-[#FF6B00] text-[11px] font-extrabold px-3.5 py-0.5 rounded-full shadow-sm animate-pulse';
+
+      dialContainer.style.filter = 'drop-shadow(0 20px 38px rgba(255, 107, 0, 0.35))';
+
+      timerInterval = setInterval(() => {
+        if (remainingSeconds > 0) {
+          remainingSeconds--;
+          updateVisuals();
+        } else {
+          pauseTimer();
+          statusPill.textContent = 'Concluído! 🎉';
+          statusPill.className = 'mt-2 bg-emerald-50 border border-emerald-300 text-emerald-700 text-[11px] font-extrabold px-3 py-0.5 rounded-full shadow-xs';
+        }
+      }, 1000);
+
+      updateVisuals();
+    }
+
+    function pauseTimer() {
+      isRunning = false;
+      clearInterval(timerInterval);
+      iconPlay.classList.remove('hidden');
+      iconPause.classList.add('hidden');
+
+      if (remainingSeconds > 0 && remainingSeconds < TOTAL_SECONDS) {
+        statusPill.textContent = 'Pausado';
+        statusPill.className = 'mt-2 bg-[#FFF9F5] border border-[#E2BFB0] text-[#5A4136] text-[11px] font-bold px-3 py-0.5 rounded-full shadow-xs';
+      } else if (remainingSeconds === TOTAL_SECONDS) {
+        statusPill.textContent = 'Pronto';
+        statusPill.className = 'mt-2 bg-[#FFF3E9] border border-[#F8CBB0] text-[#7A3E15] text-[11px] font-bold px-3 py-0.5 rounded-full shadow-xs';
+      }
+      dialContainer.style.filter = '';
+      updateVisuals();
+    }
+
+    function resetTimer() {
+      pauseTimer();
+      remainingSeconds = TOTAL_SECONDS;
+
+      // Animação tátil do botão de reset
+      iconReset.classList.add('spin-reset');
+      setTimeout(() => {
+        iconReset.classList.remove('spin-reset');
+      }, 600);
+
+      statusPill.textContent = 'Pronto';
+      statusPill.className = 'mt-2 bg-[#FFF3E9] border border-[#F8CBB0] text-[#7A3E15] text-[11px] font-bold px-3 py-0.5 rounded-full shadow-xs';
+      updateVisuals();
+    }
+
+    // Interatividade do Seletor de Categorias
+    categoryChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        categoryChips.forEach(c => {
+          c.className = 'category-chip flex-shrink-0 flex items-center space-x-2 bg-slate-50/80 border border-slate-200/60 rounded-2xl px-3.5 py-2.5 shadow-xs hover:bg-slate-100 text-slate-700 transition-all duration-200 active:scale-95';
+          const label = c.querySelector('span:nth-child(2)');
+          if (label) {
+            label.className = 'text-xs font-semibold text-slate-700';
+          }
+        });
+        chip.className = 'category-chip flex-shrink-0 flex items-center space-x-2 bg-orange-50/90 border border-orange-300 text-citrus-700 rounded-2xl px-3.5 py-2.5 shadow-sm transition-all duration-200 active:scale-95';
+        const activeLabel = chip.querySelector('span:nth-child(2)');
+        if (activeLabel) {
+          activeLabel.className = 'text-xs font-bold text-slate-800';
+        }
+      });
+    });
+
+    // Listeners
+    btnPlay.addEventListener('click', toggleTimer);
+    btnReset.addEventListener('click', resetTimer);
+
+    // Inicialização visual
+    updateVisuals();
+  })();
+</script>
+</body></html>

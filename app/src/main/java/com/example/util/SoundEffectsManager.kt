@@ -27,7 +27,7 @@ object SoundEffectsManager {
     val allSounds = listOf(
         SoundItem("sound_analog_warm_2", "Analógico Suave 2 (Padrão Tarefa)", R.raw.sound_analog_warm_2, "tarefa"),
         SoundItem("sound_analog_warm_4", "Analógico Suave 4 (Padrão Hábito)", R.raw.sound_analog_warm_4, "habito"),
-        SoundItem("sound_upbeat_4", "Recompensa Animada 4 (Padrão Pomodoro)", R.raw.sound_upbeat_4, "pomodoro"),
+        SoundItem("sound_upbeat_4", "Recompensa Animada 4 (Padrão Arancia)", R.raw.sound_upbeat_4, "pomodoro"),
         SoundItem("sound_conquistas_default", "Brilho Festivo (Padrão Conquistas)", R.raw.sound_conquistas_default, "conquistas"),
         SoundItem("sound_light_chime_1", "Sino Leve e Arejado 1 (Padrão Alertas)", R.raw.sound_light_chime_1, "alerta"),
 

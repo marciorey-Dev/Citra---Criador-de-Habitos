@@ -49,13 +49,39 @@ fun SettingsDialog(
     val appBgUri by viewModel.appBgUri.collectAsState()
     val appBgBlur by viewModel.appBgBlur.collectAsState()
     val appBgBrightness by viewModel.appBgBrightness.collectAsState()
+    val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
+    val disabledWelcomeCategories by viewModel.disabledWelcomeCategories.collectAsState()
+
+    // Finance Module States
+    val financesEnabled by viewModel.financesEnabled.collectAsState()
+    val financesSetupCompleted by viewModel.financesSetupCompleted.collectAsState()
+    val financeDefaultCurrency by viewModel.financeDefaultCurrency.collectAsState()
+    val financeHideValues by viewModel.financeHideValues.collectAsState()
+    val financePinCode by viewModel.financePinCode.collectAsState()
+    val financeBiometricEnabled by viewModel.financeBiometricEnabled.collectAsState()
+
+    var showFinanceWizard by remember { mutableStateOf(false) }
+    var showFinanceLockDialog by remember { mutableStateOf(false) }
+    var showEraseFinanceDialog by remember { mutableStateOf(false) }
+    var financeCurrencyExpanded by remember { mutableStateOf(false) }
 
     val appBgPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            val permUri = com.example.util.MediaStorageHelper.saveNoteBackground(context, uri)
-            viewModel.setAppBackground(permUri ?: uri.toString(), appBgBlur, appBgBrightness)
+            try {
+                val bgFile = java.io.File(context.filesDir, "app_background.jpg")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    bgFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (bgFile.exists() && bgFile.length() > 0L) {
+                    viewModel.setAppBackground(bgFile.absolutePath, appBgBlur, appBgBrightness)
+                }
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(context, "Não foi possível carregar a imagem.", android.widget.Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -430,6 +456,49 @@ fun SettingsDialog(
                                 }
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Resetar Mascotes Citra do Timer
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Mascotes Citra no Timer",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Limpar os mascotes acumulados na tela do Timer",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                FilledTonalButton(
+                                    onClick = {
+                                        viewModel.clearTimerCitraBalls()
+                                        android.widget.Toast.makeText(context, "Mascotes do Timer resetados!", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Resetar", fontSize = 12.sp)
+                                }
+                            }
+                        }
                     }
 
                     // 2. ABA INICIAL PADRÃO
@@ -469,7 +538,7 @@ fun SettingsDialog(
                     // 3. TELA DO TIMER & COMPORTAMENTO
                     item {
                         Text(
-                            text = "Temporizador de Pomodoro",
+                            text = "Temporizador Arancia",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
@@ -562,7 +631,7 @@ fun SettingsDialog(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         NotificationSoundSelector(
-                            label = "Som de Término do Pomodoro",
+                            label = "Som de Término do Arancia",
                             currentSound = tempNotificationSettings.pomodoroSound,
                             customUri = tempNotificationSettings.pomodoroSoundUri,
                             soundOptions = soundOptions,
@@ -842,6 +911,278 @@ fun SettingsDialog(
                             }
                         }
                     }
+
+                    // 7. FRASES DE BOAS-VINDAS DIÁRIAS
+                    item {
+                        Text(
+                            text = "Frases de Boas-vindas",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Mensagem diária no Início", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text(
+                                            "Exibe uma frase nova por dia na primeira abertura",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = welcomePhrasesEnabled,
+                                        onCheckedChange = { viewModel.setWelcomePhrasesEnabled(it) }
+                                    )
+                                }
+
+                                if (welcomePhrasesEnabled) {
+                                    Text(
+                                        text = "Categorias ativas:",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(com.example.data.local.WelcomePhraseCategory.entries) { cat ->
+                                            val isEnabled = !disabledWelcomeCategories.contains(cat.id)
+                                            FilterChip(
+                                                selected = isEnabled,
+                                                onClick = { viewModel.toggleWelcomeCategory(cat.id) },
+                                                label = { Text("${cat.emoji} ${cat.label}", fontSize = 11.5.sp) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==================== FINANÇAS (V1.2) ====================
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.AccountBalanceWallet,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Finanças",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                // Interruptor Ativar Finanças
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Ativar Finanças",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = if (financesEnabled) {
+                                                "Aba ativa na navegação. Desligar não apaga dados."
+                                            } else {
+                                                "Desligado por padrão. Nenhum dado é apagado ao desligar."
+                                            },
+                                            fontSize = 11.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = financesEnabled,
+                                        onCheckedChange = { checked ->
+                                            if (checked && !financesSetupCompleted) {
+                                                showFinanceWizard = true
+                                            } else {
+                                                viewModel.setFinancesEnabled(checked)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("toggle_finances_switch")
+                                    )
+                                }
+
+                                if (financesEnabled) {
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                    // Moeda padrão
+                                    val currentCurr = com.example.data.model.FinanceCurrency.fromCode(financeDefaultCurrency)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Moeda padrão", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { financeCurrencyExpanded = true },
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(currentCurr.displayName, fontSize = 12.5.sp)
+                                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            }
+                                            DropdownMenu(
+                                                expanded = financeCurrencyExpanded,
+                                                onDismissRequest = { financeCurrencyExpanded = false }
+                                            ) {
+                                                com.example.data.model.FinanceCurrency.entries.forEach { curr ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(curr.displayName) },
+                                                        onClick = {
+                                                            viewModel.setFinanceDefaultCurrency(curr.code)
+                                                            financeCurrencyExpanded = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Bloqueio por PIN ou biometria
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { showFinanceLockDialog = true }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Bloqueio por PIN ou biometria", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                            Text(
+                                                text = when {
+                                                    !financePinCode.isNullOrBlank() && financeBiometricEnabled -> "PIN e biometria ativos"
+                                                    !financePinCode.isNullOrBlank() -> "PIN ativo"
+                                                    financeBiometricEnabled -> "Biometria ativa"
+                                                    else -> "Desligado"
+                                                },
+                                                fontSize = 11.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Icon(Icons.Default.ChevronRight, contentDescription = null)
+                                    }
+
+                                    // Ocultar valores na tela
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Ocultar valores na tela", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                        Switch(
+                                            checked = financeHideValues,
+                                            onCheckedChange = { viewModel.setFinanceHideValues(it) }
+                                        )
+                                    }
+
+                                    // Sincronização automática na nuvem (Ativar / Desativar)
+                                    val syncEnabled by viewModel.syncEnabled.collectAsState()
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Sincronização automática na nuvem", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                            Text(
+                                                text = if (syncEnabled) "Ativada (sincroniza ao abrir e sair)" else "Desativada (apenas backup manual)",
+                                                fontSize = 11.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Switch(
+                                            checked = syncEnabled,
+                                            onCheckedChange = { viewModel.setSyncEnabled(it) }
+                                        )
+                                    }
+
+                                    // Backup na nuvem (botão manual)
+                                    val lastFinSync by viewModel.lastFinanceSyncTimestamp.collectAsState()
+                                    val syncDateFmt = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale("pt", "AO")) }
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Backup na nuvem", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                                Text(
+                                                    text = if (lastFinSync > 0L) {
+                                                        "Último backup: ${syncDateFmt.format(java.util.Date(lastFinSync))}"
+                                                    } else {
+                                                        "Sincronize manualmente quando quiser"
+                                                    },
+                                                    fontSize = 11.5.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            FilledTonalButton(
+                                                onClick = { viewModel.backupFinancesNow(showToast = true) },
+                                                shape = RoundedCornerShape(12.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                            ) {
+                                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Fazer backup agora", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                            }
+                                        }
+                                    }
+
+                                    // Apagar dados de finanças (confirmação dupla)
+                                    OutlinedButton(
+                                        onClick = { showEraseFinanceDialog = true },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = com.example.ui.theme.RedAction
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Apagar dados de finanças", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -864,6 +1205,34 @@ fun SettingsDialog(
                 }
             }
         }
+    }
+
+    if (showFinanceWizard) {
+        com.example.ui.screens.finances.FinanceFirstTimeWizardDialog(
+            onDismiss = { showFinanceWizard = false },
+            onComplete = { currencyCode, initialBalanceMinor, pin, biometric ->
+                viewModel.completeFinanceSetup(currencyCode, initialBalanceMinor, pin, biometric)
+                showFinanceWizard = false
+            }
+        )
+    }
+
+    if (showFinanceLockDialog) {
+        com.example.ui.screens.finances.FinanceLockSettingsDialog(
+            currentPin = financePinCode,
+            currentBiometric = financeBiometricEnabled,
+            onDismiss = { showFinanceLockDialog = false },
+            onSave = { pin, biometric ->
+                viewModel.setFinanceLock(pin, biometric)
+            }
+        )
+    }
+
+    if (showEraseFinanceDialog) {
+        com.example.ui.screens.finances.EraseFinanceDataDoubleConfirmDialog(
+            onDismiss = { showEraseFinanceDialog = false },
+            onConfirmErase = { viewModel.eraseAllFinanceData() }
+        )
     }
 
     if (showAllColorsDialog) {

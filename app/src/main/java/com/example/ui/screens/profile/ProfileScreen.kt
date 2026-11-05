@@ -75,7 +75,6 @@ fun ProfileScreen(
     // Modals
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
-    var showTutorialDialog by remember { mutableStateOf(false) }
     var showLatexManualDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
     var showCloudDataDialog by remember { mutableStateOf(false) }
@@ -138,11 +137,18 @@ fun ProfileScreen(
             // 1. TOP PROFILE HEADER CARD
             item {
                 Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                            RoundedCornerShape(22.dp)
+                        )
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(18.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -152,22 +158,22 @@ fun ProfileScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = user?.displayName ?: "Viajante Citra",
-                                        style = MaterialTheme.typography.titleLarge,
+                                        fontSize = 20.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     IconButton(
                                         onClick = { showEditNameDialog = true },
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Edit,
                                             contentDescription = "Editar Nome",
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(17.dp)
                                         )
                                     }
                                 }
@@ -180,10 +186,11 @@ fun ProfileScreen(
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.primaryContainer,
+                                    shadowElevation = 3.dp,
                                     modifier = Modifier
-                                        .size(76.dp)
+                                        .size(78.dp)
                                         .clip(CircleShape)
-                                        .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                                        .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), CircleShape)
                                         .clickable { showImageSourceDialog = true }
                                 ) {
                                     if (!user?.photoUrl.isNullOrBlank()) {
@@ -198,7 +205,7 @@ fun ProfileScreen(
                                             Text(
                                                 text = user?.displayName?.take(1)?.uppercase() ?: "C",
                                                 fontSize = 32.sp,
-                                                fontWeight = FontWeight.Bold,
+                                                fontWeight = FontWeight.ExtraBold,
                                                 color = MaterialTheme.colorScheme.primary
                                             )
                                         }
@@ -208,32 +215,63 @@ fun ProfileScreen(
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.primary,
+                                    shadowElevation = 2.dp,
                                     modifier = Modifier
-                                        .size(24.dp)
+                                        .size(26.dp)
                                         .clickable { showImageSourceDialog = true }
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.CameraAlt,
                                         contentDescription = "Alterar Foto",
-                                        tint = Color.White,
-                                        modifier = Modifier.padding(4.dp)
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.padding(5.dp)
                                     )
                                 }
                             }
                         }
 
+                        // Cozy Citrus Divider
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            HorizontalDivider(
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            ) {
+                                Text(
+                                    text = "🍊 Citra • Eu 🍊",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                )
+                            }
+                            HorizontalDivider(
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                        }
+
                         // Guest mode warning & sign in link
                         if (user?.isGuest == true) {
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onOpenAuthGate() }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(10.dp),
+                                    modifier = Modifier.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(Icons.Default.CloudQueue, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -250,40 +288,63 @@ fun ProfileScreen(
                 }
             }
 
-            // 2. STYLISH DIVIDER
+            // 2. SEGMENTED SUB-TABS SELECTOR: [Estatísticas] [Dados]
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(" 🍊 Citra • Eu 🍊 ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-                }
-            }
-
-            // 3. SUB-TABS SELECTOR: [Estatísticas] [Dados]
-            item {
-                TabRow(
-                    selectedTabIndex = selectedSubTab,
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    divider = {}
-                ) {
-                    Tab(
-                        selected = selectedSubTab == 0,
-                        onClick = { selectedSubTab = 0 },
-                        text = { Text("Estatísticas", fontWeight = if (selectedSubTab == 0) FontWeight.Bold else FontWeight.Normal) },
-                        icon = { Icon(Icons.Default.BarChart, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    )
-                    Tab(
-                        selected = selectedSubTab == 1,
-                        onClick = { selectedSubTab = 1 },
-                        text = { Text("Dados", fontWeight = if (selectedSubTab == 1) FontWeight.Bold else FontWeight.Normal) },
-                        icon = { Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf(
+                            0 to Pair("Estatísticas", Icons.Default.BarChart),
+                            1 to Pair("Dados", Icons.Default.Storage)
+                        ).forEach { (index, pair) ->
+                            val isSelected = selectedSubTab == index
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                                shadowElevation = if (isSelected) 2.dp else 0.dp,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { selectedSubTab = index }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = pair.second,
+                                        contentDescription = null,
+                                        tint = if (isSelected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = pair.first,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = if (isSelected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -726,7 +787,11 @@ fun ProfileScreen(
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { showTutorialDialog = true }
+                                    .clickable {
+                                        viewModel.resetAllTutorials()
+                                        viewModel.startTutorial(com.example.ui.tutorial.CitraTutorialArea.STATS)
+                                        Toast.makeText(context, "Tutoriais reativados! Navegue pelas abas para ver cada guia.", Toast.LENGTH_SHORT).show()
+                                    }
                             ) {
                                 Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.School, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -904,10 +969,6 @@ fun ProfileScreen(
         )
     }
 
-    if (showTutorialDialog) {
-        AppTutorialDialog(onDismiss = { showTutorialDialog = false })
-    }
-
     if (showLatexManualDialog) {
         LatexManualDialog(onDismiss = { showLatexManualDialog = false })
     }
@@ -947,7 +1008,7 @@ fun ProfileScreen(
             )
             else -> Triple(
                 "Resetar Todos os Dados do App",
-                "ATENÇÃO: Isso irá apagar permanentemente todas as tarefas, hábitos, notas, histórico de foco Pomodoro e conquistas. Deseja continuar?",
+                "ATENÇÃO: Isso irá apagar permanentemente todas as tarefas, hábitos, notas, histórico de foco Arancia e conquistas. Deseja continuar?",
                 { viewModel.resetAllAppData(); Toast.makeText(context, "Todos os dados foram resetados com sucesso.", Toast.LENGTH_LONG).show() }
             )
         }

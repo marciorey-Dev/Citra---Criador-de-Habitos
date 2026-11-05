@@ -1,11 +1,12 @@
 package com.example.ui.screens.calendar
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -19,22 +20,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.Category
 import com.example.data.model.Habit
 import com.example.data.model.Note
 import com.example.data.model.Task
 import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
 import com.example.ui.screens.organization.QuickAddTaskDialog
-import com.example.ui.screens.organization.TaskItemCard
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteEditorMode
-import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
+
+private sealed class CalendarTimelineEntry(val sortTime: String) {
+    class HabitEntry(val habit: Habit, val isCompletedOnDay: Boolean, time: String) : CalendarTimelineEntry(time)
+    class TaskEntry(val task: Task, time: String) : CalendarTimelineEntry(time)
+    class NoteEntry(val note: Note, time: String) : CalendarTimelineEntry(time)
+}
 
 @Composable
 fun CalendarScreen(
@@ -51,554 +56,859 @@ fun CalendarScreen(
     var activeNoteForEditor by remember { mutableStateOf<Note?>(null) }
     var isCreatingNoteForCalendar by remember { mutableStateOf(false) }
 
-    // Toggleable view filters to prevent visual pollution as requested
-    var showHabitsFilter by remember { mutableStateOf(true) }
-    var showTasksFilter by remember { mutableStateOf(true) }
-    var showNotesFilter by remember { mutableStateOf(true) }
+    // Retractable calendar mode: false = Semanal (retraído), true = Mensal (expandido)
+    var isMonthExpanded by remember { mutableStateOf(false) }
 
-    // Calendar state: Year and Month
-    val currentCal = remember { Calendar.getInstance() }
-    var displayedYear by remember { mutableStateOf(currentCal.get(Calendar.YEAR)) }
-    var displayedMonth by remember { mutableStateOf(currentCal.get(Calendar.MONTH)) }
-
-    val monthYearFormat = remember { SimpleDateFormat("MMMM yyyy", Locale("pt", "BR")) }
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val todayStr = remember { dayFormat.format(Date()) }
 
-    // Month display title
-    val monthTitle = remember(displayedYear, displayedMonth) {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.YEAR, displayedYear)
-            set(Calendar.MONTH, displayedMonth)
-            set(Calendar.DAY_OF_MONTH, 1)
+    val selectedCal = remember(selectedDateStr) {
+        Calendar.getInstance().apply {
+            try {
+                time = dayFormat.parse(selectedDateStr) ?: Date()
+            } catch (_: Exception) {
+                time = Date()
+            }
         }
-        monthYearFormat.format(cal.time).replaceFirstChar { it.uppercase() }
     }
 
-    // Days in current displayed month
-    val daysInMonth = remember(displayedYear, displayedMonth) {
+    var displayedYear by remember(selectedDateStr) { mutableStateOf(selectedCal.get(Calendar.YEAR)) }
+    var displayedMonth by remember(selectedDateStr) { mutableStateOf(selectedCal.get(Calendar.MONTH)) }
+
+    val monthNameFormat = remember { SimpleDateFormat("MMMM", Locale("pt", "BR")) }
+    val fullDayTitleFormat = remember { SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR")) }
+
+    val monthName = remember(displayedYear, displayedMonth) {
         val cal = Calendar.getInstance().apply {
             set(Calendar.YEAR, displayedYear)
             set(Calendar.MONTH, displayedMonth)
             set(Calendar.DAY_OF_MONTH, 1)
         }
-        val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK) // 1=Sun, 2=Mon...
+        monthNameFormat.format(cal.time).replaceFirstChar { it.uppercase() }
+    }
+
+    val selectedDayHeaderTitle = remember(selectedCal) {
+        fullDayTitleFormat.format(selectedCal.time).uppercase()
+    }
+
+    // 7 days of the current week (Monday -> Sunday) around selectedDateStr
+    val weekDaysList = remember(selectedDateStr) {
+        val cal = (selectedCal.clone() as Calendar).apply {
+            firstDayOfWeek = Calendar.MONDAY
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        }
+        List(7) {
+            val str = dayFormat.format(cal.time)
+            cal.add(Calendar.DAY_OF_MONTH, 1)
+            str
+        }
+    }
+
+    // Full month grid (Monday -> Sunday)
+    val monthDaysList = remember(displayedYear, displayedMonth) {
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.YEAR, displayedYear)
+            set(Calendar.MONTH, displayedMonth)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }
+        val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK) // 1=Sun, 2=Mon...
+        val leadingEmpty = if (dayOfWeek == Calendar.SUNDAY) 6 else dayOfWeek - Calendar.MONDAY
         val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
 
-        val days = mutableListOf<String?>()
-        for (i in 1 until firstDayOfWeek) {
-            days.add(null)
+        val list = mutableListOf<String?>()
+        repeat(leadingEmpty) { list.add(null) }
+        for (d in 1..maxDays) {
+            cal.set(Calendar.DAY_OF_MONTH, d)
+            list.add(dayFormat.format(cal.time))
         }
-        for (day in 1..maxDays) {
-            cal.set(Calendar.DAY_OF_MONTH, day)
-            days.add(dayFormat.format(cal.time))
+        while (list.size % 7 != 0) {
+            list.add(null)
         }
-        days
+        list
     }
 
     // Filter tasks, habits, and notes for the selected date
-    val tasksForDay = remember(tasks, selectedDateStr, showTasksFilter) {
-        if (!showTasksFilter) emptyList()
-        else tasks.filter { task ->
+    val tasksForDay = remember(tasks, selectedDateStr) {
+        tasks.filter { task ->
             task.dueDateText.startsWith(selectedDateStr) ||
-            task.dueDateText.contains(selectedDateStr) ||
-            (task.dueDateTimestamp != null && dayFormat.format(Date(task.dueDateTimestamp)) == selectedDateStr)
+                task.dueDateText.contains(selectedDateStr) ||
+                (task.dueDateTimestamp != null && dayFormat.format(Date(task.dueDateTimestamp)) == selectedDateStr)
         }
     }
 
-    val habitsForDay = remember(habits, selectedDateStr, showHabitsFilter) {
-        if (!showHabitsFilter) emptyList()
-        else habits.filter { habit ->
-            habit.completedDatesCsv.split(",").any { it.trim() == selectedDateStr }
+    val habitsForDay = remember(habits, selectedDateStr, todayStr) {
+        if (selectedDateStr == todayStr) {
+            habits
+        } else {
+            habits.filter { habit ->
+                habit.completedDatesCsv.split(",").any { it.trim() == selectedDateStr }
+            }
         }
     }
 
-    val notesForDay = remember(notes, selectedDateStr, showNotesFilter) {
-        if (!showNotesFilter) emptyList()
-        else notes.filter { it.associatedDate == selectedDateStr }
+    val notesForDay = remember(notes, selectedDateStr) {
+        notes.filter { it.associatedDate == selectedDateStr }
+    }
+
+    // Build chronological "Fluxo do Dia" entries
+    val timelineEntries = remember(tasksForDay, habitsForDay, notesForDay, selectedDateStr) {
+        val list = mutableListOf<CalendarTimelineEntry>()
+
+        habitsForDay.forEach { habit ->
+            val isDone = habit.completedDatesCsv.split(",").any { it.trim() == selectedDateStr }
+            val timeStr = habit.reminderTime.ifBlank { "08:00" }
+            list.add(CalendarTimelineEntry.HabitEntry(habit, isDone, timeStr))
+        }
+
+        tasksForDay.forEach { task ->
+            val timeStr = when {
+                task.dueDateTimestamp != null -> timeFormat.format(Date(task.dueDateTimestamp))
+                task.dueDateText.contains(":") -> {
+                    val match = Regex("(\\d{2}:\\d{2})").find(task.dueDateText)
+                    match?.groupValues?.getOrNull(1) ?: "09:00"
+                }
+                else -> "09:00"
+            }
+            list.add(CalendarTimelineEntry.TaskEntry(task, timeStr))
+        }
+
+        notesForDay.forEach { note ->
+            val timeStr = timeFormat.format(Date(note.updatedAt))
+            list.add(CalendarTimelineEntry.NoteEntry(note, timeStr))
+        }
+
+        list.sortedBy { it.sortTime }
+    }
+
+    val totalItems = timelineEntries.size
+    val completedItems = remember(timelineEntries) {
+        timelineEntries.count { entry ->
+            when (entry) {
+                is CalendarTimelineEntry.HabitEntry -> entry.isCompletedOnDay
+                is CalendarTimelineEntry.TaskEntry -> entry.task.isCompleted
+                is CalendarTimelineEntry.NoteEntry -> true
+            }
+        }
+    }
+    val dayFocusPercent = remember(totalItems, completedItems) {
+        if (totalItems == 0) 0 else (completedItems * 100) / totalItems
     }
 
     // Full screen smooth note editor if editing or creating note
     if (isCreatingNoteForCalendar || activeNoteForEditor != null) {
         key(activeNoteForEditor?.id ?: if (isCreatingNoteForCalendar) -1L else 0L) {
             FullScreenNoteEditor(
-            initialNote = activeNoteForEditor,
-            categories = categories,
-            allNotes = notes,
-            tasks = tasks,
-            habits = habits,
-            onClose = {
-                isCreatingNoteForCalendar = false
-                activeNoteForEditor = null
-            },
-            onSaveAndClose = { title, content, cat, isPinned, bgUri, blur, brightness ->
-                viewModel.saveNote(
-                    id = activeNoteForEditor?.id ?: 0L,
-                    title = title,
-                    content = content,
-                    category = cat,
-                    iconEmoji = "📝",
-                    associatedDate = selectedDateStr,
-                    isPinned = isPinned,
-                    backgroundImageUri = bgUri,
-                    backgroundBlur = blur,
-                    backgroundBrightness = brightness,
-                    uuid = activeNoteForEditor?.uuid,
-                    oldTitle = activeNoteForEditor?.title
-                )
-                isCreatingNoteForCalendar = false
-                activeNoteForEditor = null
-            },
-            onDelete = if (activeNoteForEditor != null) {
-                {
-                    viewModel.moveNoteToTrash(activeNoteForEditor!!)
+                initialNote = activeNoteForEditor,
+                categories = categories,
+                allNotes = notes,
+                tasks = tasks,
+                habits = habits,
+                onClose = {
                     isCreatingNoteForCalendar = false
                     activeNoteForEditor = null
+                },
+                onSaveAndClose = { title, content, cat, isPinned, bgUri, blur, brightness ->
+                    viewModel.saveNote(
+                        id = activeNoteForEditor?.id ?: 0L,
+                        title = title,
+                        content = content,
+                        category = cat,
+                        iconEmoji = "📝",
+                        associatedDate = selectedDateStr,
+                        isPinned = isPinned,
+                        backgroundImageUri = bgUri,
+                        backgroundBlur = blur,
+                        backgroundBrightness = brightness,
+                        uuid = activeNoteForEditor?.uuid,
+                        oldTitle = activeNoteForEditor?.title
+                    )
+                    isCreatingNoteForCalendar = false
+                    activeNoteForEditor = null
+                },
+                onDelete = if (activeNoteForEditor != null) {
+                    {
+                        viewModel.moveNoteToTrash(activeNoteForEditor!!)
+                        isCreatingNoteForCalendar = false
+                        activeNoteForEditor = null
+                    }
+                } else null,
+                onOpenLinkedNote = { note ->
+                    activeNoteForEditor = note
+                    isCreatingNoteForCalendar = false
+                },
+                initialMode = if (viewModel.getLastNoteEditorMode() == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
+                onModeChanged = { mode ->
+                    viewModel.setLastNoteEditorMode(mode.name)
+                },
+                onToggleChecklistTaskSync = { checklistText, isChecked ->
+                    viewModel.syncChecklistToTask(checklistText, isChecked)
+                },
+                onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate, dueTimestamp, reminderMinutes ->
+                    val priorityEnum = when (taskPriority) {
+                        "ALTA" -> TaskPriority.ALTA
+                        "BAIXA" -> TaskPriority.BAIXA
+                        else -> TaskPriority.MEDIA
+                    }
+                    viewModel.addTask(
+                        title = taskTitle,
+                        category = taskCategory,
+                        priority = priorityEnum,
+                        dueDateText = dueDate,
+                        dueTimestamp = dueTimestamp,
+                        reminderMinutesBefore = reminderMinutes
+                    )
+                },
+                onConvertChecklistToTask = { taskTitle, dueDate ->
+                    viewModel.addTask(
+                        title = taskTitle,
+                        category = "Geral",
+                        priority = TaskPriority.MEDIA,
+                        dueDateText = dueDate,
+                        dueTimestamp = null,
+                        reminderMinutesBefore = 0
+                    )
                 }
-            } else null,
-            onOpenLinkedNote = { note ->
-                activeNoteForEditor = note
-                isCreatingNoteForCalendar = false
-            },
-            initialMode = if (viewModel.getLastNoteEditorMode() == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
-            onModeChanged = { mode ->
-                viewModel.setLastNoteEditorMode(mode.name)
-            },
-            onToggleChecklistTaskSync = { checklistText, isChecked ->
-                viewModel.syncChecklistToTask(checklistText, isChecked)
-            },
-            onConvertChecklistToDirectTask = { taskTitle, taskCategory, taskPriority, dueDate, dueTimestamp, reminderMinutes ->
-                val priorityEnum = when (taskPriority) {
-                    "ALTA" -> TaskPriority.ALTA
-                    "BAIXA" -> TaskPriority.BAIXA
-                    else -> TaskPriority.MEDIA
-                }
-                viewModel.addTask(
-                    title = taskTitle,
-                    category = taskCategory,
-                    priority = priorityEnum,
-                    dueDateText = dueDate,
-                    dueTimestamp = dueTimestamp,
-                    reminderMinutesBefore = reminderMinutes
-                )
-            },
-            onConvertChecklistToTask = { taskTitle, dueDate ->
-                viewModel.addTask(
-                    title = taskTitle,
-                    category = "Geral",
-                    priority = TaskPriority.MEDIA,
-                    dueDateText = dueDate,
-                    dueTimestamp = null,
-                    reminderMinutesBefore = 0
-                )
-            }
-        )
+            )
         }
         return
     }
 
-    // Unified scrollable container so users can freely scroll down to see all tasks, habits, and notes
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        // 1. Month Navigation Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = {
-                        if (displayedMonth == 0) {
-                            displayedMonth = 11
-                            displayedYear--
-                        } else {
-                            displayedMonth--
-                        }
-                    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 6.dp, bottom = 92.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // 1. Mês & Controle de Navegação + Alternador Retrátil (Semanal / Mensal)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.ChevronLeft, contentDescription = "Mês Anterior")
-                }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = monthTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        if (displayedMonth == 11) {
-                            displayedMonth = 0
-                            displayedYear++
-                        } else {
-                            displayedMonth++
-                        }
-                    }
-                ) {
-                    Icon(Icons.Default.ChevronRight, contentDescription = "Próximo Mês")
-                }
-            }
-        }
-
-        // 2. View Mode Filter Chips (Tarefas, Hábitos, Notas)
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = showTasksFilter,
-                    onClick = { showTasksFilter = !showTasksFilter },
-                    label = { Text("Tarefas", fontSize = 11.sp) },
-                    leadingIcon = {
-                        if (showTasksFilter) Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp))
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-
-                FilterChip(
-                    selected = showHabitsFilter,
-                    onClick = { showHabitsFilter = !showHabitsFilter },
-                    label = { Text("Hábitos", fontSize = 11.sp) },
-                    leadingIcon = {
-                        if (showHabitsFilter) Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp))
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-
-                FilterChip(
-                    selected = showNotesFilter,
-                    onClick = { showNotesFilter = !showNotesFilter },
-                    label = { Text("Notas", fontSize = 11.sp) },
-                    leadingIcon = {
-                        if (showNotesFilter) Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp))
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // 3. Weekday Labels
-        item {
-            val weekdayLabels = listOf("Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                weekdayLabels.forEach { label ->
-                    Text(
-                        text = label,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-
-        // 4. Month Calendar Grid (Weeks)
-        item {
-            val weeks = daysInMonth.chunked(7)
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                weeks.forEach { week ->
+                    // Left: Retractable Mode Toggle + Month/Year Title
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { isMonthExpanded = !isMonthExpanded }
+                            .padding(vertical = 2.dp)
+                            .testTag("cal_toggle_mode_btn")
                     ) {
-                        week.forEach { dateStr ->
-                            if (dateStr == null) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            } else {
-                                val isSelected = dateStr == selectedDateStr
-                                val dayNumber = dateStr.substringAfterLast("-").toIntOrNull() ?: 1
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isMonthExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isMonthExpanded) "Recolher para Semanal" else "Expandir para Mensal",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
 
-                                val hasTasks = showTasksFilter && tasks.any { t ->
-                                    t.dueDateText.startsWith(dateStr) || (t.dueDateTimestamp != null && dayFormat.format(Date(t.dueDateTimestamp)) == dateStr)
-                                }
-                                val hasHabits = showHabitsFilter && habits.any { h ->
-                                    h.completedDatesCsv.split(",").any { it.trim() == dateStr }
-                                }
-                                val hasNotes = showNotesFilter && notes.any { n ->
-                                    n.associatedDate == dateStr
-                                }
+                        Row(
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = monthName,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "$displayedYear",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 1.dp)
+                            )
+                        }
+                    }
 
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .aspectRatio(1.1f)
-                                        .padding(2.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            when {
-                                                isSelected -> MaterialTheme.colorScheme.primaryContainer
-                                                else -> Color.Transparent
+                    // Right: Previous / Hoje / Next Pill
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        shadowElevation = 1.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        if (isMonthExpanded) {
+                                            val cal = Calendar.getInstance().apply {
+                                                set(Calendar.YEAR, displayedYear)
+                                                set(Calendar.MONTH, displayedMonth)
+                                                set(Calendar.DAY_OF_MONTH, 1)
+                                                add(Calendar.MONTH, -1)
                                             }
-                                        )
-                                        .clickable { viewModel.selectCalendarDate(dateStr) }
-                                        .testTag("cal_day_$dateStr"),
-                                    contentAlignment = Alignment.Center
+                                            displayedYear = cal.get(Calendar.YEAR)
+                                            displayedMonth = cal.get(Calendar.MONTH)
+                                            viewModel.selectCalendarDate(dayFormat.format(cal.time))
+                                        } else {
+                                            val cal = (selectedCal.clone() as Calendar).apply {
+                                                add(Calendar.DAY_OF_MONTH, -7)
+                                            }
+                                            viewModel.selectCalendarDate(dayFormat.format(cal.time))
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ChevronLeft,
+                                    contentDescription = if (isMonthExpanded) "Mês anterior" else "Semana anterior",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable { viewModel.selectCalendarDate(todayStr) }
+                            ) {
+                                Text(
+                                    text = "Hoje",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        if (isMonthExpanded) {
+                                            val cal = Calendar.getInstance().apply {
+                                                set(Calendar.YEAR, displayedYear)
+                                                set(Calendar.MONTH, displayedMonth)
+                                                set(Calendar.DAY_OF_MONTH, 1)
+                                                add(Calendar.MONTH, 1)
+                                            }
+                                            displayedYear = cal.get(Calendar.YEAR)
+                                            displayedMonth = cal.get(Calendar.MONTH)
+                                            viewModel.selectCalendarDate(dayFormat.format(cal.time))
+                                        } else {
+                                            val cal = (selectedCal.clone() as Calendar).apply {
+                                                add(Calendar.DAY_OF_MONTH, 7)
+                                            }
+                                            viewModel.selectCalendarDate(dayFormat.format(cal.time))
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = if (isMonthExpanded) "Próximo mês" else "Próxima semana",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Mini Calendário & Grade Semanal / Mensal Retrátil
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        .animateContentSize()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp)
+                    ) {
+                        // Weekday Header (Seg .. Dom)
+                        val weekdayLabels = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+                        val selectedDayIndex = remember(selectedCal) {
+                            val dow = selectedCal.get(Calendar.DAY_OF_WEEK)
+                            if (dow == Calendar.SUNDAY) 6 else dow - Calendar.MONDAY
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            weekdayLabels.forEachIndexed { idx, label ->
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (idx == selectedDayIndex) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+
+                        // Retractable Calendar Grid: Weekly (1 row) vs Monthly (all weeks)
+                        val rowsToRender = if (isMonthExpanded) {
+                            monthDaysList.chunked(7)
+                        } else {
+                            listOf(weekDaysList)
+                        }
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            rowsToRender.forEach { weekRow ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(
-                                            text = "$dayNumber",
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                        )
+                                    weekRow.forEach { dateStr ->
+                                        if (dateStr == null) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        } else {
+                                            val isSelected = dateStr == selectedDateStr
+                                            val isToday = dateStr == todayStr
+                                            val dayNumber = dateStr.substringAfterLast("-").toIntOrNull() ?: 1
 
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            if (hasTasks) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(4.dp)
-                                                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                                )
+                                            val hasTasks = tasks.any { t ->
+                                                t.dueDateText.startsWith(dateStr) ||
+                                                    (t.dueDateTimestamp != null && dayFormat.format(Date(t.dueDateTimestamp)) == dateStr)
                                             }
-                                            if (hasHabits) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(4.dp)
-                                                        .background(GreenAccent, CircleShape)
-                                                )
+                                            val hasHabits = habits.any { h ->
+                                                h.completedDatesCsv.split(",").any { it.trim() == dateStr }
                                             }
-                                            if (hasNotes) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(4.dp)
-                                                        .background(Color(0xFF2563EB), CircleShape)
-                                                )
+                                            val hasNotes = notes.any { n ->
+                                                n.associatedDate == dateStr
+                                            }
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(
+                                                        when {
+                                                            isSelected -> MaterialTheme.colorScheme.primary
+                                                            isToday -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                                            else -> Color.Transparent
+                                                        }
+                                                    )
+                                                    .clickable { viewModel.selectCalendarDate(dateStr) }
+                                                    .padding(vertical = 7.dp)
+                                                    .testTag("cal_day_$dateStr"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isToday && !isSelected) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(end = 5.dp)
+                                                            .size(6.dp)
+                                                            .background(MaterialTheme.colorScheme.secondary, CircleShape)
+                                                    )
+                                                }
+
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "$dayNumber",
+                                                        fontSize = if (isSelected) 16.sp else 14.sp,
+                                                        fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.SemiBold,
+                                                        color = if (isSelected) {
+                                                            MaterialTheme.colorScheme.onPrimary
+                                                        } else {
+                                                            MaterialTheme.colorScheme.onSurface
+                                                        }
+                                                    )
+
+                                                    Row(
+                                                        modifier = Modifier.height(6.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        if (hasNotes) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(5.dp)
+                                                                    .background(
+                                                                        if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                                                                        CircleShape
+                                                                    )
+                                                            )
+                                                        }
+                                                        if (hasHabits) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(5.dp)
+                                                                    .background(
+                                                                        if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.secondary,
+                                                                        CircleShape
+                                                                    )
+                                                            )
+                                                        }
+                                                        if (hasTasks) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(5.dp)
+                                                                    .background(
+                                                                        if (isSelected) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.tertiary,
+                                                                        CircleShape
+                                                                    )
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+
+                        // Legenda sutil de produtividade + Modo
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    LegendDotItem(color = MaterialTheme.colorScheme.primary, label = "Notas")
+                                    LegendDotItem(color = MaterialTheme.colorScheme.secondary, label = "Hábitos")
+                                    LegendDotItem(color = MaterialTheme.colorScheme.tertiary, label = "Tarefas")
+                                }
+
+                                Text(
+                                    text = if (isMonthExpanded) "Mensal" else "Semanal",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.clickable { isMonthExpanded = !isMonthExpanded }
+                                )
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        // 5. Selected Day Agenda Header & Action buttons
-        item {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-            ) {
+            // 3. Card de Resumo do Dia
+            item {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = selectedDayHeaderTitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${tasksForDay.size} compromissos • ${habitsForDay.size} hábitos",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Eco,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Ritmo Solar",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+
+                        // Barra de progresso de infusão
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Dia $dayFocusPercent% focado",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "$completedItems de $totalItems concluídos",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(12.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                                    .padding(2.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth((dayFocusPercent / 100f).coerceIn(0f, 1f))
+                                        .fillMaxHeight()
+                                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Linha do Tempo / Agenda do Dia ("Fluxo do Dia")
+            item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .padding(top = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "Agenda de $selectedDateStr",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        val totalItems = tasksForDay.size + habitsForDay.size + notesForDay.size
-                        Text(
-                            text = "$totalItems item(s) registrado(s)",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(
-                            onClick = { showAddTaskDialog = true },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Tarefa", fontSize = 11.sp)
-                        }
-
-                        OutlinedButton(
-                            onClick = { isCreatingNoteForCalendar = true },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Nota", fontSize = 11.sp)
-                        }
-                    }
+                    Text(
+                        text = "Fluxo do Dia",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Horário Local",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-        }
 
-        // 6. Empty State if nothing for day
-        if (tasksForDay.isEmpty() && habitsForDay.isEmpty() && notesForDay.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.EventAvailable,
-                            contentDescription = null,
-                            modifier = Modifier.size(36.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Nenhum item registrado para este dia.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        }
-
-        // 7. Tasks Section
-        if (tasksForDay.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Tarefas (${tasksForDay.size})",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-            items(tasksForDay, key = { "task_${it.id}" }) { task ->
-                TaskItemCard(
-                    task = task,
-                    onToggle = { viewModel.toggleTask(task) },
-                    onEdit = {},
-                    onPlay = { onStartPomodoroForTask(task) },
-                    onDelete = { viewModel.deleteTask(task) }
-                )
-            }
-        }
-
-        // 8. Habits Completed Section
-        if (habitsForDay.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Hábitos Concluídos (${habitsForDay.size})",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = GreenAccent,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-            items(habitsForDay, key = { "habit_${it.id}" }) { habit ->
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = GreenContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
+            if (timelineEntries.isEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surface,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = habit.iconEmoji, fontSize = 20.sp)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = habit.title, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = OnGreenContainer)
-                            Text(text = "Sequência atual: ${habit.currentStreak} dias", fontSize = 11.sp, color = GreenAccent)
-                        }
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = GreenAccent, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-        }
-
-        // 9. Notes Section
-        if (notesForDay.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Anotações (${notesForDay.size})",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF2563EB),
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-            items(notesForDay, key = { "note_${it.id}" }) { note ->
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 2.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                        .clickable { activeNoteForEditor = note }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Icon(
-                                imageVector = Icons.Default.Description,
-                                contentDescription = null,
-                                tint = Color(0xFF2563EB),
-                                modifier = Modifier.size(20.dp)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                                RoundedCornerShape(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = note.title,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = note.content.take(50).replace("\n", " "),
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 28.dp, horizontal = 16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.EventAvailable,
+                                contentDescription = null,
+                                modifier = Modifier.size(38.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
+                            )
+                            Text(
+                                text = "Nenhum compromisso ou hábito neste dia.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { showAddTaskDialog = true },
+                                    shape = CircleShape
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Tarefa", fontSize = 12.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = { isCreatingNoteForCalendar = true },
+                                    shape = CircleShape
+                                ) {
+                                    Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Nota", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                itemsIndexed(
+                    items = timelineEntries,
+                    key = { index, entry ->
+                        when (entry) {
+                            is CalendarTimelineEntry.HabitEntry -> "h_${entry.habit.id}_$index"
+                            is CalendarTimelineEntry.TaskEntry -> "t_${entry.task.id}_$index"
+                            is CalendarTimelineEntry.NoteEntry -> "n_${entry.note.id}_$index"
+                        }
+                    }
+                ) { index, entry ->
+                    val isLast = index == timelineEntries.lastIndex
+                    val timeLabelColor = when (entry) {
+                        is CalendarTimelineEntry.HabitEntry -> if (entry.isCompletedOnDay) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
+                        is CalendarTimelineEntry.TaskEntry -> MaterialTheme.colorScheme.primary
+                        is CalendarTimelineEntry.NoteEntry -> MaterialTheme.colorScheme.tertiary
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Left Time Column + Vertical Connector Line
+                        Column(
+                            modifier = Modifier
+                                .width(44.dp)
+                                .fillMaxHeight()
+                                .padding(top = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = entry.sortTime,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = timeLabelColor
+                            )
+                            if (!isLast) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(2.dp)
+                                        .weight(1f)
+                                        .padding(vertical = 6.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceVariant,
+                                            CircleShape
+                                        )
                                 )
                             }
                         }
 
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = "Abrir nota",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        // Right Timeline Card
+                        Box(modifier = Modifier.weight(1f)) {
+                            when (entry) {
+                                is CalendarTimelineEntry.HabitEntry -> {
+                                    TimelineHabitCard(
+                                        habit = entry.habit,
+                                        isDone = entry.isCompletedOnDay,
+                                        canToggle = selectedDateStr == todayStr,
+                                        onToggle = { viewModel.toggleHabitToday(entry.habit) }
+                                    )
+                                }
+                                is CalendarTimelineEntry.TaskEntry -> {
+                                    TimelineTaskCard(
+                                        task = entry.task,
+                                        timeText = entry.sortTime,
+                                        onToggle = { viewModel.toggleTask(entry.task) },
+                                        onPlay = { onStartPomodoroForTask(entry.task) },
+                                        onDelete = { viewModel.deleteTask(entry.task) }
+                                    )
+                                }
+                                is CalendarTimelineEntry.NoteEntry -> {
+                                    TimelineNoteCard(
+                                        note = entry.note,
+                                        onClick = { activeNoteForEditor = entry.note }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        // Botão Flutuante de Ação (FAB Cítrico)
+        FloatingActionButton(
+            onClick = { showAddTaskDialog = true },
+            shape = CircleShape,
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .size(56.dp)
+                .testTag("cal_add_fab")
+        ) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Novo Agendamento ou Tarefa",
+                modifier = Modifier.size(30.dp)
+            )
         }
     }
 
@@ -611,5 +921,469 @@ fun CalendarScreen(
                 showAddTaskDialog = false
             }
         )
+    }
+}
+
+@Composable
+private fun LegendDotItem(color: Color, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(color, CircleShape)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun TimelineHabitCard(
+    habit: Habit,
+    isDone: Boolean,
+    canToggle: Boolean,
+    onToggle: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (isDone) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        shadowElevation = if (isDone) 0.dp else 1.5.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                RoundedCornerShape(20.dp)
+            )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isDone) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Done,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Concluído",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)
+                    ) {
+                        Text(
+                            text = habit.category,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = "Hábito",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                if (isDone) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocalFireDepartment,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "${habit.currentStreak}d",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                if (isDone) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                RoundedCornerShape(12.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = habit.iconEmoji.ifBlank { "🍊" }, fontSize = 20.sp)
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = habit.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = if (isDone) TextDecoration.LineThrough else TextDecoration.None,
+                            color = if (isDone) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (isDone) {
+                                "Meta alcançada • ${habit.currentStreak} dias seguidos"
+                            } else {
+                                "Avisa ${habit.reminderLeadMinutes}m antes • ${habit.currentStreak} dias seguidos"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isDone) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Surface(
+                    shape = CircleShape,
+                    color = if (isDone) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable(enabled = canToggle) { onToggle() }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Completar hábito",
+                            tint = if (isDone) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimelineTaskCard(
+    task: Task,
+    timeText: String,
+    onToggle: () -> Unit,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val accentColor = when (task.priority) {
+        TaskPriority.ALTA -> MaterialTheme.colorScheme.primary
+        TaskPriority.MEDIA -> MaterialTheme.colorScheme.tertiary
+        TaskPriority.BAIXA -> MaterialTheme.colorScheme.secondary
+    }
+
+    val (priorityBg, priorityFg, priorityLabel) = when (task.priority) {
+        TaskPriority.ALTA -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            "Alta Prioridade"
+        )
+        TaskPriority.MEDIA -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            "Média"
+        )
+        TaskPriority.BAIXA -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            "Baixa"
+        )
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.5.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                RoundedCornerShape(20.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+        ) {
+            // Left visual accent bar
+            Box(
+                modifier = Modifier
+                    .width(6.dp)
+                    .fillMaxHeight()
+                    .background(accentColor)
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = task.category,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = priorityBg
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(priorityFg, CircleShape)
+                                )
+                                Text(
+                                    text = priorityLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = priorityFg
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Remover tarefa",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (task.isCompleted) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant
+                                )
+                                .clickable { onToggle() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (task.isCompleted) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Concluída",
+                                    tint = MaterialTheme.colorScheme.onSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = task.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
+                                color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Previsto para as $timeText",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (!task.isCompleted) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shadowElevation = 1.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .clickable { onPlay() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Iniciar timer",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimelineNoteCard(
+    note: Note,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.5.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                RoundedCornerShape(20.dp)
+            )
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                            RoundedCornerShape(12.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Description,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = note.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = note.content.take(50).replace("\n", " ").ifBlank { "Nota vinculada ao dia" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = "Abrir nota",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }

@@ -18,11 +18,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Category
@@ -30,10 +33,21 @@ import com.example.data.model.Task
 import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
-import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
 import java.text.SimpleDateFormat
 import java.util.*
+
+@Composable
+private fun taskCategoryIconFor(category: String): ImageVector {
+    return when (category.lowercase().trim()) {
+        "estudos", "study" -> Icons.Default.MenuBook
+        "criatividade", "ideias" -> Icons.Default.Palette
+        "comunidade", "social" -> Icons.Default.VolunteerActivism
+        "saúde", "fitness" -> Icons.Default.Eco
+        "trabalho", "work", "finanças", "logística" -> Icons.Default.Payments
+        else -> Icons.Default.Label
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,10 +62,18 @@ fun TasksSubTab(
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
 
-    val filteredTasks = when (filterMode) {
-        "PENDING" -> tasks.filter { !it.isCompleted }
-        "COMPLETED" -> tasks.filter { it.isCompleted }
-        else -> tasks
+    val pendingCount = remember(tasks) { tasks.count { !it.isCompleted } }
+    val completedCount = remember(tasks) { tasks.count { it.isCompleted } }
+    val completionPercent = remember(tasks, completedCount) {
+        if (tasks.isEmpty()) 0 else (completedCount * 100) / tasks.size
+    }
+
+    val filteredTasks = remember(tasks, filterMode) {
+        when (filterMode) {
+            "PENDING" -> tasks.filter { !it.isCompleted }
+            "COMPLETED" -> tasks.filter { it.isCompleted }
+            else -> tasks
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -59,33 +81,125 @@ fun TasksSubTab(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(top = 6.dp, bottom = 92.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Filter Pills (Scrolls with the content)
+            // Secondary Pill Filter Chips
             item {
-                Row(
+                LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 2.dp)
                         .tutorialTarget("tasks_filter_row"),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilterChip(
-                        selected = filterMode == "PENDING",
-                        onClick = { filterMode = "PENDING" },
-                        label = { Text("Pendentes (${tasks.count { !it.isCompleted }})") }
-                    )
-                    FilterChip(
-                        selected = filterMode == "ALL",
-                        onClick = { filterMode = "ALL" },
-                        label = { Text("Todas (${tasks.size})") }
-                    )
-                    FilterChip(
-                        selected = filterMode == "COMPLETED",
-                        onClick = { filterMode = "COMPLETED" },
-                        label = { Text("Concluídas (${tasks.count { it.isCompleted }})") }
-                    )
+                    item {
+                        TaskFilterPill(
+                            label = "Pendentes ($pendingCount)",
+                            selected = filterMode == "PENDING",
+                            showActiveDot = true,
+                            onClick = { filterMode = "PENDING" }
+                        )
+                    }
+                    item {
+                        TaskFilterPill(
+                            label = "Todas (${tasks.size})",
+                            selected = filterMode == "ALL",
+                            showActiveDot = false,
+                            onClick = { filterMode = "ALL" }
+                        )
+                    }
+                    item {
+                        TaskFilterPill(
+                            label = "Concluídas ($completedCount)",
+                            selected = filterMode == "COMPLETED",
+                            showActiveDot = false,
+                            onClick = { filterMode = "COMPLETED" }
+                        )
+                    }
+                }
+            }
+
+            // Warm Motivation Banner
+            item {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                        RoundedCornerShape(12.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Eco,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = when (pendingCount) {
+                                        0 -> "Todas as tarefas concluídas!"
+                                        1 -> "1 tarefa para completar hoje"
+                                        else -> "$pendingCount tarefas para completar hoje"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Cultive seu foco como uma fruta doce.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "$completionPercent%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -100,12 +214,20 @@ fun TasksSubTab(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircleOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = if (filterMode == "COMPLETED") "Nenhuma tarefa concluída ainda." else "Tudo em dia! Nenhuma tarefa pendente.",
                                 style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "Toque no '+' para criação rápida de tarefas.",
                                 fontSize = 12.sp,
@@ -129,18 +251,25 @@ fun TasksSubTab(
             }
         }
 
-        // Floating Action Button
+        // Warm Tactile Circular FAB
         FloatingActionButton(
             onClick = { showAddDialog = true },
+            shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = Color.White,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
+                .size(56.dp)
                 .tutorialTarget("tasks_add_button")
                 .testTag("add_task_fab")
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Adicionar Tarefa")
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Adicionar Tarefa",
+                modifier = Modifier.size(28.dp)
+            )
         }
     }
 
@@ -168,7 +297,7 @@ fun TasksSubTab(
         )
     }
 
-    // Protection against errors: Confirmation dialog before deletion
+    // Confirmation dialog before deletion
     if (taskToDelete != null) {
         ConfirmDeleteDialog(
             title = "Excluir Tarefa",
@@ -183,6 +312,53 @@ fun TasksSubTab(
 }
 
 @Composable
+private fun TaskFilterPill(
+    label: String,
+    selected: Boolean,
+    showActiveDot: Boolean,
+    onClick: () -> Unit
+) {
+    val bgColor = if (selected) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    }
+    val textColor = if (selected) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        shape = CircleShape,
+        color = bgColor,
+        shadowElevation = if (selected) 1.dp else 0.dp,
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (selected && showActiveDot) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(MaterialTheme.colorScheme.secondary, CircleShape)
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = textColor
+            )
+        }
+    }
+}
+
+@Composable
 fun TaskItemCard(
     task: Task,
     isFirst: Boolean = false,
@@ -191,136 +367,264 @@ fun TaskItemCard(
     onPlay: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val (priorityBadgeBg, priorityBadgeText) = when (task.priority) {
-        TaskPriority.ALTA -> RedContainer to RedAction
-        TaskPriority.MEDIA -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
-        TaskPriority.BAIXA -> GreenContainer to GreenAccent
+    val (priorityBg, priorityFg, priorityDot) = when (task.priority) {
+        TaskPriority.ALTA -> Triple(
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.65f),
+            MaterialTheme.colorScheme.error,
+            MaterialTheme.colorScheme.error
+        )
+        TaskPriority.MEDIA -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            MaterialTheme.colorScheme.tertiary
+        )
+        TaskPriority.BAIXA -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            MaterialTheme.colorScheme.secondary
+        )
+    }
+
+    val categoryBg = when (task.category.lowercase().trim()) {
+        "estudos", "study" -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+        "criatividade", "ideias", "comunidade" -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+        else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+    }
+    val categoryFg = when (task.category.lowercase().trim()) {
+        "estudos", "study" -> MaterialTheme.colorScheme.onSecondaryContainer
+        "criatividade", "ideias", "comunidade" -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
     }
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (task.isCompleted) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surface
+            containerColor = if (task.isCompleted) {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (task.isCompleted) 0.dp else 1.5.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (task.isCompleted) 0.dp else 2.dp),
         modifier = Modifier
             .fillMaxWidth()
             .then(if (isFirst) Modifier.tutorialTarget("tasks_list_first_item") else Modifier)
-            .clickable { onEdit() }
             .border(
                 width = 1.dp,
-                color = if (task.isCompleted) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(16.dp)
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+                shape = RoundedCornerShape(20.dp)
             )
+            .clip(RoundedCornerShape(20.dp))
+            .clickable { onEdit() }
             .testTag("task_item_${task.id}")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Checkbox
-            Checkbox(
-                checked = task.isCompleted,
-                onCheckedChange = { onToggle() },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = GreenAccent,
-                    uncheckedColor = priorityBadgeText
-                ),
-                modifier = Modifier
-                    .then(if (isFirst) Modifier.tutorialTarget("tasks_checkbox_area") else Modifier)
-                    .testTag("task_checkbox_${task.id}")
-            )
+            // Top Row: Tactile Checkbox + Title + Play/Delete Actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Tactile Soft Rounded Checkbox
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (task.isCompleted) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                                }
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (task.isCompleted) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                },
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onToggle() }
+                            .then(if (isFirst) Modifier.tutorialTarget("tasks_checkbox_area") else Modifier)
+                            .testTag("task_checkbox_${task.id}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (task.isCompleted) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Concluída",
+                                tint = MaterialTheme.colorScheme.onSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
 
-            Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = task.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
+                            color = if (task.isCompleted) {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
 
-            // Task Info
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-                    color = if (task.isCompleted) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface
-                )
+                        if (task.focusMinutesCompleted > 0) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${task.focusMinutesCompleted} min de foco registrados",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
+                // Quick Actions: Circular Play + Delete
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Category Badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Text(
-                            text = task.category,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+                    if (!task.isCompleted) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shadowElevation = 1.dp,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onPlay() }
+                                .testTag("task_play_${task.id}")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Iniciar Timer",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
                     }
 
-                    // Priority Badge (original clean pill)
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = priorityBadgeBg
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        Text(
-                            text = "● ${task.priority.label}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = priorityBadgeText,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-
-                    // Due Date
-                    if (task.dueDateText.isNotBlank()) {
-                        Text(
-                            text = "📅 ${task.dueDateText}",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Excluir Tarefa",
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Play / Pomodoro Link Button
-            if (!task.isCompleted) {
-                IconButton(
-                    onClick = onPlay,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
-                        .testTag("task_play_${task.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Focar nesta tarefa",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            // Delete Button
-            IconButton(
-                onClick = onDelete,
-                modifier = Modifier.size(36.dp)
+            // Bottom Row: Category Pill + Priority Pill + Due Date
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Default.DeleteOutline,
-                    contentDescription = "Excluir Tarefa",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier.size(20.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    // Category Pill Chip
+                    Surface(
+                        shape = CircleShape,
+                        color = categoryBg
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = taskCategoryIconFor(task.category),
+                                contentDescription = null,
+                                tint = categoryFg,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = task.category,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = categoryFg,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // Priority Pill Chip
+                    Surface(
+                        shape = CircleShape,
+                        color = priorityBg
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(priorityDot, CircleShape)
+                            )
+                            Text(
+                                text = task.priority.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = priorityFg
+                            )
+                        }
+                    }
+                }
+
+                // Due Date
+                if (task.dueDateText.isNotBlank()) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = task.dueDateText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
     }

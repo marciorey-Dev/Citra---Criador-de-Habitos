@@ -16,21 +16,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import com.example.R
-import com.example.ui.tutorial.tutorialTarget
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.Habit
-import com.example.data.model.Task
+import com.example.R
 import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
-import com.example.ui.theme.*
+import com.example.ui.components.CitraMascote
+import com.example.ui.components.MascotHumor
+import com.example.ui.theme.GreenAccent
+import com.example.ui.theme.RedAction
+import com.example.ui.tutorial.tutorialTarget
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -45,13 +48,14 @@ fun HomeScreen(
     val tasks by viewModel.tasks.collectAsState()
     val habits by viewModel.habits.collectAsState()
     val pomodoroState by viewModel.pomodoroState.collectAsState()
+    val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
+    val dailyWelcomePhrase by viewModel.dailyWelcomePhrase.collectAsState()
     val todayStr = viewModel.todayString
 
     val pendingTasks = remember(tasks) { tasks.filter { !it.isCompleted } }
     val currentTask = pendingTasks.firstOrNull()
     val nextTasks = pendingTasks.drop(1).take(3)
 
-    // Formatted current date
     val dateDisplay = remember {
         val sdf = SimpleDateFormat("EEEE, d 'de' MMMM", Locale("pt", "BR"))
         sdf.format(Date()).replaceFirstChar { it.uppercase() }
@@ -60,42 +64,52 @@ fun HomeScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 88.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        // 1. Welcome & Date Header
+        // 1. Greeting & Date Header
         item {
             Column {
                 Text(
                     text = dateDisplay,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (pendingTasks.isNotEmpty()) "Pronto para focar?" else "Tudo em dia por hoje!",
-                    style = MaterialTheme.typography.headlineSmall,
+                    text = if (welcomePhrasesEnabled) {
+                        dailyWelcomePhrase
+                    } else if (pendingTasks.isNotEmpty()) {
+                        "Pronto para focar?"
+                    } else {
+                        "Tudo em dia por hoje!"
+                    },
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
         }
 
-        // 2. Active Session Card OR Big "Iniciar Foco" Button
+        // 2. Hero Focus Card (Active Session OR Start Focus Banner)
         item {
+            val primaryColor = MaterialTheme.colorScheme.primary
+            val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
             if (pomodoroState.isRunning || pomodoroState.isPaused) {
-                // Active session card
                 val mins = pomodoroState.remainingSeconds / 60
                 val secs = pomodoroState.remainingSeconds % 60
                 val timeStr = String.format("%02d:%02d", mins, secs)
 
                 Card(
-                    shape = RoundedCornerShape(22.dp),
+                    shape = RoundedCornerShape(26.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .tutorialTarget("home_pomodoro_card")
@@ -105,19 +119,20 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(18.dp),
+                            .padding(20.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape),
+                                .size(50.dp)
+                                .background(primaryColor, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.citra_logo),
-                                contentDescription = "Logo Citra",
-                                modifier = Modifier.size(28.dp)
+                            CitraMascote(
+                                humor = MascotHumor.FELIZ,
+                                olharX = 0f,
+                                olharY = 0f,
+                                tamanho = 34.dp
                             )
                         }
 
@@ -133,13 +148,13 @@ fun HomeScreen(
                             Text(
                                 text = timeStr,
                                 fontSize = 26.sp,
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             if (pomodoroState.linkedTask != null) {
                                 Text(
                                     text = "Foco em: ${pomodoroState.linkedTask!!.title}",
-                                    fontSize = 11.sp,
+                                    fontSize = 11.5.sp,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -150,159 +165,243 @@ fun HomeScreen(
                         Button(
                             onClick = { onNavigateToTimer() },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = Color.White
+                                containerColor = primaryColor,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
                             ),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                         ) {
                             Text("Abrir", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
             } else {
-                // Prominent CTA button to start timer immediately
-                Card(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                Surface(
+                    shape = RoundedCornerShape(26.dp),
+                    shadowElevation = 8.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .tutorialTarget("home_pomodoro_card")
+                        .clip(RoundedCornerShape(26.dp))
                         .clickable { onNavigateToTimer() }
                         .testTag("home_start_focus_btn")
                 ) {
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Image(
-                                    painter = painterResource(id = R.drawable.citra_logo),
-                                    contentDescription = "Logo Citra",
-                                    modifier = Modifier.size(24.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        primaryColor,
+                                        primaryColor.copy(alpha = 0.92f),
+                                        tertiaryColor.copy(alpha = 0.9f)
+                                    )
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Iniciar Sessão de Foco",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${pomodoroState.focusMinutes} min de concentração • ${pomodoroState.totalCycles} ciclos",
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.85f)
                             )
-                        }
-
+                    ) {
+                        // Subtle ambient decorative circles
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
-                                .background(Color.White.copy(alpha = 0.22f), CircleShape),
-                            contentAlignment = Alignment.Center
+                                .size(120.dp)
+                                .align(Alignment.TopEnd)
+                                .offset(x = 28.dp, y = (-28).dp)
+                                .background(Color.White.copy(alpha = 0.10f), CircleShape)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(90.dp)
+                                .align(Alignment.BottomStart)
+                                .offset(x = (-20).dp, y = 24.dp)
+                                .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Iniciar",
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp)
-                            )
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CitraMascote(
+                                        humor = MascotHumor.FELIZ,
+                                        olharX = 0f,
+                                        olharY = 0f,
+                                        tamanho = 28.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Iniciar Sessão de Foco",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "${pomodoroState.focusMinutes} min de concentração  •  ${pomodoroState.totalCycles} ciclos",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .background(Color.White.copy(alpha = 0.24f), CircleShape)
+                                    .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Iniciar foco",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 3. Current & Upcoming Tasks Section
+        // 3. Quick Actions Section ("O que fazer a seguir")
         item {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .tutorialTarget("home_tasks_shortcut"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
                     text = "O que fazer a seguir",
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    FilledTonalButton(
-                        onClick = { onQuickAddNote() },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("home_quick_add_note_btn")
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .clickable { onQuickAddNote() }
+                            .testTag("home_quick_add_note_btn")
                     ) {
-                        Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Nova Nota", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NoteAdd,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Nova Nota",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
                     }
 
-                    FilledTonalButton(
-                        onClick = { onQuickAddTask() },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("home_quick_add_task_btn")
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .clickable { onQuickAddTask() }
+                            .testTag("home_quick_add_task_btn")
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Nova Tarefa", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Nova Tarefa",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
                     }
                 }
             }
         }
 
+        // 4. Empty Tasks Card OR Current & Upcoming Tasks
         if (pendingTasks.isEmpty()) {
             item {
                 Card(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                            RoundedCornerShape(16.dp)
+                            RoundedCornerShape(24.dp)
                         )
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(horizontal = 24.dp, vertical = 28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(text = "✨", fontSize = 32.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = "✨", fontSize = 26.sp)
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = "Nenhuma tarefa pendente!",
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "Toque em '+ Nova Tarefa' para planejar seu dia.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
             }
         } else {
-            // Highlighted current priority task
             if (currentTask != null) {
                 item {
                     val priorityColor = when (currentTask.priority) {
@@ -312,15 +411,15 @@ fun HomeScreen(
                     }
 
                     Card(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(22.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .border(
                                 1.5.dp,
-                                priorityColor.copy(alpha = 0.5f),
-                                RoundedCornerShape(18.dp)
+                                priorityColor.copy(alpha = 0.45f),
+                                RoundedCornerShape(22.dp)
                             )
                     ) {
                         Column(
@@ -334,7 +433,7 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Surface(
-                                    shape = RoundedCornerShape(6.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     color = priorityColor.copy(alpha = 0.12f)
                                 ) {
                                     Text(
@@ -342,19 +441,20 @@ fun HomeScreen(
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = priorityColor,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
 
                                 Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
                                 ) {
                                     Text(
                                         text = currentTask.category,
                                         fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                     )
                                 }
                             }
@@ -368,7 +468,7 @@ fun HomeScreen(
                                 Checkbox(
                                     checked = currentTask.isCompleted,
                                     onCheckedChange = { viewModel.toggleTask(currentTask) },
-                                    colors = CheckboxDefaults.colors(checkedColor = GreenAccent)
+                                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.secondary)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Column(modifier = Modifier.weight(1f)) {
@@ -381,7 +481,7 @@ fun HomeScreen(
                                     if (currentTask.dueDateText.isNotBlank()) {
                                         Text(
                                             text = "📅 ${currentTask.dueDateText}",
-                                            fontSize = 11.sp,
+                                            fontSize = 11.5.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -393,7 +493,7 @@ fun HomeScreen(
                                         onNavigateToTimer()
                                     },
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(42.dp)
                                         .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
                                 ) {
                                     Icon(
@@ -409,26 +509,25 @@ fun HomeScreen(
                 }
             }
 
-            // Next tasks items
             if (nextTasks.isNotEmpty()) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         nextTasks.forEach { task ->
                             Card(
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .border(
                                         1.dp,
-                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                                        RoundedCornerShape(14.dp)
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                        RoundedCornerShape(18.dp)
                                     )
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Checkbox(
@@ -439,7 +538,8 @@ fun HomeScreen(
                                     Text(
                                         text = task.title,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -447,6 +547,7 @@ fun HomeScreen(
                                     Text(
                                         text = task.category,
                                         fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -456,7 +557,6 @@ fun HomeScreen(
                 }
             }
 
-            // View all tasks link
             if (pendingTasks.size > 1) {
                 item {
                     TextButton(
@@ -465,115 +565,150 @@ fun HomeScreen(
                     ) {
                         Text(
                             "Ver todas as ${pendingTasks.size} tarefas pendentes →",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
         }
 
-        // 4. Discreet Daily Habits Summary Section
+        // 5. Daily Habits Section ("Hábitos de Hoje")
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .tutorialTarget("home_habits_shortcut"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "Hábitos de Hoje",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                val completedToday = habits.count { h ->
-                    h.completedDatesCsv.split(",").any { it.trim() == todayStr }
-                }
-                Text(
-                    text = "$completedToday de ${habits.size} feitos",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        if (habits.isEmpty()) {
-            item {
-                Text(
-                    text = "Nenhum hábito cadastrado ainda.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            item {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tutorialTarget("home_habits_shortcut"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    items(habits, key = { it.id }) { habit ->
-                        val isDone = habit.completedDatesCsv.split(",").any { it.trim() == todayStr }
+                    Text(
+                        text = "Hábitos de Hoje",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isDone) GreenContainer else MaterialTheme.colorScheme.surface
-                            ),
-                            modifier = Modifier
-                                .widthIn(min = 140.dp)
-                                .clickable { viewModel.toggleHabitToday(habit) }
-                                .border(
-                                    width = 1.dp,
-                                    color = if (isDone) GreenAccent.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(text = habit.iconEmoji, fontSize = 20.sp)
-                                    if (isDone) {
-                                        Icon(
-                                            imageVector = Icons.Default.CheckCircle,
-                                            contentDescription = "Concluído",
-                                            tint = GreenAccent,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                    val completedToday = habits.count { h ->
+                        h.completedDatesCsv.split(",").any { it.trim() == todayStr }
+                    }
+                    Text(
+                        text = "$completedToday de ${habits.size} feitos",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                if (habits.isEmpty()) {
+                    Text(
+                        text = "Nenhum hábito cadastrado ainda.",
+                        fontSize = 12.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(habits, key = { it.id }) { habit ->
+                            val isDone = habit.completedDatesCsv.split(",").any { it.trim() == todayStr }
+
+                            Card(
+                                shape = RoundedCornerShape(22.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDone) {
+                                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
                                     } else {
-                                        Text(
-                                            text = habit.reminderTime,
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        MaterialTheme.colorScheme.surface
                                     }
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                modifier = Modifier
+                                    .width(156.dp)
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isDone) {
+                                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)
+                                        } else {
+                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                        },
+                                        shape = RoundedCornerShape(22.dp)
+                                    )
+                                    .clickable { viewModel.toggleHabitToday(habit) }
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(text = habit.iconEmoji, fontSize = 18.sp)
+                                            Text(
+                                                text = habit.reminderTime,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isDone) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                }
+                                            )
+                                        }
+
+                                        if (isDone) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = "Concluído",
+                                                tint = MaterialTheme.colorScheme.secondary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Text(
+                                        text = habit.title,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp,
+                                        lineHeight = 18.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        color = if (isDone) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        }
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    Text(
+                                        text = "🔥 ${habit.currentStreak} dias",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDone) {
+                                            MaterialTheme.colorScheme.secondary
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        }
+                                    )
                                 }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Text(
-                                    text = habit.title,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = if (isDone) OnGreenContainer else MaterialTheme.colorScheme.onSurface
-                                )
-
-                                Text(
-                                    text = "🔥 ${habit.currentStreak} dias",
-                                    fontSize = 11.sp,
-                                    color = if (isDone) GreenAccent else MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
                             }
                         }
                     }

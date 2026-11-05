@@ -47,13 +47,11 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.citra_logo),
-                    contentDescription = "Logo Citra",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                CitraMascote(
+                    humor = MascotHumor.FELIZ,
+                    olharX = 0f,
+                    olharY = 0f,
+                    tamanho = 72.dp
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -66,7 +64,7 @@ fun CreditsDialog(onDismiss: () -> Unit) {
                 )
 
                 Text(
-                    text = "Versão V1.0 • Foco, Hábitos e Produtividade com Backup na Nuvem",
+                    text = "Versão 1.2.2 • Foco, Hábitos e Produtividade com Backup na Nuvem",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

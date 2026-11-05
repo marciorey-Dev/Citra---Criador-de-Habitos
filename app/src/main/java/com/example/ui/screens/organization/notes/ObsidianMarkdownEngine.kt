@@ -390,18 +390,55 @@ object ObsidianMarkdownEngine {
      */
     fun toggleLinePrefix(value: TextFieldValue, targetPrefix: String): TextFieldValue {
         val text = value.text
-        val cursor = value.selection.start.coerceIn(0, text.length)
-        val info = findCursorLine(text, cursor)
-        val line = info.lineContent
-        val trimmed = line.trimStart()
-        val indent = line.substring(0, line.length - trimmed.length)
+        val selStart = minOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+        val selEnd = maxOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
 
-        // Known prefixes that can be replaced
         val knownPrefixes = listOf(
             "##### ", "#### ", "### ", "## ", "# ",
             "- [ ] ", "- [x] ", "- [X] ",
             "- ", "* ", "> "
         )
+
+        if (selStart != selEnd) {
+            val firstLineStart = if (selStart == 0) 0 else {
+                val prevNl = text.lastIndexOf('\n', selStart - 1)
+                if (prevNl == -1) 0 else prevNl + 1
+            }
+            val lastLineEnd = text.indexOf('\n', selEnd).let { if (it == -1) text.length else it }
+            val selectedBlock = text.substring(firstLineStart, lastLineEnd)
+            val lines = selectedBlock.split('\n')
+            val nonBlankLines = lines.filter { it.isNotBlank() }
+            val allHaveTarget = nonBlankLines.isNotEmpty() && nonBlankLines.all {
+                it.trimStart().startsWith(targetPrefix)
+            }
+
+            val transformed = lines.joinToString("\n") { line ->
+                if (line.isBlank()) {
+                    line
+                } else {
+                    val trimmed = line.trimStart()
+                    val indent = line.substring(0, line.length - trimmed.length)
+                    val existingPrefix = knownPrefixes.firstOrNull { trimmed.startsWith(it) }
+                    when {
+                        allHaveTarget && existingPrefix == targetPrefix -> indent + trimmed.removePrefix(targetPrefix)
+                        existingPrefix != null -> indent + targetPrefix + trimmed.removePrefix(existingPrefix)
+                        else -> indent + targetPrefix + trimmed
+                    }
+                }
+            }
+
+            val newText = text.substring(0, firstLineStart) + transformed + text.substring(lastLineEnd)
+            return value.copy(
+                text = newText,
+                selection = TextRange(firstLineStart, firstLineStart + transformed.length)
+            )
+        }
+
+        val cursor = selStart
+        val info = findCursorLine(text, cursor)
+        val line = info.lineContent
+        val trimmed = line.trimStart()
+        val indent = line.substring(0, line.length - trimmed.length)
 
         val existingPrefix = knownPrefixes.firstOrNull { trimmed.startsWith(it) }
 
@@ -425,6 +462,81 @@ object ObsidianMarkdownEngine {
         val newCursor = (cursor + diff).coerceIn(0, newText.length)
 
         return value.copy(text = newText, selection = TextRange(newCursor, newCursor))
+    }
+
+    /**
+     * Wraps selected paragraphs inside a block (e.g. Code, Math, Collapsible) or inserts defaultTemplate if nothing is selected.
+     */
+    fun wrapOrInsertBlock(
+        value: TextFieldValue,
+        blockPrefix: String,
+        blockSuffix: String,
+        defaultTemplate: String
+    ): TextFieldValue {
+        val text = value.text
+        val selStart = minOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+        val selEnd = maxOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+
+        if (selStart == selEnd) {
+            return insertMediaToken(value, defaultTemplate)
+        }
+
+        val selected = text.substring(selStart, selEnd).trim()
+        if (selected.isEmpty()) {
+            return insertMediaToken(value, defaultTemplate)
+        }
+
+        val needsLeadingNewline = selStart > 0 && text[selStart - 1] != '\n'
+        val needsTrailingNewline = selEnd < text.length && text[selEnd] != '\n'
+        val sb = StringBuilder()
+        if (needsLeadingNewline) sb.append("\n")
+        sb.append(blockPrefix)
+        sb.append(selected)
+        sb.append(blockSuffix)
+        if (needsTrailingNewline) sb.append("\n")
+
+        val insertion = sb.toString()
+        val newText = text.substring(0, selStart) + insertion + text.substring(selEnd)
+        val newPos = selStart + insertion.length
+        return value.copy(text = newText, selection = TextRange(newPos, newPos))
+    }
+
+    /**
+     * Wraps selected paragraphs inside a Markdown Callout block or inserts defaultText if nothing is selected.
+     */
+    fun wrapSelectionInCallout(
+        value: TextFieldValue,
+        calloutTag: String,
+        defaultText: String
+    ): TextFieldValue {
+        val text = value.text
+        val selStart = minOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+        val selEnd = maxOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+
+        if (selStart == selEnd) {
+            return insertMediaToken(value, "> [!$calloutTag] $defaultText")
+        }
+
+        val selected = text.substring(selStart, selEnd).trim()
+        if (selected.isEmpty()) {
+            return insertMediaToken(value, "> [!$calloutTag] $defaultText")
+        }
+
+        val quotedLines = selected.lines().joinToString("\n") { line ->
+            if (line.isBlank()) ">" else "> ${line.trimStart()}"
+        }
+        val block = "> [!$calloutTag]\n$quotedLines"
+        val needsLeadingNewline = selStart > 0 && text[selStart - 1] != '\n'
+        val needsTrailingNewline = selEnd < text.length && text[selEnd] != '\n'
+        val sb = StringBuilder()
+        if (needsLeadingNewline) sb.append("\n")
+        sb.append(block)
+        if (needsTrailingNewline) sb.append("\n")
+
+        val insertion = sb.toString()
+        val newText = text.substring(0, selStart) + insertion + text.substring(selEnd)
+        val newPos = selStart + insertion.length
+        return value.copy(text = newText, selection = TextRange(newPos, newPos))
     }
 
     /**

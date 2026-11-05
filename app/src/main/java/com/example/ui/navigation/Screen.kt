@@ -65,7 +65,21 @@ sealed class Screen(
         unselectedIcon = Icons.Outlined.Person
     )
 
+    object Finances : Screen(
+        route = "finances",
+        title = "Finanças",
+        selectedIcon = Icons.Filled.BarChart,
+        unselectedIcon = Icons.Outlined.BarChart
+    )
+
     companion object {
         val allScreens = listOf(Home, Timer, Organization, Notes, Profile)
+
+        fun screensFor(financesEnabled: Boolean): List<Screen> =
+            if (financesEnabled) {
+                listOf(Home, Timer, Organization, Notes, Finances, Profile)
+            } else {
+                allScreens
+            }
     }
 }

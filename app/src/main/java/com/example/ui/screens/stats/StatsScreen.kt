@@ -3,10 +3,8 @@ package com.example.ui.screens.stats
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,17 +13,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.Habit
 import com.example.ui.MainViewModel
-import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
 import java.text.SimpleDateFormat
 import java.util.*
@@ -47,26 +46,34 @@ fun StatsScreen(
     val todayStr = viewModel.todayString
 
     var selectedPeriod by remember { mutableStateOf(StatsPeriod.SEMANAL) }
-    var periodOffset by remember { mutableStateOf(0) } // 0 = current, -1 = previous, etc.
+    var periodOffset by remember { mutableStateOf(0) }
 
-    // Reset offset when period changes
     LaunchedEffect(selectedPeriod) {
         periodOffset = 0
     }
 
-    // Dynamic colors for categories
-    val palette = listOf(
-        Color(0xFF2563EB), Color(0xFF7C3AED), Color(0xFFD97706),
-        Color(0xFFDB2777), Color(0xFF059669), Color(0xFFFF6F00),
-        Color(0xFF0891B2), Color(0xFF4F46E5)
-    )
-    val categoryColorMap = remember(categories) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
+    val palette = remember(primaryColor, secondaryColor, tertiaryColor) {
+        listOf(
+            primaryColor,
+            tertiaryColor,
+            secondaryColor,
+            Color(0xFF2563EB),
+            Color(0xFF7C3AED),
+            Color(0xFFDB2777),
+            Color(0xFF0891B2),
+            Color(0xFFD97706)
+        )
+    }
+    val categoryColorMap = remember(categories, palette) {
         categories.mapIndexed { idx, cat ->
             cat.name to palette[idx % palette.size]
         }.toMap()
     }
 
-    // Calculate time bounds, title, and bar data based on period & offset
     val periodInfo = remember(selectedPeriod, periodOffset, focusSessions) {
         val cal = Calendar.getInstance()
         when (selectedPeriod) {
@@ -87,9 +94,9 @@ fun StatsScreen(
                 endCal.set(Calendar.SECOND, 59)
                 val endMs = endCal.timeInMillis
 
-                val df = SimpleDateFormat("dd 'de' MMM", Locale("pt", "BR"))
-                val title = if (periodOffset == 0) "Semana Atual (${df.format(cal.time)} - ${df.format(endCal.time)})"
-                else "Semana de ${df.format(cal.time)} a ${df.format(endCal.time)}"
+                val df = SimpleDateFormat("dd MMM", Locale("pt", "BR"))
+                val title = if (periodOffset == 0) "Esta Semana (${df.format(cal.time)} - ${df.format(endCal.time)})"
+                else "${df.format(cal.time)} - ${df.format(endCal.time)}"
 
                 val dayLabels = listOf("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
                 val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
@@ -124,10 +131,8 @@ fun StatsScreen(
                 val endMs = endCal.timeInMillis
 
                 val monthFormat = SimpleDateFormat("MMMM 'de' yyyy", Locale("pt", "BR"))
-                val monthName = monthFormat.format(cal.time).replaceFirstChar { it.uppercase() }
-                val title = if (periodOffset == 0) "Mês Atual ($monthName)" else monthName
+                val title = monthFormat.format(cal.time).replaceFirstChar { it.uppercase() }
 
-                // Split month into 4-5 weekly buckets
                 val bars = mutableListOf<Triple<String, Int, Boolean>>()
                 var bucketStart = 1
                 var weekNum = 1
@@ -149,7 +154,7 @@ fun StatsScreen(
                     }.sumOf { it.durationMinutes }
 
                     val isCurrentWeekInMonth = isCurrentMonth && currentCal.get(Calendar.DAY_OF_MONTH) in bucketStart..bucketEnd
-                    bars.add(Triple("Sem $weekNum", mins, isCurrentWeekInMonth))
+                    bars.add(Triple("S$weekNum", mins, isCurrentWeekInMonth))
 
                     bucketStart += 7
                     weekNum++
@@ -176,7 +181,7 @@ fun StatsScreen(
                 val endMs = endCal.timeInMillis
 
                 val year = cal.get(Calendar.YEAR)
-                val title = if (periodOffset == 0) "Ano Atual ($year)" else "Ano de $year"
+                val title = "Ano de $year"
 
                 val monthShortNames = listOf("Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez")
                 val currentCal = Calendar.getInstance()
@@ -205,7 +210,6 @@ fun StatsScreen(
         }
     }
 
-    // Sessions in the active period window
     val periodSessions = remember(focusSessions, periodInfo) {
         focusSessions.filter { it.timestamp in periodInfo.startMs..periodInfo.endMs }
     }
@@ -213,31 +217,34 @@ fun StatsScreen(
     val totalPeriodMinutes = remember(periodSessions) {
         periodSessions.sumOf { it.durationMinutes }
     }
-    val totalPeriodHours = totalPeriodMinutes / 60
-    val totalPeriodRemMins = totalPeriodMinutes % 60
-    val formattedPeriodTime = if (totalPeriodHours > 0) "${totalPeriodHours}h ${totalPeriodRemMins}m" else "${totalPeriodRemMins}m"
 
-    // Group sessions by category for the Pie Chart in this period
     val categoryTotals = remember(periodSessions) {
         if (periodSessions.isEmpty()) {
-            mapOf("Sem foco registrado" to 1)
+            emptyMap()
         } else {
             periodSessions.groupBy { it.category }
                 .mapValues { entry -> entry.value.sumOf { it.durationMinutes } }
+                .toList()
+                .sortedByDescending { it.second }
+                .toMap()
         }
     }
 
-    // Most productive bucket in this period
+    val avgMinutesPerBucket = remember(periodInfo.bars, totalPeriodMinutes) {
+        if (periodInfo.bars.isEmpty()) 0 else (totalPeriodMinutes.toFloat() / periodInfo.bars.size).roundToInt()
+    }
+
     val mostProductiveBucket = remember(periodInfo.bars) {
         val top = periodInfo.bars.maxByOrNull { it.second }
         if (top != null && top.second > 0) "${top.first} (${top.second}m)" else "—"
     }
 
-    // Habit Statistics: Completed vs Pending
     val completedHabitsCount = remember(habits, todayStr) {
         habits.count { h -> h.completedDatesCsv.split(",").any { it.trim() == todayStr } }
     }
-    val pendingHabitsCount = habits.size - completedHabitsCount
+    val bestStreak = remember(habits) {
+        habits.maxOfOrNull { it.currentStreak } ?: 0
+    }
 
     val dayFormat = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val dailyFocusMinutes = remember(focusSessions, todayStr) {
@@ -259,13 +266,6 @@ fun StatsScreen(
         focusSessions.filter { it.timestamp >= startWeek }.sumOf { it.durationMinutes }
     }
 
-    val plannedMinutes = remember(periodSessions) {
-        periodSessions.sumOf { (it.cycleCount.coerceAtLeast(1) * 25).coerceAtMost(it.durationMinutes) }
-    }
-    val extraMinutes = remember(totalPeriodMinutes, plannedMinutes) {
-        (totalPeriodMinutes - plannedMinutes).coerceAtLeast(0)
-    }
-
     val previousPeriodTotalMinutes = remember(focusSessions, periodInfo) {
         val windowDuration = periodInfo.endMs - periodInfo.startMs
         val prevStart = periodInfo.startMs - windowDuration
@@ -274,628 +274,514 @@ fun StatsScreen(
     }
     val periodDiff = totalPeriodMinutes - previousPeriodTotalMinutes
 
-    val past7DaysHabitsHistory = remember(habits) {
-        val cal = Calendar.getInstance()
-        var completedCount = 0
-        var missedCount = 0
-        for (i in 0..6) {
-            val dCal = cal.clone() as Calendar
-            dCal.add(Calendar.DAY_OF_YEAR, -i)
-            val dStr = dayFormat.format(dCal.time)
-            habits.forEach { h ->
-                val wasCompleted = h.completedDatesCsv.split(",").any { it.trim() == dStr }
-                if (wasCompleted) completedCount++ else missedCount++
-            }
-        }
-        completedCount to missedCount
-    }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header & Period Selector
+        // 1. Header & Period Filter Pills
         Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "Estatísticas & Histórico",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = "Compreenda seus padrões com clareza e ritmo saudável",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Text(
+                text = "Estatísticas & Histórico",
+                fontSize = 23.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.4).sp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Compreenda seus padrões com clareza e ritmo saudável",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-                Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-                // Period Filter Tabs
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tutorialTarget("stats_period_selector"),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StatsPeriod.entries.forEach { period ->
-                        FilterChip(
-                            selected = selectedPeriod == period,
-                            onClick = { selectedPeriod = period },
-                            label = {
-                                Text(
-                                    text = period.label,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selectedPeriod == period) FontWeight.Bold else FontWeight.Normal
-                                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("stats_period_selector"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StatsPeriod.entries.forEach { period ->
+                    val isSelected = selectedPeriod == period
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        shadowElevation = if (isSelected) 2.dp else 0.dp,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                },
+                                shape = CircleShape
+                            )
+                            .clickable { selectedPeriod = period }
+                    ) {
+                        Text(
+                            text = period.label,
+                            fontSize = 12.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
                         )
                     }
                 }
             }
+        }
 
-        // 1. DADOS DE INÍCIO: TEMPO DIÁRIO, SEMANAL & COMPARAÇÃO DE PERÍODOS
+        // 2. Productivity Overview Card (Clean 2-stat highlight)
         Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                    RoundedCornerShape(22.dp)
+                )
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Visão Geral de Produtividade",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                    Text(
+                        text = "Visão Geral de Produtividade",
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
-                        // Comparação de períodos
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (periodDiff >= 0) GreenContainer else MaterialTheme.colorScheme.surfaceVariant
+                    Surface(
+                        shape = CircleShape,
+                        color = if (periodDiff >= 0) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            Icon(
+                                imageVector = if (periodDiff >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                contentDescription = null,
+                                tint = if (periodDiff >= 0) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(14.dp)
+                            )
                             Text(
                                 text = if (periodDiff >= 0) "+${periodDiff}m vs anterior" else "${periodDiff}m vs anterior",
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (periodDiff >= 0) OnGreenContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                color = if (periodDiff >= 0) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                             )
                         }
                     }
+                }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Foco Hoje", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Foco Hoje",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "${dailyFocusMinutes / 60}h ${dailyFocusMinutes % 60}m",
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 18.sp,
+                                fontSize = 20.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
+                    }
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Foco Semanal", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = "Foco Semanal",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "${weeklyFocusMinutes / 60}h ${weeklyFocusMinutes % 60}m",
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 18.sp,
+                                fontSize = 20.sp,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
-
-                    Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-
-                    // Tempo Planejado vs Tempo Extra
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Planejado: ${plannedMinutes}m",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Bolt, contentDescription = null, tint = GreenAccent, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Tempo Extra: ${extraMinutes}m",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = GreenAccent
-                            )
-                        }
-                    }
-                }
-            }
-
-        // 2. HISTÓRICO DE HÁBITOS CUMPRIDOS E FALHADOS (Sem tom de culpa)
-        Card(
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Histórico de Hábitos (Últimos 7 dias)",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "✅", fontSize = 14.sp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "${past7DaysHabitsHistory.first} cumpridos",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = GreenAccent
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🍃", fontSize = 14.sp)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "${past7DaysHabitsHistory.second} não realizados",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "🌱 Padrão saudável: dias mais calmos fazem parte da sua rotina. Cada dia é uma nova oportunidade!",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                        lineHeight = 15.sp
-                    )
-                }
-            }
-
-        // 3. PROGRESSO POR CATEGORIA NO INÍCIO
-        if (totalPeriodMinutes > 0) {
-            Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "Progresso por Categoria (${selectedPeriod.label})",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        categoryTotals.filter { it.key != "Sem foco registrado" }.forEach { (catName, catMins) ->
-                            val pct = (catMins.toFloat() / totalPeriodMinutes.toFloat()).coerceIn(0f, 1f)
-                            val catColor = categoryColorMap[catName] ?: OrangePrimary
-
-                            Column {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(catName, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    Text("${catMins}m (${(pct * 100).roundToInt()}%)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                LinearProgressIndicator(
-                                    progress = { pct },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp),
-                                    color = catColor,
-                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }
 
-        // 4 Summary Metric Cards (with readable Orange numbers in Dark Mode)
-        Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                MetricCard(
-                    title = "Foco (${selectedPeriod.label})",
-                    value = formattedPeriodTime,
-                    icon = Icons.Default.Timer,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "Mais Produtivo",
-                    value = mostProductiveBucket,
-                    icon = Icons.Default.TrendingUp,
-                    iconTint = GreenAccent,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-        Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                MetricCard(
-                    title = "Hábitos Concluídos Hoje",
-                    value = "$completedHabitsCount de ${habits.size}",
-                    icon = Icons.Default.CheckCircle,
-                    iconTint = GreenAccent,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "Hábitos Pendentes",
-                    value = "$pendingHabitsCount pendentes",
-                    icon = Icons.Default.Schedule,
-                    iconTint = RedAction,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-        // Focus Bar Chart with Period Navigation
+        // 3. Tactile Rhythm Bar Chart Card
         Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                    RoundedCornerShape(22.dp)
+                )
+                .tutorialTarget("stats_focus_chart")
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .tutorialTarget("stats_focus_chart")
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Period Navigator
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { periodOffset-- }) {
-                            Icon(Icons.Default.ChevronLeft, contentDescription = "Período Anterior")
-                        }
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = periodInfo.title,
-                            style = MaterialTheme.typography.titleSmall,
+                            text = "Ritmo ${selectedPeriod.label}",
+                            fontSize = 15.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        IconButton(
-                            onClick = { if (periodOffset < 0) periodOffset++ },
-                            enabled = periodOffset < 0
-                        ) {
-                            Icon(Icons.Default.ChevronRight, contentDescription = "Próximo Período")
-                        }
+                        Text(
+                            text = periodInfo.title,
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { periodOffset-- },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "Período Anterior",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { if (periodOffset < 0) periodOffset++ },
+                            enabled = periodOffset < 0,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Próximo Período",
+                                tint = if (periodOffset < 0) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
+                                }
+                            )
+                        }
+                    }
+                }
 
-                    val maxMins = (periodInfo.bars.maxOfOrNull { it.second } ?: 60).coerceAtLeast(60)
+                val maxMins = (periodInfo.bars.maxOfOrNull { it.second } ?: 60).coerceAtLeast(60)
 
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(136.dp)
+                        .padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    periodInfo.bars.forEach { (label, mins, isCurrent) ->
+                        val heightFraction = (mins.toFloat() / maxMins.toFloat()).coerceIn(0.12f, 1f)
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(if (periodInfo.bars.size > 8) 14.dp else 22.dp)
+                                    .fillMaxHeight(heightFraction)
+                                    .background(
+                                        color = if (isCurrent) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                        },
+                                        shape = CircleShape
+                                    )
+                                    .padding(2.dp),
+                                contentAlignment = Alignment.BottomCenter
+                            ) {
+                                if (mins > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                color = if (isCurrent) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
+                                                },
+                                                shape = CircleShape
+                                            )
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Text(
+                                text = label,
+                                fontSize = if (periodInfo.bars.size > 8) 9.5.sp else 11.sp,
+                                fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                color = if (isCurrent) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(130.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        periodInfo.bars.forEach { (label, mins, isCurrent) ->
-                            val heightFraction = (mins.toFloat() / maxMins.toFloat()).coerceIn(0.08f, 1f)
-
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Bottom,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                if (mins > 0) {
-                                    Text(
-                                        text = "${mins}m",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .width(if (periodInfo.bars.size > 8) 12.dp else 18.dp)
-                                        .fillMaxHeight(heightFraction)
-                                        .background(
-                                            color = if (mins > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                            shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
-                                        )
-                                )
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                Text(
-                                    text = label,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-        // Category Pie Chart with Historical Comparison for the Selected Period
-        Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .tutorialTarget("stats_category_pie")
-                    .testTag("category_pie_chart_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "Distribuição por Categoria",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Histórico: ${periodInfo.title}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    val sumMins = if (periodSessions.isEmpty()) 1 else categoryTotals.values.sum().coerceAtLeast(1)
-
-                    if (periodSessions.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Nenhuma sessão de foco registrada neste período.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            // Canvas Pie
                             Box(
                                 modifier = Modifier
-                                    .size(130.dp)
-                                    .padding(6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    var currentAngle = -90f
-                                    val strokeWidth = 22.dp.toPx()
-                                    val diameter = size.minDimension - strokeWidth
-                                    val topLeft = Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
-                                    val arcSize = Size(diameter, diameter)
-
-                                    categoryTotals.forEach { (cat, mins) ->
-                                        val sweep = (mins.toFloat() / sumMins.toFloat()) * 360f
-                                        val color = categoryColorMap[cat] ?: OrangePrimary
-                                        drawArc(
-                                            color = color,
-                                            startAngle = currentAngle,
-                                            sweepAngle = sweep,
-                                            useCenter = false,
-                                            topLeft = topLeft,
-                                            size = arcSize,
-                                            style = Stroke(width = strokeWidth)
-                                        )
-                                        currentAngle += sweep
-                                    }
-                                }
-
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        text = "100%",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Foco",
-                                        fontSize = 10.sp,
-                                        color = Slate400
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(14.dp))
-
-                            // Legend
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                categoryTotals.forEach { (cat, mins) ->
-                                    val pct = (mins * 100) / sumMins
-                                    val color = categoryColorMap[cat] ?: OrangePrimary
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(10.dp)
-                                                    .background(color, CircleShape)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = cat,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 1
-                                            )
-                                        }
-                                        Text(
-                                            text = "$pct% (${mins}m)",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
+                                    .size(8.dp)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            )
+                            Text(
+                                text = "Média: ${avgMinutesPerBucket}m",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
+
+                        Text(
+                            text = "Pico: $mostProductiveBucket",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
                     }
                 }
             }
+        }
 
-        // Habit History & Performance Section
+        // 4. Category Pie Chart Card (Preserved & Styled)
         Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                modifier = Modifier.fillMaxWidth()
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                    RoundedCornerShape(22.dp)
+                )
+                .tutorialTarget("stats_category_pie")
+                .testTag("category_pie_chart_card")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Histórico de Hábitos & Desempenho",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = "Distribuição por Categoria",
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "Status de cumprimento de cada hábito definido",
-                        fontSize = 12.sp,
+                        text = selectedPeriod.label,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                    if (habits.isEmpty()) {
+                if (periodSessions.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = "Nenhum hábito cadastrado ainda.",
-                            fontSize = 12.sp,
-                            color = Slate400
+                            text = "Nenhuma sessão de foco registrada neste período.",
+                            fontSize = 12.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    } else {
-                        habits.forEach { habit ->
-                            val isDoneToday = habit.completedDatesCsv.split(",")
-                                .any { it.trim() == todayStr }
+                    }
+                } else {
+                    val sumMins = categoryTotals.values.sum().coerceAtLeast(1)
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(132.dp)
+                                .padding(6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                var currentAngle = -90f
+                                val strokeWidth = 22.dp.toPx()
+                                val diameter = size.minDimension - strokeWidth
+                                val topLeft = Offset((size.width - diameter) / 2, (size.height - diameter) / 2)
+                                val arcSize = Size(diameter, diameter)
+
+                                categoryTotals.entries.forEachIndexed { idx, (cat, mins) ->
+                                    val sweep = (mins.toFloat() / sumMins.toFloat()) * 360f
+                                    val color = categoryColorMap[cat] ?: palette[idx % palette.size]
+                                    drawArc(
+                                        color = color,
+                                        startAngle = currentAngle,
+                                        sweepAngle = sweep,
+                                        useCenter = false,
+                                        topLeft = topLeft,
+                                        size = arcSize,
+                                        style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+                                    )
+                                    currentAngle += sweep
+                                }
+                            }
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "${totalPeriodMinutes}m",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Total",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(16.dp))
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            categoryTotals.entries.forEachIndexed { idx, (cat, mins) ->
+                                val pct = ((mins.toFloat() / sumMins.toFloat()) * 100f).roundToInt()
+                                val color = categoryColorMap[cat] ?: palette[idx % palette.size]
                                 Row(
+                                    modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(text = habit.iconEmoji, fontSize = 18.sp)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            text = habit.title,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(color, CircleShape)
                                         )
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "Sequência: ${habit.currentStreak} dias | Notifica às ${habit.reminderTime}",
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = cat,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                }
-
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isDoneToday) GreenContainer else MaterialTheme.colorScheme.surfaceVariant
-                                ) {
                                     Text(
-                                        text = if (isDoneToday) "Concluído Hoje" else "Pendente",
-                                        fontSize = 10.sp,
+                                        text = "$pct% (${mins}m)",
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isDoneToday) OnGreenContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -904,6 +790,97 @@ fun StatsScreen(
                 }
             }
         }
+
+        // 5. Compact Habits Summary Card
+        Card(
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                    RoundedCornerShape(22.dp)
+                )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(
+                                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Eco,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "Hábitos de Hoje",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (habits.isEmpty()) {
+                                "Nenhum hábito cadastrado"
+                            } else {
+                                "$completedHabitsCount de ${habits.size} concluídos hoje"
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (bestStreak > 0) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalFireDepartment,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "${bestStreak}d",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 private data class PeriodComputation(
     val startMs: Long,
@@ -911,55 +888,3 @@ private data class PeriodComputation(
     val title: String,
     val bars: List<Triple<String, Int, Boolean>>
 )
-
-@Composable
-fun MetricCard(
-    title: String,
-    value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    iconTint: Color,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = modifier.border(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-            shape = RoundedCornerShape(18.dp)
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .background(iconTint.copy(alpha = 0.14f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = value,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1
-            )
-            Text(
-                text = title,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}

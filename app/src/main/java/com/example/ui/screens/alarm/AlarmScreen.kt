@@ -62,11 +62,29 @@ fun AlarmScreen(
         ) {
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Central strictly "00:00" blinking clock per user specification
-            Box(
+            // Central task/habit title + "00:00" blinking clock
+            Column(
                 modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.Center
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
+                if (alarmData.title.isNotBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF1E293B).copy(alpha = 0.85f),
+                        modifier = Modifier.padding(bottom = 20.dp)
+                    ) {
+                        Text(
+                            text = alarmData.title,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFF8FAFC),
+                            modifier = Modifier
+                                .padding(horizontal = 20.dp, vertical = 10.dp)
+                                .testTag("alarm_title_text")
+                        )
+                    }
+                }
                 Text(
                     text = "00:00",
                     fontSize = 84.sp,

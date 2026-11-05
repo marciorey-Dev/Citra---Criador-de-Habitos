@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>Citra - Início</title>
+<!-- Tailwind CSS v3 with plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind Configuration -->
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+          },
+          colors: {
+            citrus: {
+              50: '#FFF9F5',
+              100: '#FFF0E6',
+              200: '#FEDBC4',
+              300: '#FDBE96',
+              400: '#FB9858',
+              500: '#F97316',
+              600: '#EA580C',
+              700: '#C2410C',
+            },
+            warmbg: '#FAF6F0',
+            warmcard: '#FFFFFF',
+            warmdark: '#27201D',
+            sage: {
+              50: '#EDF7F1',
+              100: '#DDF0E5',
+              700: '#1D6443',
+            }
+          },
+          boxShadow: {
+            'tactile': '0 4px 18px -2px rgba(234, 88, 12, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
+            'card-soft': '0 8px 24px -4px rgba(120, 53, 15, 0.06), 0 2px 6px -2px rgba(0, 0, 0, 0.02)',
+            'hero': '0 12px 30px -6px rgba(249, 115, 22, 0.38), 0 4px 12px -2px rgba(249, 115, 22, 0.22)',
+            'nav': '0 -4px 20px rgba(0, 0, 0, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+<!-- Custom Styles for Scrollbars and Tactile Feel -->
+<style data-purpose="base-styling">
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      background-color: #FAF6F0;
+    }
+    
+    /* Hide scrollbar for clean horizontal card scrolling */
+    .hide-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .hide-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-[#FAF6F0] text-warmdark min-h-screen flex flex-col justify-between selection:bg-citrus-200">
+<!-- BEGIN: MainContainer -->
+<div class="w-full max-w-md mx-auto flex flex-col min-h-screen relative pb-28">
+<!-- BEGIN: Header -->
+<header class="pt-5 px-6 pb-2 flex items-center justify-between sticky top-0 bg-[#FAF6F0]/90 backdrop-blur-md z-30">
+<div class="w-7"></div> <!-- Spacer to keep brand perfectly centered -->
+<!-- Logo Citra -->
+<div class="flex items-center gap-2 cursor-pointer active:scale-95 transition-transform" data-purpose="brand-logo">
+<span aria-label="Logo Tangerina" class="text-2xl filter drop-shadow-sm select-none">🍊</span>
+<span class="text-2xl font-extrabold tracking-tight text-[#E85D04]">Citra</span>
+</div>
+<!-- Action: Menu options -->
+<button aria-label="Opções do aplicativo" class="w-8 h-8 rounded-full flex items-center justify-center text-[#735A4F] hover:bg-black/5 active:scale-90 transition-all" type="button">
+<svg class="w-6 h-6 fill-current" viewbox="0 0 24 24">
+<circle cx="12" cy="5" r="2"></circle>
+<circle cx="12" cy="12" r="2"></circle>
+<circle cx="12" cy="19" r="2"></circle>
+</svg>
+</button>
+</header>
+<!-- END: Header -->
+<!-- BEGIN: MainContent -->
+<main class="px-5 pt-3 flex-1 flex flex-col space-y-6">
+<!-- BEGIN: GreetingSection -->
+<section data-purpose="daily-greeting">
+<p class="text-[13px] font-semibold tracking-wide text-[#7C6E65] capitalize mb-1">
+          Terça-feira, 3 de novembro
+        </p>
+<h1 class="text-2xl sm:text-[26px] font-extrabold text-[#E8590C] tracking-tight leading-tight">
+          Tudo em dia por hoje!
+        </h1>
+</section>
+<!-- END: GreetingSection -->
+<!-- BEGIN: HeroFocusCard -->
+<section class="relative overflow-hidden rounded-[26px] bg-gradient-to-r from-[#FF6B00] via-[#FF5F00] to-[#F15000] p-5 text-white shadow-hero active:scale-[0.99] transition-transform cursor-pointer" data-purpose="focus-timer-banner">
+<!-- Subtle tactile background ambient rings -->
+<div class="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-white/10 blur-xl pointer-events-none"></div>
+<div class="absolute -left-6 -bottom-6 w-28 h-28 rounded-full bg-yellow-400/15 blur-lg pointer-events-none"></div>
+<div class="relative z-10 flex items-center justify-between">
+<div class="flex-1 pr-3">
+<div class="flex items-center gap-2 mb-1.5">
+<!-- Orange Clock Mascot/Badge -->
+<span class="text-xl filter drop-shadow">⏰</span>
+<h2 class="text-[18px] font-bold tracking-tight text-white">
+                Iniciar Sessão de Foco
+              </h2>
+</div>
+<p class="text-[12.5px] font-medium text-white/90 tracking-wide flex items-center gap-1.5 pl-0.5">
+<span>15 min de concentração</span>
+<span class="inline-block w-1 h-1 rounded-full bg-white/70"></span>
+<span>1 ciclos</span>
+</p>
+</div>
+<!-- Play Button -->
+<div aria-label="Iniciar foco" class="flex-shrink-0 w-13 h-13 w-[52px] h-[52px] rounded-full bg-white/25 backdrop-blur-md flex items-center justify-center border border-white/30 shadow-md text-white active:scale-90 transition-transform">
+<svg class="w-6 h-6 fill-current translate-x-0.5" viewbox="0 0 24 24">
+<path d="M8 5.14v13.72a1 1 0 001.5.86l11-6.86a1 1 0 000-1.72l-11-6.86a1 1 0 00-1.5.86z"></path>
+</svg>
+</div>
+</div>
+</section>
+<!-- END: HeroFocusCard -->
+<!-- BEGIN: QuickActionsSection -->
+<section data-purpose="quick-actions">
+<div class="flex items-center justify-between mb-3">
+<h2 class="text-[16px] font-bold text-[#2A2320]">
+            O que fazer a seguir
+          </h2>
+</div>
+<!-- Action Pills -->
+<div class="flex items-center gap-2.5">
+<!-- Button: Nova Nota -->
+<button class="flex-1 flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-2xl bg-[#E8F5EE] border border-[#D0ECE0]/80 text-[#1B6343] font-semibold text-[13px] shadow-sm hover:bg-[#DDF0E5] active:scale-95 transition-all" type="button">
+<span class="text-sm">📑</span>
+<span>Nova Nota</span>
+</button>
+<!-- Button: Nova Tarefa -->
+<button class="flex-1 flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-2xl bg-[#E8F5EE] border border-[#D0ECE0]/80 text-[#1B6343] font-semibold text-[13px] shadow-sm hover:bg-[#DDF0E5] active:scale-95 transition-all" type="button">
+<span class="text-base font-bold leading-none">+</span>
+<span>Nova Tarefa</span>
+</button>
+</div>
+</section>
+<!-- END: QuickActionsSection -->
+<!-- BEGIN: EmptyTasksCard -->
+<section class="bg-white rounded-[24px] border border-[#F3ECE4] p-7 shadow-tactile flex flex-col items-center justify-center text-center my-1" data-purpose="empty-tasks-placeholder">
+<!-- Golden Sparkles Visual -->
+<div aria-hidden="true" class="mb-3 animate-pulse text-2xl select-none">
+          ✨
+        </div>
+<h3 class="text-[16px] font-bold text-[#2B231F] mb-1">
+          Nenhuma tarefa pendente!
+        </h3>
+<p class="text-[12.5px] font-medium text-[#8F8177] max-w-[240px] leading-relaxed">
+          Toque em '+ Nova Tarefa' para planejar seu dia.
+        </p>
+</section>
+<!-- END: EmptyTasksCard -->
+<!-- BEGIN: DailyHabitsSection -->
+<section class="space-y-3" data-purpose="today-habits">
+<!-- Section Header with Counter -->
+<div class="flex items-center justify-between">
+<h2 class="text-[16px] font-bold text-[#2A2320]">
+            Hábitos de Hoje
+          </h2>
+<span class="text-[12.5px] font-semibold text-[#8C7E74]">
+            0 de 3 feitos
+          </span>
+</div>
+<!-- Horizontal Habit Cards List -->
+<div class="flex gap-3.5 overflow-x-auto hide-scrollbar pb-2 -mx-5 px-5 scroll-smooth snap-x snap-mandatory">
+<!-- Habit Card 1: Soneca Matinal -->
+<article class="min-w-[154px] w-[154px] flex-shrink-0 snap-start bg-white rounded-[22px] border border-[#F3ECE4] p-3.5 shadow-tactile flex flex-col justify-between active:scale-95 transition-transform cursor-pointer">
+<div>
+<div class="flex items-center gap-1.5 mb-2">
+<span class="text-base">🛏️</span>
+<span class="text-[11.5px] font-bold text-[#7A6D63]">13:00</span>
+</div>
+<h4 class="text-[13.5px] font-bold text-[#2B231F] leading-snug">
+                Soneca Matinal
+              </h4>
+</div>
+<div class="mt-3.5 flex items-center gap-1 text-[11px] font-bold text-[#EA580C]">
+<span>🔥</span>
+<span>0 dias</span>
+</div>
+</article>
+<!-- Habit Card 2: 30 min de leitura -->
+<article class="min-w-[154px] w-[154px] flex-shrink-0 snap-start bg-white rounded-[22px] border border-[#F3ECE4] p-3.5 shadow-tactile flex flex-col justify-between active:scale-95 transition-transform cursor-pointer">
+<div>
+<div class="flex items-center gap-1.5 mb-2">
+<span class="text-base">📖</span>
+<span class="text-[11.5px] font-bold text-[#7A6D63]">05:05</span>
+</div>
+<h4 class="text-[13.5px] font-bold text-[#2B231F] leading-snug">
+                30 min de leitura
+              </h4>
+</div>
+<div class="mt-3.5 flex items-center gap-1 text-[11px] font-bold text-[#EA580C]">
+<span>🔥</span>
+<span>0 dias</span>
+</div>
+</article>
+<!-- Habit Card 3: Exercícios Físicos -->
+<article class="min-w-[154px] w-[154px] flex-shrink-0 snap-start bg-white rounded-[22px] border border-[#F3ECE4] p-3.5 shadow-tactile flex flex-col justify-between active:scale-95 transition-transform cursor-pointer">
+<div>
+<div class="flex items-center gap-1.5 mb-2">
+<span class="text-base">🏃</span>
+<span class="text-[11.5px] font-bold text-[#7A6D63]">06:00</span>
+</div>
+<h4 class="text-[13.5px] font-bold text-[#2B231F] leading-snug line-clamp-1">
+                Exercícios Fís...
+              </h4>
+</div>
+<div class="mt-3.5 flex items-center gap-1 text-[11px] font-bold text-[#EA580C]">
+<span>🔥</span>
+<span>0 dias</span>
+</div>
+</article>
+</div>
+</section>
+<!-- END: DailyHabitsSection -->
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: BottomNavigation -->
+<nav aria-label="Barra de Navegação Principal" class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#FFF3EC]/95 backdrop-blur-md border-t border-[#F8E2D4] px-4 pt-2.5 pb-5 z-40 shadow-nav">
+<ul class="flex items-center justify-around">
+<!-- Tab: Início (Active) -->
+<li class="flex-1">
+<a aria-current="page" class="flex flex-col items-center justify-center gap-1 text-[#E85D04] group" href="#">
+<div class="w-6 h-6 flex items-center justify-center transition-transform group-hover:scale-110">
+<svg class="w-[22px] h-[22px] fill-current" viewbox="0 0 24 24">
+<path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"></path>
+</svg>
+</div>
+<span class="text-[11px] font-extrabold tracking-tight">Início</span>
+</a>
+</li>
+<!-- Tab: Timer -->
+<li class="flex-1">
+<a class="flex flex-col items-center justify-center gap-1 text-[#5E5149] hover:text-[#E85D04] transition-colors group" href="#">
+<div class="w-6 h-6 flex items-center justify-center transition-transform group-hover:scale-110">
+<svg class="w-[21px] h-[21px] stroke-current stroke-2 fill-none" viewbox="0 0 24 24">
+<circle cx="12" cy="13" r="8"></circle>
+<path d="M12 9v4l2.5 2.5"></path>
+<path d="M10 2h4"></path>
+</svg>
+</div>
+<span class="text-[11px] font-medium">Timer</span>
+</a>
+</li>
+<!-- Tab: Tarefas -->
+<li class="flex-1">
+<a class="flex flex-col items-center justify-center gap-1 text-[#5E5149] hover:text-[#E85D04] transition-colors group" href="#">
+<div class="w-6 h-6 flex items-center justify-center transition-transform group-hover:scale-110">
+<svg class="w-[21px] h-[21px] stroke-current stroke-2 fill-none" viewbox="0 0 24 24">
+<path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" stroke-linecap="round" stroke-linejoin="round"></path>
+<path d="M16.5 15.75l2.25 2.25 3.75-3.75" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-medium">Tarefas</span>
+</a>
+</li>
+<!-- Tab: Notas -->
+<li class="flex-1">
+<a class="flex flex-col items-center justify-center gap-1 text-[#5E5149] hover:text-[#E85D04] transition-colors group" href="#">
+<div class="w-6 h-6 flex items-center justify-center transition-transform group-hover:scale-110">
+<svg class="w-[21px] h-[21px] stroke-current stroke-2 fill-none" viewbox="0 0 24 24">
+<path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-medium">Notas</span>
+</a>
+</li>
+<!-- Tab: Eu -->
+<li class="flex-1">
+<a class="flex flex-col items-center justify-center gap-1 text-[#5E5149] hover:text-[#E85D04] transition-colors group" href="#">
+<div class="w-6 h-6 flex items-center justify-center transition-transform group-hover:scale-110">
+<svg class="w-[21px] h-[21px] stroke-current stroke-2 fill-none" viewbox="0 0 24 24">
+<path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+<span class="text-[11px] font-medium">Eu</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- END: BottomNavigation -->
+</div>
+<!-- END: MainContainer -->
+</body></html>

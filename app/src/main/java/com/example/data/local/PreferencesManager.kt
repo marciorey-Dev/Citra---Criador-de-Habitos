@@ -66,7 +66,10 @@ class PreferencesManager(private val context: Context) {
     )
     val completedTutorialAreas: StateFlow<Set<String>> = _completedTutorialAreas.asStateFlow()
 
-    // Sync Frequency: "1_HOUR", "DAILY", "WEEKLY", "ON_APP_OPEN"
+    // Sync Enabled & Frequency: "1_HOUR", "DAILY", "WEEKLY", "ON_APP_OPEN"
+    private val _syncEnabled = MutableStateFlow(prefs.getBoolean("sync_enabled", true))
+    val syncEnabled: StateFlow<Boolean> = _syncEnabled.asStateFlow()
+
     private val _syncFrequency = MutableStateFlow(prefs.getString("sync_frequency", "DAILY") ?: "DAILY")
     val syncFrequency: StateFlow<String> = _syncFrequency.asStateFlow()
 
@@ -80,19 +83,134 @@ class PreferencesManager(private val context: Context) {
     private val _appBgBrightness = MutableStateFlow(prefs.getFloat("app_bg_brightness", 0.6f))
     val appBgBrightness: StateFlow<Float> = _appBgBrightness.asStateFlow()
 
+    // Timer Citra Physics Balls (JSON array of diameters/durations)
+    private val _citraTimerBallsJson = MutableStateFlow(prefs.getString("citra_timer_balls_json", "[]") ?: "[]")
+    val citraTimerBallsJson: StateFlow<String> = _citraTimerBallsJson.asStateFlow()
+
+    // Daily Welcome Phrases
+    private val _welcomePhrasesEnabled = MutableStateFlow(prefs.getBoolean("welcome_phrases_enabled", true))
+    val welcomePhrasesEnabled: StateFlow<Boolean> = _welcomePhrasesEnabled.asStateFlow()
+
+    private val _disabledWelcomeCategories = MutableStateFlow(
+        prefs.getStringSet("disabled_welcome_categories", emptySet()) ?: emptySet()
+    )
+    val disabledWelcomeCategories: StateFlow<Set<String>> = _disabledWelcomeCategories.asStateFlow()
+
+    private val _dailyWelcomePhrase = MutableStateFlow(resolveDailyWelcomePhrase())
+    val dailyWelcomePhrase: StateFlow<String> = _dailyWelcomePhrase.asStateFlow()
+
+    // Finance Module Preferences (disabled by default)
+    private val _financesEnabled = MutableStateFlow(prefs.getBoolean("finances_enabled", false))
+    val financesEnabled: StateFlow<Boolean> = _financesEnabled.asStateFlow()
+
+    private val _financesSetupCompleted = MutableStateFlow(prefs.getBoolean("finances_setup_completed", false))
+    val financesSetupCompleted: StateFlow<Boolean> = _financesSetupCompleted.asStateFlow()
+
+    private val _financeDefaultCurrency = MutableStateFlow(prefs.getString("finance_default_currency", "AOA") ?: "AOA")
+    val financeDefaultCurrency: StateFlow<String> = _financeDefaultCurrency.asStateFlow()
+
+    private val _financeBaseBalanceMinor = MutableStateFlow(prefs.getLong("finance_base_balance_minor", 0L))
+    val financeBaseBalanceMinor: StateFlow<Long> = _financeBaseBalanceMinor.asStateFlow()
+
+    private val _financeHideValues = MutableStateFlow(prefs.getBoolean("finance_hide_values", false))
+    val financeHideValues: StateFlow<Boolean> = _financeHideValues.asStateFlow()
+
+    private val _financePinCode = MutableStateFlow<String?>(prefs.getString("finance_pin_code", null))
+    val financePinCode: StateFlow<String?> = _financePinCode.asStateFlow()
+
+    private val _financeBiometricEnabled = MutableStateFlow(prefs.getBoolean("finance_biometric_enabled", false))
+    val financeBiometricEnabled: StateFlow<Boolean> = _financeBiometricEnabled.asStateFlow()
+
+    private fun resolveDailyWelcomePhrase(forceNew: Boolean = false): String {
+        val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val lastDate = prefs.getString("last_welcome_date", null)
+        val savedPhrase = prefs.getString("current_daily_phrase", null)
+        val disabled = prefs.getStringSet("disabled_welcome_categories", emptySet()) ?: emptySet()
+
+        if (!forceNew && lastDate == todayStr && !savedPhrase.isNullOrBlank()) {
+            val matching = DailyWelcomePhrasesCatalog.allPhrases.find { it.text == savedPhrase }
+            if (matching == null || !disabled.contains(matching.category.id)) {
+                return savedPhrase
+            }
+        }
+
+        val pool = DailyWelcomePhrasesCatalog.allPhrases.filter { !disabled.contains(it.category.id) }
+            .ifEmpty { DailyWelcomePhrasesCatalog.allPhrases }
+
+        val usedSet = (prefs.getStringSet("used_welcome_phrases", emptySet()) ?: emptySet()).toMutableSet()
+        var available = pool.filter { !usedSet.contains(it.id) }
+        if (available.isEmpty()) {
+            usedSet.clear()
+            available = pool
+        }
+
+        val picked = available.random()
+        usedSet.add(picked.id)
+
+        prefs.edit()
+            .putString("last_welcome_date", todayStr)
+            .putString("current_daily_phrase", picked.text)
+            .putStringSet("used_welcome_phrases", usedSet)
+            .apply()
+
+        return picked.text
+    }
+
+    fun setWelcomePhrasesEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("welcome_phrases_enabled", enabled).apply()
+        _welcomePhrasesEnabled.value = enabled
+        if (enabled) {
+            _dailyWelcomePhrase.value = resolveDailyWelcomePhrase(forceNew = false)
+        }
+    }
+
+    fun toggleWelcomeCategory(categoryId: String) {
+        val current = _disabledWelcomeCategories.value.toMutableSet()
+        if (current.contains(categoryId)) {
+            current.remove(categoryId)
+        } else {
+            // Keep at least one category enabled
+            if (current.size < WelcomePhraseCategory.entries.size - 1) {
+                current.add(categoryId)
+            }
+        }
+        prefs.edit().putStringSet("disabled_welcome_categories", current).apply()
+        _disabledWelcomeCategories.value = current
+        _dailyWelcomePhrase.value = resolveDailyWelcomePhrase(forceNew = false)
+    }
+
     fun setAppBackground(uri: String?, blur: Float = _appBgBlur.value, brightness: Float = _appBgBrightness.value) {
         prefs.edit().apply {
             if (uri != null) putString("app_bg_uri", uri) else remove("app_bg_uri")
             putFloat("app_bg_blur", blur)
             putFloat("app_bg_brightness", brightness)
-        }.apply()
+        }.commit()
         _appBgUri.value = uri
         _appBgBlur.value = blur
         _appBgBrightness.value = brightness
     }
 
     fun clearAppBackground() {
+        try {
+            val bgFile = java.io.File(context.filesDir, "app_background.jpg")
+            if (bgFile.exists()) bgFile.delete()
+        } catch (_: Exception) {}
         setAppBackground(null, 0.5f, 0.6f)
+    }
+
+    fun saveCitraTimerBallsJson(json: String) {
+        prefs.edit().putString("citra_timer_balls_json", json).apply()
+        _citraTimerBallsJson.value = json
+    }
+
+    fun clearCitraTimerBalls() {
+        prefs.edit().putString("citra_timer_balls_json", "[]").commit()
+        _citraTimerBallsJson.value = "[]"
+    }
+
+    fun setSyncEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("sync_enabled", enabled).apply()
+        _syncEnabled.value = enabled
     }
 
     fun setSyncFrequency(frequency: String) {
@@ -397,6 +515,64 @@ class PreferencesManager(private val context: Context) {
 
     fun setLastNoteEditorMode(mode: String) {
         prefs.edit().putString("last_note_editor_mode", mode).apply()
+    }
+
+    fun setFinancesEnabled(enabled: Boolean) {
+        _financesEnabled.value = enabled
+        prefs.edit().putBoolean("finances_enabled", enabled).apply()
+    }
+
+    fun setFinancesSetupCompleted(completed: Boolean) {
+        _financesSetupCompleted.value = completed
+        prefs.edit().putBoolean("finances_setup_completed", completed).apply()
+    }
+
+    fun setFinanceDefaultCurrency(currencyCode: String) {
+        _financeDefaultCurrency.value = currencyCode
+        prefs.edit().putString("finance_default_currency", currencyCode).apply()
+    }
+
+    fun setFinanceBaseBalanceMinor(balanceMinor: Long) {
+        _financeBaseBalanceMinor.value = balanceMinor
+        prefs.edit().putLong("finance_base_balance_minor", balanceMinor).apply()
+    }
+
+    fun setFinanceHideValues(hide: Boolean) {
+        _financeHideValues.value = hide
+        prefs.edit().putBoolean("finance_hide_values", hide).apply()
+    }
+
+    fun setFinancePinCode(pin: String?) {
+        _financePinCode.value = pin
+        prefs.edit().putString("finance_pin_code", pin).apply()
+    }
+
+    fun setFinanceBiometricEnabled(enabled: Boolean) {
+        _financeBiometricEnabled.value = enabled
+        prefs.edit().putBoolean("finance_biometric_enabled", enabled).apply()
+    }
+
+    private val _lastFinanceSyncTimestamp = MutableStateFlow(prefs.getLong("last_finance_sync_timestamp", 0L))
+    val lastFinanceSyncTimestamp: StateFlow<Long> = _lastFinanceSyncTimestamp.asStateFlow()
+
+    fun setLastFinanceSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
+        _lastFinanceSyncTimestamp.value = timestamp
+        prefs.edit().putLong("last_finance_sync_timestamp", timestamp).apply()
+    }
+
+    fun resetFinanceDataPreferences() {
+        _financeBaseBalanceMinor.value = 0L
+        _financeHideValues.value = false
+        _financePinCode.value = null
+        _financeBiometricEnabled.value = false
+        _financesSetupCompleted.value = false
+        prefs.edit()
+            .putLong("finance_base_balance_minor", 0L)
+            .putBoolean("finance_hide_values", false)
+            .remove("finance_pin_code")
+            .putBoolean("finance_biometric_enabled", false)
+            .putBoolean("finances_setup_completed", false)
+            .apply()
     }
 }
 

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.habitcraft.krqpmv"
     minSdk = 24
     targetSdk = 36
-    versionCode = 9
-    versionName = "1.0"
+    versionCode = 11
+    versionName = "1.2.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -113,6 +113,7 @@ dependencies {
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)

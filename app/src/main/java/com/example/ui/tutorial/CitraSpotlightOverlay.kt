@@ -210,14 +210,12 @@ fun CitraSpotlightOverlay(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Explanation (strictly 1 paragraph, max 5 lines)
+                    // Explanation (unbounded length, clear step-by-step)
                     Text(
                         text = currentStep.text,
                         style = MaterialTheme.typography.bodyMedium,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         lineHeight = 19.sp,
-                        maxLines = 5,
-                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 

@@ -169,7 +169,7 @@ fun NotificationSettingsDialog(
                     )
 
                     DialogSoundRow(
-                        label = "Som do Pomodoro",
+                        label = "Som do Arancia",
                         currentSound = pomodoroSound,
                         customUri = pomodoroSoundUri,
                         onSoundSelect = { pomodoroSound = it; pomodoroSoundUri = "" },

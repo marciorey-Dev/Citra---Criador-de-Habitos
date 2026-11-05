@@ -43,6 +43,8 @@ data class FlexiblePomodoroState(
     val currentPhase: PomodoroPhase = PomodoroPhase.FOCUS,
     val remainingSeconds: Int = 15 * 60,
     val totalPhaseSeconds: Int = 15 * 60,
+    val isStopwatchMode: Boolean = false,
+    val stopwatchSeconds: Int = 0,
     val isRunning: Boolean = false,
     val isPaused: Boolean = false,
     val selectedCategory: String = "",
@@ -95,6 +97,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setKeepScreenOn(enabled: Boolean) {
         preferencesManager.setKeepScreenOn(enabled)
+    }
+
+    val welcomePhrasesEnabled: StateFlow<Boolean> = preferencesManager.welcomePhrasesEnabled
+    val disabledWelcomeCategories: StateFlow<Set<String>> = preferencesManager.disabledWelcomeCategories
+    val dailyWelcomePhrase: StateFlow<String> = preferencesManager.dailyWelcomePhrase
+
+    fun setWelcomePhrasesEnabled(enabled: Boolean) {
+        preferencesManager.setWelcomePhrasesEnabled(enabled)
+    }
+
+    fun toggleWelcomeCategory(categoryId: String) {
+        preferencesManager.toggleWelcomeCategory(categoryId)
     }
 
 
@@ -167,6 +181,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.setThemeMode(next)
     }
 
+    val syncEnabled: StateFlow<Boolean> = preferencesManager.syncEnabled
+    fun setSyncEnabled(enabled: Boolean) {
+        preferencesManager.setSyncEnabled(enabled)
+    }
+
     val appBgUri: StateFlow<String?> = preferencesManager.appBgUri
     val appBgBlur: StateFlow<Float> = preferencesManager.appBgBlur
     val appBgBrightness: StateFlow<Float> = preferencesManager.appBgBrightness
@@ -177,6 +196,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAppBackground() {
         preferencesManager.clearAppBackground()
+    }
+
+    val citraTimerBallsJson: StateFlow<String> = preferencesManager.citraTimerBallsJson
+
+    fun saveTimerCitraBallsJson(json: String) {
+        preferencesManager.saveCitraTimerBallsJson(json)
+    }
+
+    fun clearTimerCitraBalls() {
+        preferencesManager.clearCitraTimerBalls()
+    }
+
+    private fun spawnTimerCitraBall(durationMinutes: Int) {
+        try {
+            val arr = org.json.JSONArray(preferencesManager.citraTimerBallsJson.value)
+            arr.put(durationMinutes.coerceIn(1, 180))
+            preferencesManager.saveCitraTimerBallsJson(arr.toString())
+        } catch (_: Exception) {
+            val arr = org.json.JSONArray().apply { put(durationMinutes.coerceIn(1, 180)) }
+            preferencesManager.saveCitraTimerBallsJson(arr.toString())
+        }
     }
 
     // Database Flows
@@ -493,6 +533,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleStopwatchMode() {
+        val current = _pomodoroState.value
+        if (current.isRunning || current.isPaused) return
+        vibrate(25)
+        val nextMode = !current.isStopwatchMode
+        val sec = current.focusMinutes * 60
+        _pomodoroState.update {
+            it.copy(
+                isStopwatchMode = nextMode,
+                stopwatchSeconds = 0,
+                currentPhase = PomodoroPhase.FOCUS,
+                remainingSeconds = sec,
+                totalPhaseSeconds = sec
+            )
+        }
+    }
+
+    fun skipOptionalBreak() {
+        val current = _pomodoroState.value
+        if (current.currentPhase != PomodoroPhase.BREAK) return
+        timerJob?.cancel()
+        timerJob = null
+        val focusSec = current.focusMinutes * 60
+        _pomodoroState.update {
+            it.copy(
+                isRunning = false,
+                isPaused = false,
+                currentPhase = PomodoroPhase.FOCUS,
+                remainingSeconds = focusSec,
+                totalPhaseSeconds = focusSec
+            )
+        }
+        persistTimerState()
+    }
+
     fun startPomodoro() {
         vibrate(40)
         _pomodoroState.update { it.copy(isRunning = true, isPaused = false) }
@@ -500,23 +575,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
-            while (_pomodoroState.value.remainingSeconds > 0 && _pomodoroState.value.isRunning) {
-                delay(1000L)
-                val currentRem = _pomodoroState.value.remainingSeconds - 1
-                _pomodoroState.update { it.copy(remainingSeconds = currentRem) }
-                persistTimerState()
+            if (_pomodoroState.value.isStopwatchMode) {
+                while (_pomodoroState.value.isRunning && _pomodoroState.value.isStopwatchMode) {
+                    delay(1000L)
+                    val elapsed = _pomodoroState.value.stopwatchSeconds + 1
+                    _pomodoroState.update { it.copy(stopwatchSeconds = elapsed) }
 
-                // Update ongoing notification
-                NotificationHelper.showTimerOngoingNotification(
-                    context = getApplication(),
-                    remainingSeconds = currentRem,
-                    phaseLabel = _pomodoroState.value.currentPhase.label,
-                    isPaused = false
-                )
-            }
+                    NotificationHelper.showTimerOngoingNotification(
+                        context = getApplication(),
+                        remainingSeconds = elapsed,
+                        phaseLabel = "Cronômetro",
+                        isPaused = false
+                    )
+                }
+            } else {
+                while (_pomodoroState.value.remainingSeconds > 0 && _pomodoroState.value.isRunning) {
+                    delay(1000L)
+                    val currentRem = _pomodoroState.value.remainingSeconds - 1
+                    _pomodoroState.update { it.copy(remainingSeconds = currentRem) }
+                    persistTimerState()
 
-            if (_pomodoroState.value.remainingSeconds <= 0 && _pomodoroState.value.isRunning) {
-                onPhaseCompleted()
+                    NotificationHelper.showTimerOngoingNotification(
+                        context = getApplication(),
+                        remainingSeconds = currentRem,
+                        phaseLabel = _pomodoroState.value.currentPhase.label,
+                        isPaused = false
+                    )
+                }
+
+                if (_pomodoroState.value.remainingSeconds <= 0 && _pomodoroState.value.isRunning) {
+                    onPhaseCompleted()
+                }
             }
         }
     }
@@ -528,10 +617,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _pomodoroState.update { it.copy(isRunning = false, isPaused = true) }
         persistTimerState()
 
+        val state = _pomodoroState.value
         NotificationHelper.showTimerOngoingNotification(
             context = getApplication(),
-            remainingSeconds = _pomodoroState.value.remainingSeconds,
-            phaseLabel = _pomodoroState.value.currentPhase.label,
+            remainingSeconds = if (state.isStopwatchMode) state.stopwatchSeconds else state.remainingSeconds,
+            phaseLabel = if (state.isStopwatchMode) "Cronômetro" else state.currentPhase.label,
             isPaused = true
         )
     }
@@ -541,11 +631,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         timerJob = null
         val state = _pomodoroState.value
+
+        if (state.isStopwatchMode && state.stopwatchSeconds >= 60 && state.selectedCategory.isNotBlank()) {
+            val elapsedMins = state.stopwatchSeconds / 60
+            viewModelScope.launch {
+                val session = FocusSession(
+                    category = state.selectedCategory,
+                    durationMinutes = elapsedMins,
+                    breakMinutes = 0,
+                    cycleCount = 0,
+                    linkedTaskId = state.linkedTask?.id,
+                    linkedTaskTitle = state.linkedTask?.title
+                )
+                repository.recordFocusSession(session)
+            }
+        }
+
         val sec = state.focusMinutes * 60
         _pomodoroState.update {
             it.copy(
                 isRunning = false,
                 isPaused = false,
+                stopwatchSeconds = 0,
                 currentPhase = PomodoroPhase.FOCUS,
                 currentCycle = 1,
                 remainingSeconds = sec,
@@ -563,19 +670,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val state = _pomodoroState.value
 
         if (state.currentPhase == PomodoroPhase.FOCUS) {
-            // Record focus session
+            // Break is NOT mandatory to consider a cycle finished
             viewModelScope.launch {
                 val session = FocusSession(
                     category = state.selectedCategory,
                     durationMinutes = state.focusMinutes,
-                    breakMinutes = state.breakMinutes,
+                    breakMinutes = 0,
                     cycleCount = state.currentCycle,
                     linkedTaskId = state.linkedTask?.id,
                     linkedTaskTitle = state.linkedTask?.title
                 )
                 repository.recordFocusSession(session)
+                spawnTimerCitraBall(state.focusMinutes)
 
-                // Synergy: Update linked task focus minutes
                 if (state.linkedTask != null) {
                     val updatedTask = state.linkedTask.copy(
                         focusMinutesCompleted = state.linkedTask.focusMinutesCompleted + state.focusMinutes
@@ -583,7 +690,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     repository.updateTask(updatedTask)
                 }
 
-                // Synergy: Check-in linked habit if attached!
                 if (state.linkedHabit != null) {
                     val isAlreadyDone = state.linkedHabit.completedDatesCsv.split(",")
                         .any { it.trim() == todayString }
@@ -594,43 +700,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // Cancel running timer job so next phase starts cleanly paused!
             timerJob?.cancel()
             timerJob = null
             musicPlayer.stop()
 
             val vibEnabled = notificationSettings.value.vibrate
-            NotificationHelper.showInstantNotification(
-                context = getApplication(),
-                id = 101,
-                channelId = NotificationHelper.CHANNEL_ALERTS,
-                title = "Ciclo de Foco Concluído!",
-                message = "Excelente dedicação de ${state.focusMinutes}m! Pausa de ${state.breakMinutes}m pronta (toque para iniciar).",
-                customSoundUriString = notificationSettings.value.pomodoroSoundUri,
-                vibratePhone = vibEnabled
-            )
-
-            // Switch to break phase (cleanly PAUSED)
-            val breakSec = state.breakMinutes * 60
-            _pomodoroState.update {
-                it.copy(
-                    isRunning = false,
-                    isPaused = true,
-                    currentPhase = PomodoroPhase.BREAK,
-                    remainingSeconds = breakSec,
-                    totalPhaseSeconds = breakSec
-                )
-            }
-            persistTimerState()
-        } else {
-            // Break phase completed
-            timerJob?.cancel()
-            timerJob = null
-            musicPlayer.stop()
-
             val nextCycle = state.currentCycle + 1
+
             if (nextCycle > state.totalCycles) {
-                // All cycles in session completed!
                 val focusSec = state.focusMinutes * 60
                 val randomQuote = getRandomQuote()
                 _pomodoroState.update {
@@ -647,40 +724,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 preferencesManager.clearTimerSnapshot()
 
-                val vibEnabled = notificationSettings.value.vibrate
                 NotificationHelper.showInstantNotification(
                     context = getApplication(),
                     id = 102,
                     channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "🎉 Sessão Completa de Estudos!",
+                    title = "🎉 Sessão Completa de Foco!",
                     message = "Parabéns! Todos os ${state.totalCycles} ciclos foram finalizados com êxito.",
                     customSoundUriString = notificationSettings.value.pomodoroSoundUri,
                     vibratePhone = vibEnabled
                 )
             } else {
-                // Next cycle focus (cleanly PAUSED, waiting for user to start)
-                val focusSec = state.focusMinutes * 60
+                NotificationHelper.showInstantNotification(
+                    context = getApplication(),
+                    id = 101,
+                    channelId = NotificationHelper.CHANNEL_ALERTS,
+                    title = "Ciclo ${state.currentCycle} de ${state.totalCycles} Concluído!",
+                    message = "Excelente dedicação de ${state.focusMinutes}m! Pausa opcional de ${state.breakMinutes}m pronta.",
+                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
+                    vibratePhone = vibEnabled
+                )
+
+                val breakSec = state.breakMinutes * 60
                 _pomodoroState.update {
                     it.copy(
                         isRunning = false,
-                        isPaused = true,
-                        currentPhase = PomodoroPhase.FOCUS,
+                        isPaused = false,
+                        currentPhase = PomodoroPhase.BREAK,
                         currentCycle = nextCycle,
-                        remainingSeconds = focusSec,
-                        totalPhaseSeconds = focusSec
+                        remainingSeconds = breakSec,
+                        totalPhaseSeconds = breakSec
                     )
                 }
                 persistTimerState()
+            }
+        } else {
+            timerJob?.cancel()
+            timerJob = null
+            musicPlayer.stop()
 
-                NotificationHelper.showInstantNotification(
-                    context = getApplication(),
-                    id = 103,
-                    channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "Pausa Concluída",
-                    message = "Pronto para o Ciclo $nextCycle de ${state.totalCycles} de foco? Toque em Iniciar quando quiser.",
-                    customSoundUriString = notificationSettings.value.pomodoroSoundUri
+            val focusSec = state.focusMinutes * 60
+            _pomodoroState.update {
+                it.copy(
+                    isRunning = false,
+                    isPaused = false,
+                    currentPhase = PomodoroPhase.FOCUS,
+                    remainingSeconds = focusSec,
+                    totalPhaseSeconds = focusSec
                 )
             }
+            persistTimerState()
+
+            NotificationHelper.showInstantNotification(
+                context = getApplication(),
+                id = 103,
+                channelId = NotificationHelper.CHANNEL_ALERTS,
+                title = "Pausa Concluída",
+                message = "Pronto para o Ciclo ${state.currentCycle} de ${state.totalCycles} de foco?",
+                customSoundUriString = notificationSettings.value.pomodoroSoundUri
+            )
         }
     }
 
@@ -813,80 +914,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun performStartupFolderScan() {
         viewModelScope.launch(Dispatchers.IO) {
             val context = getApplication<Application>()
-            var docsImportCount = 0
-            var docsError: String? = null
             var recordsError: String? = null
 
-            // 1. Verificar pasta "Citra Docs" e importar/atualizar notas de forma inteligente sem duplicação
-            try {
-                val docsFolder = com.example.util.CitraDocsFileManager.getDocsFolder(context)
-                if (docsFolder.exists()) {
-                    val mdFiles = com.example.util.CitraDocsFileManager.listAllMarkdownNotes(context)
-                    val existingNotes = repository.getAllNotesSync()
-                    val notesByUuid = existingNotes.filter { it.uuid.isNotBlank() }.associateBy { it.uuid }
-                    val notesByTitle = existingNotes.associateBy { it.title.trim().lowercase() }
-
-                    for (file in mdFiles) {
-                        val title = file.nameWithoutExtension.trim()
-                        if (title.isBlank()) continue
-
-                        val rawContent = com.example.util.CitraDocsFileManager.readNoteMarkdown(file) ?: ""
-                        val fileUuid = com.example.util.CitraDocsFileManager.extractUuidFromMarkdown(rawContent)
-                        val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(rawContent)
-
-                        val matchingNote = (if (fileUuid != null) notesByUuid[fileUuid] else null)
-                            ?: notesByTitle[title.lowercase()]
-
-                        if (matchingNote != null) {
-                            // Nota já existe: atualiza o conteúdo se o arquivo externo foi modificado
-                            if (file.lastModified() > matchingNote.updatedAt) {
-                                val updated = matchingNote.copy(
-                                    title = title,
-                                    content = cleanContent,
-                                    updatedAt = file.lastModified()
-                                )
-                                repository.updateNote(updated)
-                            }
-                            // Se a nota não tinha identificador gravado no arquivo, salva o UUID no cabeçalho
-                            if (fileUuid == null) {
-                                com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                                    context = context,
-                                    title = title,
-                                    content = cleanContent,
-                                    uuid = matchingNote.uuid
-                                )
-                            }
-                        } else {
-                            // Nova nota encontrada na pasta: importa com UUID fixo
-                            val newUuid = fileUuid ?: java.util.UUID.randomUUID().toString()
-                            repository.insertNote(
-                                Note(
-                                    uuid = newUuid,
-                                    title = title,
-                                    content = cleanContent,
-                                    category = "Geral",
-                                    updatedAt = file.lastModified()
-                                )
-                            )
-                            if (fileUuid == null) {
-                                com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                                    context = context,
-                                    title = title,
-                                    content = cleanContent,
-                                    uuid = newUuid
-                                )
-                            }
-                            docsImportCount++
-                        }
-                    }
-                } else {
-                    docsError = "Pasta 'Citra Docs' não encontrada."
-                }
-            } catch (e: Exception) {
-                docsError = "Erro ao acessar 'Citra Docs': ${e.message}"
-            }
-
-            // 2. Verificar pasta "Citra Records" e carregar os arquivos de lá
+            // Verificar pasta "Citra Records"
             try {
                 val recFolder = com.example.util.MediaStorageHelper.getCitraRecordsFolder(context)
                 if (!recFolder.exists()) {
@@ -895,28 +925,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         recordsError = "Pasta 'Citra Records' não pôde ser criada. Verifique as permissões de armazenamento."
                     }
                 }
-                if (recFolder.exists()) {
-                    val recFiles = recFolder.listFiles { f ->
-                        f.isFile && (f.name.endsWith(".m4a", ignoreCase = true) ||
-                                     f.name.endsWith(".mp3", ignoreCase = true) ||
-                                     f.name.endsWith(".wav", ignoreCase = true) ||
-                                     f.name.endsWith(".aac", ignoreCase = true))
-                    } ?: emptyArray()
-                    // Pastas e arquivos de áudio validados com sucesso
-                }
             } catch (e: Exception) {
                 recordsError = "Erro na pasta Citra Records: ${e.message}"
             }
 
-            // Aguarda leve transição para tela de loading
-            kotlinx.coroutines.delay(350)
+            kotlinx.coroutines.delay(250)
             _isStartupScanDone.value = true
 
-            if (docsImportCount > 0) {
-                _userMessage.emit("$docsImportCount novas notas importadas de 'Citra Docs'.")
-            } else if (docsError != null) {
-                _userMessage.emit(docsError)
-            } else if (recordsError != null) {
+            if (recordsError != null) {
                 _userMessage.emit(recordsError)
             }
         }
@@ -1213,6 +1229,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun restoreAllTrashedNotes() {
+        viewModelScope.launch {
+            val currentTrash = trashNotes.value
+            if (currentTrash.isEmpty()) return@launch
+            currentTrash.forEach { note ->
+                repository.restoreFromTrash(note)
+            }
+            _userMessage.emit("Todas as ${currentTrash.size} anotações foram restauradas!")
+        }
+    }
+
     fun permanentlyDeleteNote(note: Note, context: Context? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             context?.let { ctx ->
@@ -1220,6 +1247,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             repository.permanentlyDeleteNote(note)
             _userMessage.emit("Anotação excluída definitivamente do Citra e do armazenamento.")
+        }
+    }
+
+    fun emptyNoteTrash(context: Context? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentTrash = trashNotes.value
+            if (currentTrash.isEmpty()) return@launch
+            currentTrash.forEach { note ->
+                context?.let { ctx ->
+                    com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title)
+                }
+                repository.permanentlyDeleteNote(note)
+            }
+            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} anotações excluídas).")
         }
     }
 
@@ -1359,5 +1400,676 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         timerJob?.cancel()
         musicPlayer.release()
+    }
+
+    // ==================== FINANCES MODULE (V1.2 - BLOCKS A, B, C & D) ====================
+
+    val financesEnabled: StateFlow<Boolean> = preferencesManager.financesEnabled
+    val financesSetupCompleted: StateFlow<Boolean> = preferencesManager.financesSetupCompleted
+    val financeDefaultCurrency: StateFlow<String> = preferencesManager.financeDefaultCurrency
+    val financeBaseBalanceMinor: StateFlow<Long> = preferencesManager.financeBaseBalanceMinor
+    val financeHideValues: StateFlow<Boolean> = preferencesManager.financeHideValues
+    val financePinCode: StateFlow<String?> = preferencesManager.financePinCode
+    val financeBiometricEnabled: StateFlow<Boolean> = preferencesManager.financeBiometricEnabled
+    val lastFinanceSyncTimestamp: StateFlow<Long> = preferencesManager.lastFinanceSyncTimestamp
+
+    private val _pendingCloudFinanceRestoreJson = MutableStateFlow<String?>(null)
+    val pendingCloudFinanceRestoreJson: StateFlow<String?> = _pendingCloudFinanceRestoreJson.asStateFlow()
+
+    val financeCategories: StateFlow<List<FinanceCategory>> =
+        database.financeDao().getActiveCategories()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allFinanceCategories: StateFlow<List<FinanceCategory>> =
+        database.financeDao().getAllCategories()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financeEntries: StateFlow<List<FinanceEntry>> =
+        database.financeDao().getActiveEntries()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financeNoteLinks: StateFlow<List<FinanceNoteLink>> =
+        database.financeDao().getAllLinks()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financeWallets: StateFlow<List<FinanceWallet>> =
+        database.financeDao().getAllWallets()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financeExchangeRates: StateFlow<List<FinanceExchangeRate>> =
+        database.financeDao().getAllExchangeRates()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financeBudgets: StateFlow<List<FinanceBudget>> =
+        database.financeDao().getAllBudgets()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val financeRecurringRules: StateFlow<List<FinanceRecurringRule>> =
+        database.financeDao().getAllRecurringRules()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun ensureDefaultFinanceCategories() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (database.financeDao().getCategoryCount() == 0) {
+                database.financeDao().insertCategories(FinanceCategoryIcons.defaultCategories())
+            }
+            if (database.financeDao().getWalletCount() == 0) {
+                database.financeDao().insertWallets(
+                    listOf(
+                        FinanceWallet(
+                            id = "def_wallet_cash",
+                            name = "Carteira Principal",
+                            type = FinanceWalletType.CASH.id,
+                            currencyCode = preferencesManager.financeDefaultCurrency.value,
+                            colorHex = 0xFFFF8B1F,
+                            isDefault = true
+                        ),
+                        FinanceWallet(
+                            id = "def_wallet_bank",
+                            name = "Conta Bancária",
+                            type = FinanceWalletType.BANK.id,
+                            currencyCode = preferencesManager.financeDefaultCurrency.value,
+                            colorHex = 0xFF2196F3,
+                            isDefault = false
+                        ),
+                        FinanceWallet(
+                            id = "def_wallet_mobile",
+                            name = "Carteira Móvel",
+                            type = FinanceWalletType.MOBILE.id,
+                            currencyCode = preferencesManager.financeDefaultCurrency.value,
+                            colorHex = 0xFF3FA34D,
+                            isDefault = false
+                        )
+                    )
+                )
+            }
+        }
+    }
+
+    fun setFinancesEnabled(enabled: Boolean) {
+        preferencesManager.setFinancesEnabled(enabled)
+        com.example.data.backup.FinanceLinkWorker.syncSchedule(getApplication(), enabled)
+        if (enabled) {
+            ensureDefaultFinanceCategories()
+            checkCloudFinanceBackupAvailable()
+            runDueFinanceLinksOnStartup()
+            processDueRecurringRules()
+        }
+    }
+
+    fun completeFinanceSetup(
+        currencyCode: String,
+        initialBalanceMinor: Long?,
+        pinCode: String?,
+        biometricEnabled: Boolean
+    ) {
+        preferencesManager.setFinanceDefaultCurrency(currencyCode)
+        if (initialBalanceMinor != null) {
+            val netEntries = financeEntries.value.sumOf {
+                if (it.type == FinanceEntryType.INCOME.id) it.totalAmountMinor else -it.totalAmountMinor
+            }
+            preferencesManager.setFinanceBaseBalanceMinor(initialBalanceMinor - netEntries)
+        }
+        preferencesManager.setFinancePinCode(pinCode?.takeIf { it.isNotBlank() })
+        preferencesManager.setFinanceBiometricEnabled(biometricEnabled)
+        preferencesManager.setFinancesSetupCompleted(true)
+        preferencesManager.setFinancesEnabled(true)
+        ensureDefaultFinanceCategories()
+        com.example.data.backup.FinanceLinkWorker.syncSchedule(getApplication(), true)
+        checkCloudFinanceBackupAvailable()
+        backupFinancesNow(showToast = false)
+    }
+
+    fun checkCloudFinanceBackupAvailable() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val authRepo = com.example.data.auth.AuthRepository.getInstance(getApplication())
+                val user = authRepo.currentUser.value
+                if (user != null && !user.isGuest) {
+                    val cloudJson = authRepo.fetchCloudFinances()
+                    if (!cloudJson.isNullOrBlank()) {
+                        _pendingCloudFinanceRestoreJson.value = cloudJson
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun confirmRestoreCloudFinances() {
+        val json = _pendingCloudFinanceRestoreJson.value ?: return
+        _pendingCloudFinanceRestoreJson.value = null
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = com.example.data.backup.FinanceCloudSyncManager.mergeAndRestoreFromCloudJson(
+                jsonStr = json,
+                database = database,
+                prefs = preferencesManager,
+                restoreSettings = true
+            )
+            if (ok) {
+                preferencesManager.setLastFinanceSyncTimestamp(System.currentTimeMillis())
+                com.example.data.backup.FinanceLinkWorker.syncSchedule(
+                    getApplication(),
+                    preferencesManager.financesEnabled.value
+                )
+                _userMessage.emit("Dados de finanças restaurados da nuvem!")
+            } else {
+                _userMessage.emit("Não foi possível restaurar o backup de finanças.")
+            }
+        }
+    }
+
+    fun dismissCloudFinanceRestore() {
+        _pendingCloudFinanceRestoreJson.value = null
+    }
+
+    fun backupFinancesNow(showToast: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val authRepo = com.example.data.auth.AuthRepository.getInstance(getApplication())
+            val user = authRepo.currentUser.value
+            if (user == null || user.isGuest) {
+                if (showToast) {
+                    _userMessage.emit("Ligue uma conta Google para fazer backup na nuvem.")
+                }
+                return@launch
+            }
+            val json = com.example.data.backup.FinanceCloudSyncManager.exportFinancesToJson(
+                database = database,
+                prefs = preferencesManager
+            )
+            val ok = authRepo.syncFinancesToCloud(json)
+            if (ok) {
+                preferencesManager.setLastFinanceSyncTimestamp(System.currentTimeMillis())
+                if (showToast) {
+                    _userMessage.emit("Backup de finanças guardado na nuvem!")
+                }
+            } else if (showToast) {
+                _userMessage.emit("Falha ao enviar backup de finanças. Tente novamente.")
+            }
+        }
+    }
+
+    fun setFinanceDefaultCurrency(currencyCode: String) {
+        preferencesManager.setFinanceDefaultCurrency(currencyCode)
+        backupFinancesNow(showToast = false)
+    }
+
+    fun setFinanceCurrentBalance(desiredBalanceMinor: Long) {
+        val netEntries = financeEntries.value.sumOf {
+            if (it.type == FinanceEntryType.INCOME.id) it.totalAmountMinor else -it.totalAmountMinor
+        }
+        preferencesManager.setFinanceBaseBalanceMinor(desiredBalanceMinor - netEntries)
+        backupFinancesNow(showToast = false)
+    }
+
+    fun setFinanceHideValues(hide: Boolean) {
+        preferencesManager.setFinanceHideValues(hide)
+        backupFinancesNow(showToast = false)
+    }
+
+    fun setFinanceLock(pinCode: String?, biometricEnabled: Boolean) {
+        preferencesManager.setFinancePinCode(pinCode?.takeIf { it.isNotBlank() })
+        preferencesManager.setFinanceBiometricEnabled(biometricEnabled)
+        backupFinancesNow(showToast = false)
+    }
+
+    fun saveFinanceEntry(entry: FinanceEntry, isNew: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            if (isNew) {
+                database.financeDao().insertEntry(entry.copy(createdAt = now, updatedAt = now))
+            } else {
+                database.financeDao().updateEntry(entry.copy(updatedAt = now))
+            }
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun duplicateFinanceEntry(entry: FinanceEntry) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            database.financeDao().insertEntry(
+                entry.copy(
+                    id = java.util.UUID.randomUUID().toString(),
+                    dateMillis = now,
+                    createdAt = now,
+                    updatedAt = now,
+                    deletedAt = null
+                )
+            )
+            _userMessage.emit("Lançamento '${entry.name}' duplicado.")
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun deleteFinanceEntry(entry: FinanceEntry) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().softDeleteEntry(entry.id, System.currentTimeMillis())
+            _userMessage.emit("Lançamento '${entry.name}' removido.")
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun saveFinanceCategory(category: FinanceCategory) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().insertCategory(
+                category.copy(updatedAt = System.currentTimeMillis())
+            )
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun archiveFinanceCategory(category: FinanceCategory, archived: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().updateCategory(
+                category.copy(isArchived = archived, updatedAt = System.currentTimeMillis())
+            )
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun eraseAllFinanceData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().deleteAllEntries()
+            database.financeDao().deleteAllCategories()
+            database.financeDao().deleteAllLinks()
+            database.financeDao().deleteAllExecutions()
+            preferencesManager.resetFinanceDataPreferences()
+            com.example.data.backup.FinanceLinkWorker.syncSchedule(getApplication(), false)
+            if (financesEnabled.value) {
+                database.financeDao().insertCategories(FinanceCategoryIcons.defaultCategories())
+            }
+            _userMessage.emit("Todos os dados de finanças foram apagados.")
+        }
+    }
+
+    // Bloco D: Finance Note Links
+    fun runDueFinanceLinksOnStartup() {
+        if (!preferencesManager.financesEnabled.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            com.example.data.backup.FinanceLinkWorker.syncSchedule(getApplication(), true)
+            com.example.data.backup.FinanceLinkExecutor.runDueLinks(getApplication())
+        }
+    }
+
+    fun setActiveEditorNote(note: Note?) {
+        com.example.data.backup.FinanceLinkExecutor.activeEditorNoteUuid = note?.uuid
+        com.example.data.backup.FinanceLinkExecutor.activeEditorNoteId = note?.id
+        if (note == null && preferencesManager.financesEnabled.value) {
+            runDueFinanceLinksOnStartup()
+        }
+    }
+
+    fun createAndRunFinanceNoteLink(
+        link: FinanceNoteLink,
+        createNewNote: Boolean,
+        newNoteTitle: String,
+        template: FinanceNoteTemplate?
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val finalLink = if (createNewNote) {
+                val newUuid = java.util.UUID.randomUUID().toString()
+                val startMarker = com.example.data.backup.FinanceNoteMarkdownEngine.buildStartMarker(link)
+                val endMarker = com.example.data.backup.FinanceNoteMarkdownEngine.buildEndMarker(link.blockId)
+                val initialNote = Note(
+                    uuid = newUuid,
+                    title = newNoteTitle,
+                    content = "# $newNoteTitle\n\n$startMarker\n$endMarker",
+                    category = "Finanças",
+                    iconEmoji = "💰",
+                    updatedAt = now
+                )
+                val newId = database.noteDao().insertNote(initialNote)
+                link.copy(noteId = newId, noteUuid = newUuid, createdAt = now, updatedAt = now)
+            } else {
+                link.copy(createdAt = now, updatedAt = now)
+            }
+
+            database.financeDao().insertLink(finalLink)
+            val outcome = com.example.data.backup.FinanceLinkExecutor.executeLink(
+                context = getApplication(),
+                link = finalLink,
+                isManualTrigger = true,
+                nowMillis = now
+            )
+            emitLinkOutcomeMessage(outcome)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun runFinanceLinkNow(link: FinanceNoteLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = com.example.data.backup.FinanceLinkExecutor.executeLink(
+                context = getApplication(),
+                link = link,
+                isManualTrigger = true
+            )
+            emitLinkOutcomeMessage(outcome)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun undoFinanceLinkLastExecution(link: FinanceNoteLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = com.example.data.backup.FinanceLinkExecutor.undoLastExecution(getApplication(), link)
+            if (ok) {
+                _userMessage.emit("Última atualização da nota desfeita!")
+            } else {
+                _userMessage.emit("Nenhuma atualização anterior disponível para desfazer.")
+            }
+        }
+    }
+
+    fun toggleFinanceLinkPause(link: FinanceNoteLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val nextStatus = if (link.status == "ACTIVE") "PAUSED" else "ACTIVE"
+            database.financeDao().updateLink(
+                link.copy(status = nextStatus, updatedAt = System.currentTimeMillis())
+            )
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun recreateMarkersForFinanceLink(link: FinanceNoteLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = com.example.data.backup.FinanceLinkExecutor.recreateMarkersForPausedLink(getApplication(), link)
+            emitLinkOutcomeMessage(outcome)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun recreateNoteForFinanceLink(link: FinanceNoteLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = com.example.data.backup.FinanceLinkExecutor.recreateNoteForPausedLink(getApplication(), link)
+            emitLinkOutcomeMessage(outcome)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun deleteFinanceNoteLink(link: FinanceNoteLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().deleteLinkById(link.id)
+            _userMessage.emit("Vínculo removido.")
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    private suspend fun emitLinkOutcomeMessage(outcome: com.example.data.backup.LinkExecutionOutcome) {
+        when (outcome) {
+            is com.example.data.backup.LinkExecutionOutcome.Success ->
+                _userMessage.emit("Nota '${outcome.noteTitle}' atualizada (${outcome.entriesCount} lançamentos).")
+            is com.example.data.backup.LinkExecutionOutcome.DeferredNoteOpen ->
+                _userMessage.emit("Nota aberta no editor. A atualização ocorrerá ao fechar.")
+            is com.example.data.backup.LinkExecutionOutcome.PausedNoteDeleted ->
+                _userMessage.emit("Nota apagada: vínculo pausado. Pode recriar a nota em Gerir vínculos.")
+            is com.example.data.backup.LinkExecutionOutcome.PausedMarkersDeleted ->
+                _userMessage.emit("Marcadores apagados: vínculo pausado. Pode recriar o bloco em Gerir vínculos.")
+            is com.example.data.backup.LinkExecutionOutcome.ModuleDisabled ->
+                _userMessage.emit("Ative o módulo de Finanças para atualizar vínculos.")
+            is com.example.data.backup.LinkExecutionOutcome.Error ->
+                _userMessage.emit(outcome.message)
+        }
+    }
+
+    fun emitUserMessage(message: String) {
+        viewModelScope.launch {
+            _userMessage.emit(message)
+        }
+    }
+
+    // ==================== BLOCO E: WALLETS, MULTI-CURRENCY, BUDGETS, RECURRING, PLANNED VS REAL ====================
+
+    fun saveFinanceWallet(wallet: FinanceWallet) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().insertWallet(wallet.copy(updatedAt = System.currentTimeMillis()))
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun deleteFinanceWallet(wallet: FinanceWallet) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().deleteWalletById(wallet.id)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun transferBetweenWallets(
+        fromWallet: String,
+        toWallet: String,
+        amountMinor: Long,
+        currencyCode: String
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val outEntry = FinanceEntry(
+                type = FinanceEntryType.EXPENSE.id,
+                name = "Transferência para $toWallet",
+                comment = "Transferência entre carteiras",
+                categoryId = "transfer_out",
+                walletName = fromWallet,
+                currencyCode = currencyCode,
+                dateMillis = now,
+                totalAmountMinor = amountMinor,
+                priority = FinancePriority.MANDATORY.id,
+                createdAt = now,
+                updatedAt = now
+            )
+            val inEntry = FinanceEntry(
+                type = FinanceEntryType.INCOME.id,
+                name = "Transferência de $fromWallet",
+                comment = "Transferência entre carteiras",
+                categoryId = "transfer_in",
+                walletName = toWallet,
+                currencyCode = currencyCode,
+                dateMillis = now,
+                totalAmountMinor = amountMinor,
+                priority = FinancePriority.MANDATORY.id,
+                createdAt = now,
+                updatedAt = now
+            )
+            database.financeDao().insertEntries(listOf(outEntry, inEntry))
+            val curr = FinanceCurrency.fromCode(currencyCode)
+            _userMessage.emit("Transferido ${formatFinanceAmount(amountMinor, curr)} de $fromWallet para $toWallet.")
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun saveFinanceExchangeRate(fromCurrency: String, toCurrency: String, rate: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            database.financeDao().insertExchangeRate(
+                FinanceExchangeRate(
+                    fromCurrency = fromCurrency,
+                    toCurrency = toCurrency,
+                    rate = rate,
+                    recordedAt = now,
+                    updatedAt = now
+                )
+            )
+            _userMessage.emit("Taxa guardada: 1 $fromCurrency = $rate $toCurrency")
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun deleteFinanceExchangeRate(rate: FinanceExchangeRate) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().deleteExchangeRateById(rate.id)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun saveFinanceBudget(categoryId: String, limitMinor: Long, currencyCode: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = database.financeDao().getAllBudgetsSync().find { it.categoryId == categoryId }
+            val budget = (existing ?: FinanceBudget(categoryId = categoryId, limitMinor = limitMinor)).copy(
+                limitMinor = limitMinor,
+                currencyCode = currencyCode,
+                updatedAt = System.currentTimeMillis()
+            )
+            database.financeDao().insertBudget(budget)
+            checkBudgetAlerts()
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun deleteFinanceBudget(budget: FinanceBudget) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().deleteBudgetById(budget.id)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun checkBudgetAlerts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val budgets = database.financeDao().getAllBudgetsSync()
+            if (budgets.isEmpty()) return@launch
+            val entries = database.financeDao().getAllEntriesIncludingDeleted()
+                .filter { it.deletedAt == null && !it.isPlanned && it.type == FinanceEntryType.EXPENSE.id }
+            val rates = database.financeDao().getAllExchangeRatesSync()
+            val categories = database.financeDao().getAllCategoriesSync().associateBy { it.id }
+
+            val cal = java.util.Calendar.getInstance()
+            val year = cal.get(java.util.Calendar.YEAR)
+            val month = cal.get(java.util.Calendar.MONTH)
+            val monthKey = String.format(java.util.Locale.US, "%04d-%02d", year, month + 1)
+            cal.set(year, month, 1, 0, 0, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            val monthStart = cal.timeInMillis
+
+            budgets.forEach { b ->
+                val spent = entries
+                    .filter { it.categoryId == b.categoryId && it.dateMillis >= monthStart }
+                    .sumOf { convertFinanceMinorUnits(it.totalAmountMinor, it.currencyCode, b.currencyCode, rates) }
+                val pct = if (b.limitMinor > 0L) ((spent * 100L) / b.limitMinor).toInt() else 0
+                val catName = categories[b.categoryId]?.name ?: "Categoria"
+                if (pct >= 100 && b.alert100SentMonth != monthKey) {
+                    database.financeDao().insertBudget(b.copy(alert100SentMonth = monthKey, alert80SentMonth = monthKey))
+                    com.example.notifications.NotificationHelper.showInstantNotification(
+                        context = getApplication(),
+                        id = ("budget_100_${b.id}").hashCode(),
+                        channelId = com.example.notifications.NotificationHelper.CHANNEL_ALERTS,
+                        title = "Orçamento atingido (100%)",
+                        message = "A categoria $catName atingiu $pct% do orçamento mensal."
+                    )
+                    _userMessage.emit("⚠️ Orçamento de $catName atingiu $pct%!")
+                } else if (pct >= 80 && b.alert80SentMonth != monthKey) {
+                    database.financeDao().insertBudget(b.copy(alert80SentMonth = monthKey))
+                    com.example.notifications.NotificationHelper.showInstantNotification(
+                        context = getApplication(),
+                        id = ("budget_80_${b.id}").hashCode(),
+                        channelId = com.example.notifications.NotificationHelper.CHANNEL_ALERTS,
+                        title = "Alerta de orçamento (80%)",
+                        message = "A categoria $catName já consumiu $pct% do limite mensal."
+                    )
+                    _userMessage.emit("Aviso: $catName atingiu $pct% do orçamento mensal.")
+                }
+            }
+        }
+    }
+
+    fun saveFinanceRecurringRule(rule: FinanceRecurringRule) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().insertRecurringRule(rule.copy(updatedAt = System.currentTimeMillis()))
+            processDueRecurringRules()
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun deleteFinanceRecurringRule(rule: FinanceRecurringRule) {
+        viewModelScope.launch(Dispatchers.IO) {
+            database.financeDao().deleteRecurringRuleById(rule.id)
+            backupFinancesNow(showToast = false)
+        }
+    }
+
+    fun processDueRecurringRules() {
+        if (!preferencesManager.financesEnabled.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val rules = database.financeDao().getAllRecurringRulesSync()
+            val now = System.currentTimeMillis()
+            var insertedCount = 0
+            rules.filter { it.isActive }.forEach { rule ->
+                var currentDue = rule.nextDueMillis
+                var updatedRule = rule
+                while (currentDue <= now) {
+                    database.financeDao().insertEntry(
+                        FinanceEntry(
+                            type = rule.type,
+                            name = rule.name,
+                            comment = "Lançamento recorrente",
+                            categoryId = rule.categoryId,
+                            walletName = rule.walletName,
+                            currencyCode = rule.currencyCode,
+                            dateMillis = currentDue,
+                            totalAmountMinor = rule.amountMinor,
+                            priority = rule.priority,
+                            createdAt = now,
+                            updatedAt = now
+                        )
+                    )
+                    insertedCount++
+                    val cal = java.util.Calendar.getInstance().apply { timeInMillis = currentDue }
+                    when (FinanceLinkFrequency.fromId(rule.frequency)) {
+                        FinanceLinkFrequency.DAILY -> cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                        FinanceLinkFrequency.WEEKLY -> cal.add(java.util.Calendar.WEEK_OF_YEAR, 1)
+                        FinanceLinkFrequency.ANNUAL -> cal.add(java.util.Calendar.YEAR, 1)
+                        else -> cal.add(java.util.Calendar.MONTH, 1)
+                    }
+                    currentDue = cal.timeInMillis
+                    updatedRule = updatedRule.copy(nextDueMillis = currentDue, updatedAt = now)
+                }
+
+                // Advance reminder check
+                val remMillis = updatedRule.reminderDaysBefore * 86_400_000L
+                if (updatedRule.reminderDaysBefore > 0 &&
+                    (updatedRule.nextDueMillis - now) in 1L..remMillis &&
+                    updatedRule.lastRemindedDueMillis != updatedRule.nextDueMillis
+                ) {
+                    val curr = FinanceCurrency.fromCode(updatedRule.currencyCode)
+                    com.example.notifications.NotificationHelper.showInstantNotification(
+                        context = getApplication(),
+                        id = ("rec_${updatedRule.id}").hashCode(),
+                        channelId = com.example.notifications.NotificationHelper.CHANNEL_ALERTS,
+                        title = "Lembrete financeiro: ${updatedRule.name}",
+                        message = "Vence em breve (${formatFinanceAmount(updatedRule.amountMinor, curr)})."
+                    )
+                    updatedRule = updatedRule.copy(lastRemindedDueMillis = updatedRule.nextDueMillis, updatedAt = now)
+                }
+
+                if (updatedRule != rule) {
+                    database.financeDao().insertRecurringRule(updatedRule)
+                }
+            }
+            if (insertedCount > 0) {
+                _userMessage.emit("$insertedCount lançamento(s) recorrente(s) registado(s).")
+                checkBudgetAlerts()
+                backupFinancesNow(showToast = false)
+            }
+        }
+    }
+
+    fun completePlannedEntry(entry: FinanceEntry, actualAmountMinor: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val planned = entry.plannedAmountMinor ?: entry.totalAmountMinor
+            val updated = entry.copy(
+                isPlanned = false,
+                plannedAmountMinor = planned,
+                totalAmountMinor = actualAmountMinor,
+                dateMillis = now,
+                updatedAt = now
+            )
+            database.financeDao().updateEntry(updated)
+            val curr = FinanceCurrency.fromCode(entry.currencyCode)
+            val diff = planned - actualAmountMinor
+            val msg = when {
+                diff > 0L -> "${entry.name}: previsto ${formatFinanceAmount(planned, curr)}, pago ${formatFinanceAmount(actualAmountMinor, curr)} (poupou ${formatFinanceAmount(diff, curr)})."
+                diff < 0L -> "${entry.name}: previsto ${formatFinanceAmount(planned, curr)}, pago ${formatFinanceAmount(actualAmountMinor, curr)} (+${formatFinanceAmount(-diff, curr)})."
+                else -> "${entry.name} marcado como pago (${formatFinanceAmount(actualAmountMinor, curr)})."
+            }
+            _userMessage.emit(msg)
+            checkBudgetAlerts()
+            backupFinancesNow(showToast = false)
+        }
     }
 }

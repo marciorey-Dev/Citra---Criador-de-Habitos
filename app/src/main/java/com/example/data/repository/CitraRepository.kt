@@ -379,7 +379,7 @@ class CitraRepository(
         // Seed default achievements
         val defaultAchievements = listOf(
             Achievement("focus_15", "Primeiro Foco", "Complete uma sessão de foco de 15 minutos", "🌱", "Foco"),
-            Achievement("focus_25", "Pomodoro Clássico", "Complete uma sessão de foco de 25 minutos", "⏱️", "Foco"),
+            Achievement("focus_25", "Arancia Clássico", "Complete uma sessão de foco de 25 minutos", "⏱️", "Foco"),
             Achievement("focus_30", "Foco Dedicado", "Complete uma sessão de foco de 30 minutos", "🎯", "Foco"),
             Achievement("focus_45", "Imersão Criativa", "Complete uma sessão de foco de 45 minutos", "🎨", "Foco"),
             Achievement("focus_60", "Hora de Ouro", "Complete uma sessão ininterrupta de 60 minutos", "⭐", "Foco"),

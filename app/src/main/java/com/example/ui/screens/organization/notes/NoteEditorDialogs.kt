@@ -138,65 +138,76 @@ fun FullScreenBlockDialog(
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                // Top Action Bar: Title, Undo, Redo, Copy, Paste, Exit
-                Row(
+                // Top Action Bar: Language selector above action buttons so long names (e.g. MARKDOWN) never collide
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = if (block is CodeBlock) Icons.Default.Code else Icons.Default.Functions,
-                            contentDescription = null,
-                            tint = if (block is CodeBlock) Color(0xFF38BDF8) else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        if (block is CodeBlock) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF1E293B),
-                                modifier = Modifier.clickable { showLangPicker = true }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (block is CodeBlock) Icons.Default.Code else Icons.Default.Functions,
+                                contentDescription = null,
+                                tint = if (block is CodeBlock) Color(0xFF38BDF8) else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            if (block is CodeBlock) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF1E293B),
+                                    modifier = Modifier.clickable { showLangPicker = true }
                                 ) {
-                                    Text(
-                                        text = selectedLang.uppercase(),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF38BDF8)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = selectedLang.uppercase(),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF38BDF8)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                                    }
                                 }
-                            }
 
-                            DropdownMenu(
-                                expanded = showLangPicker,
-                                onDismissRequest = { showLangPicker = false }
-                            ) {
-                                supportedLanguages.forEach { lang ->
-                                    DropdownMenuItem(
-                                        text = { Text(lang.uppercase()) },
-                                        onClick = {
-                                            selectedLang = lang
-                                            showLangPicker = false
-                                            onUpdate(block.copy(language = lang))
-                                        }
-                                    )
+                                DropdownMenu(
+                                    expanded = showLangPicker,
+                                    onDismissRequest = { showLangPicker = false }
+                                ) {
+                                    supportedLanguages.forEach { lang ->
+                                        DropdownMenuItem(
+                                            text = { Text(lang.uppercase()) },
+                                            onClick = {
+                                                selectedLang = lang
+                                                showLangPicker = false
+                                                onUpdate(block.copy(language = lang))
+                                            }
+                                        )
+                                    }
                                 }
+                            } else {
+                                Text(
+                                    text = "Editor Matemático",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
-                        } else {
-                            // Removido o nome "Editor Matemático Focado" para não obstruir os botões de ação
                         }
                     }
 
                     // Action buttons: Undo, Redo, Copy, Paste, Close
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.End
                     ) {
                         IconButton(
                             onClick = { undo() },
@@ -247,6 +258,8 @@ fun FullScreenBlockDialog(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
+
+                        Spacer(modifier = Modifier.width(4.dp))
 
                         IconButton(
                             onClick = onDismiss,
@@ -642,7 +655,7 @@ fun LinkNoteToEntityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            onSelectEntity("Sessão de Foco Pomodoro")
+                            onSelectEntity("Sessão de Foco Arancia")
                         }
                 ) {
                     Row(
