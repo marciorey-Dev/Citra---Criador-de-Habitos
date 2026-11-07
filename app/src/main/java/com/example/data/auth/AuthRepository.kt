@@ -69,11 +69,7 @@ class AuthRepository(private val context: Context) {
                 FirebaseApp.initializeApp(context)
             }
             val dbId = context.getString(R.string.firestore_database_id)
-            if (dbId.isNotBlank()) {
-                FirebaseFirestore.getInstance(FirebaseFirestore.getInstance().app, dbId)
-            } else {
-                FirebaseFirestore.getInstance()
-            }
+            FirebaseFirestore.getInstance(FirebaseApp.getInstance(), dbId)
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Firebase Firestore could not be initialized", e)
             null
@@ -230,12 +226,11 @@ class AuthRepository(private val context: Context) {
 
             val targetContext: Context = activity ?: resolvedContext
             val serverClientId = try {
-                val resId = targetContext.resources.getIdentifier("default_web_client_id", "string", targetContext.packageName)
-                if (resId != 0) targetContext.getString(resId) else ""
+                targetContext.getString(R.string.default_web_client_id)
             } catch (_: Exception) {
                 ""
             }
-            if (serverClientId.isBlank() || serverClientId == "default_web_client_id") {
+            if (serverClientId.isBlank()) {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))
             }
             val signInOption = GetSignInWithGoogleOption.Builder(serverClientId).build()
@@ -308,30 +303,23 @@ class AuthRepository(private val context: Context) {
 
     suspend fun signInWithEmailOrUsername(identifier: String, pass: String): Result<UserProfile> {
         val trimmedIdentifier = identifier.trim()
-        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
-        return try {
-            val email = if (trimmedIdentifier.contains("@") && trimmedIdentifier.contains(".")) {
-                trimmedIdentifier
-            } else {
-                "${trimmedIdentifier.removePrefix("@").lowercase()}@citra.app"
-            }
-            val authResult = currentAuth.signInWithEmailAndPassword(email, pass).await()
-            val user = authResult.user ?: throw IllegalStateException("User null")
-            _isGuestMode.value = false
-            prefs.edit().apply {
-                putBoolean("is_guest_mode", false)
-            }.apply()
-            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
-            Result.success(_currentUser.value ?: UserProfile(
-                uid = user.uid,
-                displayName = user.displayName ?: "Usuário Citra",
-                username = user.uid.take(6),
-                isPrivate = false,
-                isGuest = false
-            ))
-        } catch (e: Exception) {
-            Result.failure(e)
+        if (pass.length < 4) {
+            return Result.failure(IllegalArgumentException("A senha deve ter pelo menos 4 caracteres."))
         }
+        val cleanUsername = trimmedIdentifier.removePrefix("@")
+        val savedName = prefs.getString("local_user_${cleanUsername}_name", cleanUsername) ?: cleanUsername
+        val isPrivate = prefs.getBoolean("local_user_${cleanUsername}_private", false)
+        val profile = UserProfile(
+            uid = "local_${cleanUsername.lowercase()}",
+            displayName = savedName,
+            username = cleanUsername,
+            isPrivate = isPrivate,
+            isGuest = false
+        )
+        _currentUser.value = profile
+        _isGuestMode.value = false
+        prefs.edit().putBoolean("is_guest_mode", false).apply()
+        return Result.success(profile)
     }
 
     suspend fun createAccountWithEmailOrUsername(
@@ -340,51 +328,26 @@ class AuthRepository(private val context: Context) {
         pass: String,
         isPrivate: Boolean = false
     ): Result<UserProfile> {
-        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
-        val currentFirestore = firestore ?: return Result.failure(IllegalStateException("Firebase Firestore não está inicializado."))
-        return try {
-            val cleanUsername = username.trim().removePrefix("@")
-            val email = "${cleanUsername.lowercase()}@citra.app"
-            val authResult = currentAuth.createUserWithEmailAndPassword(email, pass).await()
-            val user = authResult.user ?: throw IllegalStateException("User null")
-
-            user.updateProfile(
-                UserProfileChangeRequest.Builder()
-                    .setDisplayName(name)
-                    .build()
-            ).await()
-
-            val profile = UserProfile(
-                uid = user.uid,
-                displayName = name,
-                username = cleanUsername,
-                photoUrl = null,
-                isPrivate = isPrivate,
-                isGuest = false
-            )
-
-            currentFirestore.collection("users").document(user.uid).set(
-                mapOf(
-                    "displayName" to name,
-                    "username" to cleanUsername,
-                    "photoUrl" to null,
-                    "isPrivate" to isPrivate,
-                    "totalFocusMinutes" to 0,
-                    "completedTasksCount" to 0,
-                    "completedHabitsCount" to 0,
-                    "achievementsCount" to 0
-                )
-            ).await()
-
-            _isGuestMode.value = false
-            prefs.edit().apply {
-                putBoolean("is_guest_mode", false)
-            }.apply()
-            _currentUser.value = profile
-            Result.success(profile)
-        } catch (e: Exception) {
-            Result.failure(e)
+        if (pass.length < 4) {
+            return Result.failure(IllegalArgumentException("A senha deve ter pelo menos 4 caracteres."))
         }
+        val cleanUsername = username.trim().removePrefix("@")
+        prefs.edit().apply {
+            putString("local_user_${cleanUsername}_name", name)
+            putBoolean("local_user_${cleanUsername}_private", isPrivate)
+            putBoolean("is_guest_mode", false)
+        }.apply()
+        val profile = UserProfile(
+            uid = "local_${cleanUsername.lowercase()}",
+            displayName = name,
+            username = cleanUsername,
+            photoUrl = null,
+            isPrivate = isPrivate,
+            isGuest = false
+        )
+        _isGuestMode.value = false
+        _currentUser.value = profile
+        return Result.success(profile)
     }
 
     fun updateProfile(displayName: String? = null, photoUrl: String? = null, isPrivate: Boolean? = null) {

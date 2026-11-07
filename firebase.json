@@ -1,16 +1,21 @@
 {
   "firestore": [
     {
-      "database": "ai-studio-android-citracri-8b571e80-3947-4de1-8037-fb97b3deae0f",
+      "database": "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74",
       "rules": "firestore.rules"
     }
   ],
   "emulators": {
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8085
+    },
     "auth": {
+      "host": "127.0.0.1",
       "port": 9099
     },
-    "firestore": {
-      "port": 8080
+    "ui": {
+      "enabled": false
     }
   }
 }

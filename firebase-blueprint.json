@@ -1,48 +1,91 @@
 {
-  "entities": [
-    {
-      "name": "User",
-      "collection": "users",
-      "fields": {
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with gamification stats",
+      "type": "object",
+      "properties": {
         "displayName": { "type": "string" },
         "username": { "type": "string" },
         "photoUrl": { "type": "string" },
+        "isPrivate": { "type": "boolean" },
         "totalFocusMinutes": { "type": "number" },
         "completedTasksCount": { "type": "number" },
         "completedHabitsCount": { "type": "number" },
         "achievementsCount": { "type": "number" }
+      },
+      "required": ["displayName", "username"]
+    },
+    "CloudSyncDoc": {
+      "title": "CloudSyncDoc",
+      "description": "Cloud backup document for user data and finances",
+      "type": "object",
+      "properties": {
+        "backupJson": { "type": "string" },
+        "notesJson": { "type": "string" },
+        "settings": { "type": "object" },
+        "financesJson": { "type": "string" },
+        "syncedAt": { "type": "number" }
       }
     },
-    {
-      "name": "Task",
-      "collection": "users/{userId}/tasks",
-      "fields": {
+    "Task": {
+      "title": "Task",
+      "description": "User task item",
+      "type": "object",
+      "properties": {
         "title": { "type": "string" },
         "category": { "type": "string" },
         "priority": { "type": "string" },
         "dueDateText": { "type": "string" },
         "isCompleted": { "type": "boolean" }
-      }
+      },
+      "required": ["title"]
     },
-    {
-      "name": "Habit",
-      "collection": "users/{userId}/habits",
-      "fields": {
+    "Habit": {
+      "title": "Habit",
+      "description": "User habit item",
+      "type": "object",
+      "properties": {
         "title": { "type": "string" },
         "category": { "type": "string" },
         "currentStreak": { "type": "number" },
         "completedDatesCsv": { "type": "string" }
-      }
+      },
+      "required": ["title"]
     },
-    {
-      "name": "Note",
-      "collection": "users/{userId}/notes",
-      "fields": {
+    "Note": {
+      "title": "Note",
+      "description": "User note item",
+      "type": "object",
+      "properties": {
         "title": { "type": "string" },
         "content": { "type": "string" },
         "category": { "type": "string" },
         "isPinned": { "type": "boolean" }
-      }
+      },
+      "required": ["title"]
     }
-  ]
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile document"
+    },
+    "/users/{userId}/cloudSync/{docId}": {
+      "schema": { "$ref": "#/entities/CloudSyncDoc" },
+      "description": "User cloud backup payloads"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "User tasks"
+    },
+    "/users/{userId}/habits/{habitId}": {
+      "schema": { "$ref": "#/entities/Habit" },
+      "description": "User habits"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "User notes"
+    }
+  }
 }
