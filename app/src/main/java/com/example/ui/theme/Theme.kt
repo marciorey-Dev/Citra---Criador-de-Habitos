@@ -35,8 +35,14 @@ fun CitraTheme(
         surface = CreamSurface,
         onSurface = Slate900,
         surfaceVariant = CreamSurfaceVariant,
-        onSurfaceVariant = Slate700, // Darkened secondary text for readability
-        outline = BorderOutline
+        onSurfaceVariant = Slate700,
+        surfaceContainerLowest = CreamSurface,
+        surfaceContainerLow = CreamSurfaceContainerLow,
+        surfaceContainer = CreamSurfaceContainer,
+        surfaceContainerHigh = CreamSurfaceContainerHigh,
+        surfaceContainerHighest = CreamSurfaceContainerHighest,
+        outline = BorderOutline,
+        outlineVariant = BorderOutlineVariant
     )
 
     val darkColors = darkColorScheme(
@@ -58,7 +64,13 @@ fun CitraTheme(
         onSurface = DarkTextPrimary,
         surfaceVariant = DarkSurfaceVariant,
         onSurfaceVariant = DarkTextSecondary,
-        outline = DarkBorder
+        surfaceContainerLowest = DarkBackground,
+        surfaceContainerLow = DarkSurfaceContainerLow,
+        surfaceContainer = DarkSurfaceContainer,
+        surfaceContainerHigh = DarkSurfaceContainerHigh,
+        surfaceContainerHighest = DarkSurfaceContainerHighest,
+        outline = DarkBorder,
+        outlineVariant = DarkBorderVariant
     )
 
     val colorScheme = if (darkTheme) darkColors else lightColors

@@ -4,7 +4,18 @@ Bem-vindo às notas de atualização do **Citra**! Aqui pode acompanhar todas as
 
 ---
 
-## 🍊 Versão 1.2.2 (Atual)
+## 🍊 Versão 1.2.3 (Atual)
+- **Mascote no Ecrã de Carregamento:** Substituição do logótipo estático pelo mascote animado **Citra** (`CitraMascote`) no ecrã de carregamento inicial.
+- **Separação Visual & Contraste Aprimorado (Modo Claro e Escuro):** Refinamento da hierarquia tonal entre o fundo, cartões (`surface`), pílulas, círculos e contornos (`outlineVariant`) mantendo o tom quente característico do Citra.
+- **Nova Interface de Conquistas:** Cartão de resumo com troféu, progresso do **Nível Pomar**, barra motivacional, filtros por categoria com contagem e cartões de medalhas com data de desbloqueio.
+- **Novas Interfaces de Finanças (Despesas & Rendas):**
+  - Cartão de **Saldo Atual** com resumo rápido das carteiras, alternância segmentada **Despesas / Rendas**, navegador de período com faixa de 5 dias e totais diários.
+  - Gráfico Donut com total central, legenda por categoria, grade de **Categorias de Renda** e cartão de vinculação rápida a notas.
+- **Nova Interface de Carteiras & Contas:** Cartão de **Património Total Consolidado**, cartões de carteiras com barra de participação (`% do total`), **Transferência Rápida** integrada com botão de inversão, resumo de **Câmbio & Multi-Moeda** e lista de **Últimas Movimentações**.
+
+---
+
+## 🍊 Versão 1.2.2
 - **Mascotes Citra Interativos no Timer Arancia:**
   - Cada sessão de foco concluída no modo Timer gera um mascote Citra proporcional à duração da sessão (`15` a `120` minutos).
   - Física de bolas em tempo real com gravidade por inclinação do telemóvel (acelerómetro), colisões entre si e toque duplo para explodir e desaparecer.

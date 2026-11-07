@@ -272,22 +272,32 @@ val OnGreenContainer = Color(0xFF00390B)
 val BlueAccent = Color(0xFF1E88E5)
 val PurpleAccent = Color(0xFF7E57C2)
 
-val CreamBackground = Color(0xFFFCFAF7)
+val CreamBackground = Color(0xFFF3ECE1)
 val CreamSurface = Color(0xFFFFFFFF)
-val CreamSurfaceVariant = Color(0xFFF4EFEA)
-val BorderOutline = Color(0xFFCBD5E1)
+val CreamSurfaceVariant = Color(0xFFE7DDD0)
+val CreamSurfaceContainerLow = Color(0xFFFAF6F0)
+val CreamSurfaceContainer = Color(0xFFEFE6D8)
+val CreamSurfaceContainerHigh = Color(0xFFE4D8C7)
+val CreamSurfaceContainerHighest = Color(0xFFD9CBB8)
+val BorderOutline = Color(0xFFBBA992)
+val BorderOutlineVariant = Color(0xFFD5C6B3)
 
-// High-contrast text colors for light mode (darkened per user feedback)
+// High-contrast text colors for light mode
 val Slate900 = Color(0xFF0F172A)           // Very crisp primary text
 val Slate700 = Color(0xFF334155)           // Darkened secondary text
 val Slate600 = Color(0xFF475569)           // Readable helper text
 val Slate500 = Color(0xFF64748B)
 val Slate400 = Color(0xFF94A3B8)
 
-// Dark theme counterparts
-val DarkBackground = Color(0xFF141311)
-val DarkSurface = Color(0xFF1E1C1A)
-val DarkSurfaceVariant = Color(0xFF2B2824)
-val DarkBorder = Color(0xFF3B3732)
+// Dark theme counterparts with clear elevation & container separation
+val DarkBackground = Color(0xFF100F0D)
+val DarkSurface = Color(0xFF1E1C19)
+val DarkSurfaceVariant = Color(0xFF2E2A24)
+val DarkSurfaceContainerLow = Color(0xFF171513)
+val DarkSurfaceContainer = Color(0xFF24211D)
+val DarkSurfaceContainerHigh = Color(0xFF2E2A24)
+val DarkSurfaceContainerHighest = Color(0xFF39342D)
+val DarkBorder = Color(0xFF524A40)
+val DarkBorderVariant = Color(0xFF3A342D)
 val DarkTextPrimary = Color(0xFFF8FAFC)
 val DarkTextSecondary = Color(0xFFCBD5E1)

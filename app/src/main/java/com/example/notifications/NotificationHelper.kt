@@ -420,9 +420,44 @@ object NotificationHelper {
         notificationManager.notify(TIMER_NOTIFICATION_ID, notification)
     }
 
+    const val ACTION_TIMER_END = "com.example.citra.TIMER_END"
+    const val REQUEST_CODE_TIMER_END = 90002
+
+    fun scheduleTimerEndAlarm(context: Context, triggerTimeMillis: Long, phaseLabel: String) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
+            action = ACTION_TIMER_END
+            putExtra(EXTRA_TYPE, TYPE_POMODORO)
+            putExtra(EXTRA_TITLE, "Sessão Concluída!")
+            putExtra(EXTRA_MESSAGE, "$phaseLabel concluído com sucesso!")
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_TIMER_END,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        tryScheduleExact(context, alarmManager, triggerTimeMillis, pendingIntent)
+    }
+
+    fun cancelTimerEndAlarm(context: Context) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
+            action = ACTION_TIMER_END
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_TIMER_END,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        alarmManager.cancel(pendingIntent)
+    }
+
     fun cancelTimerNotification(context: Context) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(TIMER_NOTIFICATION_ID)
+        cancelTimerEndAlarm(context)
     }
 
     fun scheduleTaskReminder(

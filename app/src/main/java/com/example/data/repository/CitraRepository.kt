@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.data.local.AppDatabase
 import com.example.data.local.PreferencesManager
 import com.example.data.model.*
+import com.example.notifications.NextAlarmScheduler
 import com.example.notifications.NotificationHelper
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -43,42 +44,16 @@ class CitraRepository(
 
     suspend fun insertTask(task: Task): Long {
         val id = taskDao.insertTask(task)
-        if (task.dueDateTimestamp != null && task.dueDateTimestamp > System.currentTimeMillis()) {
-            val settings = preferencesManager.settings.value
-            val sound = if (task.customSoundUri.isNotBlank()) task.customSoundUri
-                else if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
-            NotificationHelper.scheduleTaskReminder(
-                context = context,
-                taskId = id,
-                title = task.title,
-                dueTimestamp = task.dueDateTimestamp,
-                minutesBefore = task.reminderMinutesBefore,
-                customSoundUri = sound,
-                loopAlarm = task.loopAlarm
-            )
-        }
+        NextAlarmScheduler.scheduleNextAlarm(context)
         return id
     }
 
     suspend fun updateTask(task: Task) {
         taskDao.updateTask(task)
         if (task.isCompleted) {
-            NotificationHelper.cancelTaskReminder(context, task.id)
             checkTaskAchievements()
-        } else if (task.dueDateTimestamp != null && task.dueDateTimestamp > System.currentTimeMillis()) {
-            val settings = preferencesManager.settings.value
-            val sound = if (task.customSoundUri.isNotBlank()) task.customSoundUri
-                else if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
-            NotificationHelper.scheduleTaskReminder(
-                context = context,
-                taskId = task.id,
-                title = task.title,
-                dueTimestamp = task.dueDateTimestamp,
-                minutesBefore = task.reminderMinutesBefore,
-                customSoundUri = sound,
-                loopAlarm = task.loopAlarm
-            )
         }
+        NextAlarmScheduler.scheduleNextAlarm(context)
     }
 
     suspend fun toggleTaskCompleted(task: Task): Boolean {
@@ -86,15 +61,15 @@ class CitraRepository(
         val completedAt = if (updated) System.currentTimeMillis() else null
         taskDao.updateTask(task.copy(isCompleted = updated, completedAt = completedAt))
         if (updated) {
-            NotificationHelper.cancelTaskReminder(context, task.id)
             checkTaskAchievements()
         }
+        NextAlarmScheduler.scheduleNextAlarm(context)
         return updated
     }
 
     suspend fun deleteTask(task: Task) {
-        NotificationHelper.cancelTaskReminder(context, task.id)
         taskDao.deleteTask(task)
+        NextAlarmScheduler.scheduleNextAlarm(context)
     }
 
     // Habits
@@ -102,44 +77,18 @@ class CitraRepository(
 
     suspend fun insertHabit(habit: Habit): Long {
         val id = habitDao.insertHabit(habit)
-        if (habit.reminderTime.isNotBlank()) {
-            val settings = preferencesManager.settings.value
-            val sound = if (habit.customSoundUri.isNotBlank()) habit.customSoundUri
-                else if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
-            NotificationHelper.scheduleHabitReminder(
-                context = context,
-                habitId = id,
-                title = habit.title,
-                timeString = habit.reminderTime,
-                leadMinutes = habit.reminderLeadMinutes,
-                customSoundUri = sound,
-                loopAlarm = habit.loopAlarm
-            )
-        }
+        NextAlarmScheduler.scheduleNextAlarm(context)
         return id
     }
 
     suspend fun updateHabit(habit: Habit) {
         habitDao.updateHabit(habit)
-        if (habit.reminderTime.isNotBlank()) {
-            val settings = preferencesManager.settings.value
-            val sound = if (habit.customSoundUri.isNotBlank()) habit.customSoundUri
-                else if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
-            NotificationHelper.scheduleHabitReminder(
-                context = context,
-                habitId = habit.id,
-                title = habit.title,
-                timeString = habit.reminderTime,
-                leadMinutes = habit.reminderLeadMinutes,
-                customSoundUri = sound,
-                loopAlarm = habit.loopAlarm
-            )
-        }
+        NextAlarmScheduler.scheduleNextAlarm(context)
     }
 
     suspend fun deleteHabit(habit: Habit) {
-        NotificationHelper.cancelHabitReminder(context, habit.id)
         habitDao.deleteHabit(habit)
+        NextAlarmScheduler.scheduleNextAlarm(context)
     }
 
     suspend fun toggleHabitToday(habit: Habit): Boolean {
@@ -205,10 +154,93 @@ class CitraRepository(
         }
     }
 
-    suspend fun insertNotes(notes: List<Note>): Int {
-        noteDao.insertNotes(notes)
+    suspend fun upsertNotesFromCloud(cloudNotes: List<Note>): Int {
+        var count = 0
+        cloudNotes.forEach { cloudNote ->
+            val noteUuid = cloudNote.uuid.ifBlank { java.util.UUID.randomUUID().toString() }
+            val existing = noteDao.getNoteByUuid(noteUuid)
+            if (existing != null) {
+                // Last-Write-Wins: if cloud is newer or equal, update
+                if (cloudNote.updatedAt >= existing.updatedAt) {
+                    val merged = cloudNote.copy(
+                        id = existing.id,
+                        uuid = noteUuid
+                    )
+                    noteDao.updateNote(merged)
+                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        context = context,
+                        title = merged.title,
+                        content = merged.content,
+                        uuid = merged.uuid,
+                        oldTitle = existing.title
+                    )
+                }
+            } else {
+                // Also check if there's a note with the exact same title to avoid title collision
+                val existingByTitle = noteDao.getNoteByTitle(cloudNote.title)
+                if (existingByTitle != null) {
+                    val merged = cloudNote.copy(
+                        id = existingByTitle.id,
+                        uuid = noteUuid
+                    )
+                    noteDao.updateNote(merged)
+                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        context = context,
+                        title = merged.title,
+                        content = merged.content,
+                        uuid = merged.uuid,
+                        oldTitle = existingByTitle.title
+                    )
+                } else {
+                    noteDao.insertNote(cloudNote.copy(id = 0L, uuid = noteUuid))
+                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        context = context,
+                        title = cloudNote.title,
+                        content = cloudNote.content,
+                        uuid = noteUuid
+                    )
+                    count++
+                }
+            }
+        }
         checkNoteAchievements()
-        return notes.size
+        return count
+    }
+
+    suspend fun deduplicateLocalNotes(): Int {
+        val allNotes = noteDao.getAllNotesSync()
+        if (allNotes.isEmpty()) return 0
+        var removed = 0
+
+        // 1. Deduplicate by UUID
+        val byUuid = allNotes.filter { it.uuid.isNotBlank() }.groupBy { it.uuid }
+        byUuid.forEach { (_, notes) ->
+            if (notes.size > 1) {
+                val winner = notes.maxByOrNull { it.updatedAt } ?: notes.first()
+                notes.filter { it.id != winner.id }.forEach { dupe ->
+                    noteDao.permanentlyDelete(dupe.id)
+                    removed++
+                }
+            }
+        }
+
+        // 2. Deduplicate by identical normalized title & content (from earlier duplication loops)
+        val refreshed = noteDao.getAllNotesSync()
+        val byContent = refreshed.groupBy { "${it.title.trim().lowercase()}:::${it.content.trim()}" }
+        byContent.forEach { (_, dupes) ->
+            if (dupes.size > 1) {
+                val winner = dupes.maxByOrNull { it.updatedAt } ?: dupes.first()
+                dupes.filter { it.id != winner.id }.forEach { dupe ->
+                    noteDao.permanentlyDelete(dupe.id)
+                    removed++
+                }
+            }
+        }
+        return removed
+    }
+
+    suspend fun insertNotes(notes: List<Note>): Int {
+        return upsertNotesFromCloud(notes)
     }
 
     suspend fun updateNote(note: Note) = noteDao.updateNote(note)
@@ -349,13 +381,47 @@ class CitraRepository(
     }
 
     // Backup & Restore
-    suspend fun restoreBackup(tasks: List<Task>, habits: List<Habit>, sessions: List<FocusSession>, categories: List<Category>) {
+    suspend fun restoreBackup(
+        tasks: List<Task>,
+        habits: List<Habit>,
+        sessions: List<FocusSession>,
+        categories: List<Category>,
+        achievements: List<Achievement> = emptyList()
+    ) {
         if (tasks.isNotEmpty()) taskDao.insertTasks(tasks)
         if (habits.isNotEmpty()) habitDao.insertHabits(habits)
-        if (sessions.isNotEmpty()) focusSessionDao.insertSessions(sessions)
+        if (sessions.isNotEmpty()) {
+            val existingSessions = focusSessionDao.getAllSessionsSync()
+            val existingTimestamps = existingSessions.map { it.timestamp }.toSet()
+            val newSessions = sessions.filter { it.timestamp !in existingTimestamps }.map { it.copy(id = 0L) }
+            if (newSessions.isNotEmpty()) {
+                focusSessionDao.insertSessions(newSessions)
+            }
+        }
         if (categories.isNotEmpty()) {
             categories.forEach { categoryDao.insertCategory(it) }
         }
+        if (achievements.isNotEmpty()) {
+            achievements.forEach { cloudAch ->
+                val localAch = achievementDao.getAchievementById(cloudAch.id)
+                if (localAch == null) {
+                    achievementDao.insertDefaultAchievements(listOf(cloudAch))
+                } else if (cloudAch.isUnlocked && !localAch.isUnlocked) {
+                    achievementDao.updateAchievement(
+                        localAch.copy(
+                            isUnlocked = true,
+                            unlockedAt = cloudAch.unlockedAt ?: System.currentTimeMillis(),
+                            currentProgress = maxOf(localAch.currentProgress, cloudAch.currentProgress)
+                        )
+                    )
+                } else if (cloudAch.currentProgress > localAch.currentProgress) {
+                    achievementDao.updateAchievement(
+                        localAch.copy(currentProgress = cloudAch.currentProgress)
+                    )
+                }
+            }
+        }
+        com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(context)
     }
 
     suspend fun seedInitialDataIfNeeded() {
@@ -363,6 +429,7 @@ class CitraRepository(
         // If device backup exists on Android storage, restore user data and skip mock seeding
         val restoredFromDevice = com.example.data.backup.AutoDeviceStorageManager.tryRestoreFullAppSnapshot(context, database)
         if (restoredFromDevice) {
+            com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(context)
             return
         }
         // Seed default categories

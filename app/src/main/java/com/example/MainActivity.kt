@@ -50,7 +50,9 @@ import com.example.ui.MainViewModel
 import com.example.ui.PomodoroPhase
 import com.example.ui.components.AchievementsDialog
 import com.example.ui.components.BackupDialog
+import com.example.ui.components.CitraMascote
 import com.example.ui.components.CreditsDialog
+import com.example.ui.components.MascotHumor
 import com.example.ui.components.WhatsNewDialog
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.auth.AuthScreen
@@ -382,31 +384,43 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Auto-sync according to configured frequency (Default daily, or 1h, weekly, on app open)
+                // Auto-sync & Cloud settings loader (Silent save, load on user account entry)
                 val syncEnabled by viewModel.syncEnabled.collectAsState()
                 LaunchedEffect(currentUser?.uid, syncFrequency, syncEnabled) {
                     val user = currentUser
-                    if (syncEnabled && user != null && !user.isGuest) {
-                        val now = System.currentTimeMillis()
-                        val shouldSync = when (syncFrequency) {
-                            "ON_APP_OPEN" -> true
-                            "1_HOUR" -> (now - lastSyncTimestamp) >= 60 * 60 * 1000L
-                            "WEEKLY" -> (now - lastSyncTimestamp) >= 7 * 24 * 60 * 60 * 1000L
-                            else -> (now - lastSyncTimestamp) >= 24 * 60 * 60 * 1000L // "DAILY"
-                        }
-                        if (shouldSync) {
-                            viewModel.updateLastSyncTimestamp(now)
-                            try {
-                                val cloudData = authRepository.fetchCloudUserData()
-                                if (cloudData != null && viewModel.tasks.value.isEmpty() && viewModel.habits.value.isEmpty()) {
+                    if (user != null && !user.isGuest) {
+                        try {
+                            val cloudData = authRepository.fetchCloudUserData()
+                            if (cloudData != null) {
+                                // Load and apply user settings saved in the cloud for this account
+                                viewModel.applyCloudSettings(cloudData.settings)
+
+                                if (viewModel.tasks.value.isEmpty() && viewModel.habits.value.isEmpty()) {
                                     cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
                                     cloudData.notesJson?.let { viewModel.importNotesJson(it) }
-                                } else {
-                                    val settingsMap = mapOf<String, Any>(
-                                        "themeAccent" to viewModel.themeAccent.value.name,
-                                        "keepScreenOn" to viewModel.keepScreenOn.value,
-                                        "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
-                                        "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
-                                    )
+                                    cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
+                                }
+                            }
+                        } catch (_: Exception) {}
+
+                        if (syncEnabled) {
+                            val now = System.currentTimeMillis()
+                            val shouldSync = when (syncFrequency) {
+                                "ON_APP_OPEN" -> true
+                                "1_HOUR" -> (now - lastSyncTimestamp) >= 60 * 60 * 1000L
+                                "WEEKLY" -> (now - lastSyncTimestamp) >= 7 * 24 * 60 * 60 * 1000L
+                                else -> (now - lastSyncTimestamp) >= 24 * 60 * 60 * 1000L // "DAILY"
+                            }
+                            if (shouldSync) {
+                                viewModel.updateLastSyncTimestamp(now)
+                                try {
+                                    val cloudData = authRepository.fetchCloudUserData()
+                                    if (cloudData != null) {
+                                        cloudData.notesJson?.let { viewModel.importNotesJson(it) }
+                                        cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
+                                    }
+                                    val financesJson = viewModel.exportFinancesJson()
+                                    val settingsMap = viewModel.getSettingsMapForCloud()
                                     authRepository.syncAllUserDataToCloud(
                                         tasks = viewModel.tasks.value,
                                         habits = viewModel.habits.value,
@@ -414,10 +428,11 @@ class MainActivity : ComponentActivity() {
                                         categories = viewModel.categories.value,
                                         focusSessions = viewModel.focusSessions.value,
                                         achievements = viewModel.achievements.value,
-                                        settingsMap = settingsMap
+                                        settingsMap = settingsMap,
+                                        financesJson = financesJson
                                     )
-                                }
-                            } catch (_: Exception) {}
+                                } catch (_: Exception) {}
+                            }
                         }
                     }
                 }
@@ -981,6 +996,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AmbientBreakMusicManager.onAppForegrounded(this)
+        ActiveAlarmManager.checkAndRestore(this)
+        com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(this)
+        viewModel.restoreTimerSnapshotOnStartup()
     }
 
     override fun onPause() {
@@ -1066,13 +1084,12 @@ fun CitraLoadingScreen(loadingText: String = "Carregando...") {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.citra_logo),
-                contentDescription = "Citra Logo",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .size(96.dp)
-                    .graphicsLayer(scaleX = scale, scaleY = scale)
+            CitraMascote(
+                humor = MascotHumor.FELIZ,
+                olharX = 0f,
+                olharY = 0f,
+                tamanho = 88.dp,
+                modifier = Modifier.graphicsLayer(scaleX = scale, scaleY = scale)
             )
 
             Spacer(modifier = Modifier.height(24.dp))

@@ -123,6 +123,17 @@ fun TimerScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
+        AnimatedVisibility(
+            visible = pomodoroState.isRunning && !pomodoroState.isStopwatchMode,
+            enter = fadeIn(tween(350)),
+            exit = fadeOut(tween(280))
+        ) {
+            CitraPhysicsOverlay(
+                ballsJson = citraTimerBallsJson,
+                onBallsChanged = { viewModel.saveTimerCitraBallsJson(it) }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -822,13 +833,6 @@ fun TimerScreen(
                     }
                 }
             }
-        }
-
-        if (!pomodoroState.isStopwatchMode) {
-            CitraPhysicsOverlay(
-                ballsJson = citraTimerBallsJson,
-                onBallsChanged = { viewModel.saveTimerCitraBallsJson(it) }
-            )
         }
     }
 

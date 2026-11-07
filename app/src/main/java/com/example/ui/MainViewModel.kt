@@ -19,6 +19,7 @@ import com.example.data.local.NotificationSettings
 import com.example.data.local.SavedTimerSnapshot
 import com.example.data.model.*
 import com.example.data.repository.CitraRepository
+import com.example.notifications.NextAlarmScheduler
 import com.example.notifications.NotificationHelper
 import com.example.ui.theme.ThemeAccent
 import com.example.ui.tutorial.ActiveTutorialState
@@ -114,6 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateNotificationSettings(newSettings: NotificationSettings) {
         preferencesManager.updateSettings(newSettings)
+        NextAlarmScheduler.scheduleNextAlarm(getApplication())
         viewModelScope.launch {
             _userMessage.emit("Configurações de notificação salvas!")
         }
@@ -267,6 +269,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val userMessage: SharedFlow<String> = _userMessage.asSharedFlow()
 
     private var timerJob: Job? = null
+    private var timerTargetEndTimeMillis: Long = 0L
+    private var stopwatchStartTimeMillis: Long = 0L
 
     // Organization sub-tab: 0=Tasks, 1=Habits, 2=Notes
     private val _organizationSubTab = MutableStateFlow(0)
@@ -334,6 +338,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.checkDailyRandomColor()
         NotificationHelper.initNotificationChannels(application)
         restoreTimerSnapshotOnStartup()
+        NextAlarmScheduler.scheduleNextAlarm(application)
         if (preferencesManager.getLastSeenWhatsNewVersion() != "0.7.11") {
             _whatsNewVisible.value = true
         }
@@ -356,7 +361,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun restoreTimerSnapshotOnStartup() {
+    fun restoreTimerSnapshotOnStartup() {
         val snapshot = preferencesManager.loadTimerSnapshot() ?: return
         try {
             val phase = try {
@@ -366,13 +371,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             val totalSec = if (phase == PomodoroPhase.FOCUS) snapshot.focusMinutes * 60 else snapshot.breakMinutes * 60
 
+            if (snapshot.isStopwatchMode) {
+                if (snapshot.isRunning) {
+                    val startTs = if (snapshot.stopwatchStartTimeMillis > 0L) {
+                        snapshot.stopwatchStartTimeMillis
+                    } else {
+                        System.currentTimeMillis() - (snapshot.stopwatchAccumulatedSeconds * 1000L)
+                    }
+                    stopwatchStartTimeMillis = startTs
+                    val elapsed = ((System.currentTimeMillis() - startTs) / 1000L).toInt().coerceAtLeast(0)
+                    _pomodoroState.update {
+                        it.copy(
+                            isStopwatchMode = true,
+                            stopwatchSeconds = elapsed,
+                            isRunning = true,
+                            isPaused = false,
+                            selectedCategory = snapshot.selectedCategory
+                        )
+                    }
+                    startPomodoro()
+                } else if (snapshot.isPaused) {
+                    _pomodoroState.update {
+                        it.copy(
+                            isStopwatchMode = true,
+                            stopwatchSeconds = snapshot.stopwatchAccumulatedSeconds,
+                            isRunning = false,
+                            isPaused = true,
+                            selectedCategory = snapshot.selectedCategory
+                        )
+                    }
+                }
+                return
+            }
+
             if (snapshot.isRunning) {
-                // Calculate elapsed wall-clock seconds since app was closed/killed
-                val elapsedSeconds = ((System.currentTimeMillis() - snapshot.lastTimestamp) / 1000L).toInt().coerceAtLeast(0)
-                val remainingSec = snapshot.remainingSeconds - elapsedSeconds
+                val targetEnd = if (snapshot.targetEndTimeMillis > 0L) {
+                    snapshot.targetEndTimeMillis
+                } else {
+                    snapshot.lastTimestamp + (snapshot.remainingSeconds * 1000L)
+                }
+                timerTargetEndTimeMillis = targetEnd
+                val now = System.currentTimeMillis()
+                val remainingSec = ((targetEnd - now + 999L) / 1000L).toInt()
 
                 if (remainingSec > 0) {
-                    // Timer is still running! Resume smoothly without pausing!
                     _pomodoroState.update {
                         it.copy(
                             focusMinutes = snapshot.focusMinutes,
@@ -389,7 +431,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     startPomodoro()
                 } else {
-                    // Time completed while app was closed!
                     _pomodoroState.update {
                         it.copy(
                             focusMinutes = snapshot.focusMinutes,
@@ -407,7 +448,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onPhaseCompleted()
                 }
             } else if (snapshot.isPaused) {
-                // Was explicitly paused
                 _pomodoroState.update {
                     it.copy(
                         focusMinutes = snapshot.focusMinutes,
@@ -448,7 +488,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isPaused = s.isPaused,
                 selectedCategory = s.selectedCategory,
                 linkedTaskId = s.linkedTask?.id,
-                lastTimestamp = System.currentTimeMillis()
+                lastTimestamp = System.currentTimeMillis(),
+                targetEndTimeMillis = timerTargetEndTimeMillis,
+                isStopwatchMode = s.isStopwatchMode,
+                stopwatchStartTimeMillis = stopwatchStartTimeMillis,
+                stopwatchAccumulatedSeconds = s.stopwatchSeconds
             )
         )
     }
@@ -571,15 +615,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun startPomodoro() {
         vibrate(40)
         _pomodoroState.update { it.copy(isRunning = true, isPaused = false) }
-        persistTimerState()
 
-        timerJob?.cancel()
-        timerJob = viewModelScope.launch {
-            if (_pomodoroState.value.isStopwatchMode) {
+        if (_pomodoroState.value.isStopwatchMode) {
+            stopwatchStartTimeMillis = System.currentTimeMillis() - (_pomodoroState.value.stopwatchSeconds * 1000L)
+            persistTimerState()
+
+            timerJob?.cancel()
+            timerJob = viewModelScope.launch {
                 while (_pomodoroState.value.isRunning && _pomodoroState.value.isStopwatchMode) {
-                    delay(1000L)
-                    val elapsed = _pomodoroState.value.stopwatchSeconds + 1
+                    val now = System.currentTimeMillis()
+                    val elapsed = ((now - stopwatchStartTimeMillis) / 1000L).toInt().coerceAtLeast(0)
                     _pomodoroState.update { it.copy(stopwatchSeconds = elapsed) }
+                    persistTimerState()
 
                     NotificationHelper.showTimerOngoingNotification(
                         context = getApplication(),
@@ -587,24 +634,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         phaseLabel = "Cronômetro",
                         isPaused = false
                     )
+                    delay(500L)
                 }
-            } else {
-                while (_pomodoroState.value.remainingSeconds > 0 && _pomodoroState.value.isRunning) {
-                    delay(1000L)
-                    val currentRem = _pomodoroState.value.remainingSeconds - 1
-                    _pomodoroState.update { it.copy(remainingSeconds = currentRem) }
+            }
+        } else {
+            val now = System.currentTimeMillis()
+            timerTargetEndTimeMillis = now + (_pomodoroState.value.remainingSeconds * 1000L)
+            persistTimerState()
+
+            // Schedule system AlarmClock that pierces Doze mode and lockscreen
+            NotificationHelper.scheduleTimerEndAlarm(
+                context = getApplication(),
+                triggerTimeMillis = timerTargetEndTimeMillis,
+                phaseLabel = _pomodoroState.value.currentPhase.label
+            )
+
+            timerJob?.cancel()
+            timerJob = viewModelScope.launch {
+                while (_pomodoroState.value.isRunning && !_pomodoroState.value.isStopwatchMode) {
+                    val currentTime = System.currentTimeMillis()
+                    val rem = ((timerTargetEndTimeMillis - currentTime + 999L) / 1000L).toInt().coerceAtLeast(0)
+                    _pomodoroState.update { it.copy(remainingSeconds = rem) }
                     persistTimerState()
 
                     NotificationHelper.showTimerOngoingNotification(
                         context = getApplication(),
-                        remainingSeconds = currentRem,
+                        remainingSeconds = rem,
                         phaseLabel = _pomodoroState.value.currentPhase.label,
                         isPaused = false
                     )
-                }
 
-                if (_pomodoroState.value.remainingSeconds <= 0 && _pomodoroState.value.isRunning) {
-                    onPhaseCompleted()
+                    if (rem <= 0) {
+                        onPhaseCompleted()
+                        break
+                    }
+                    delay(500L)
                 }
             }
         }
@@ -614,7 +678,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vibrate(30)
         timerJob?.cancel()
         timerJob = null
-        _pomodoroState.update { it.copy(isRunning = false, isPaused = true) }
+        NotificationHelper.cancelTimerEndAlarm(getApplication())
+
+        val now = System.currentTimeMillis()
+        if (_pomodoroState.value.isStopwatchMode) {
+            val elapsed = ((now - stopwatchStartTimeMillis) / 1000L).toInt().coerceAtLeast(0)
+            _pomodoroState.update { it.copy(isRunning = false, isPaused = true, stopwatchSeconds = elapsed) }
+        } else {
+            val rem = ((timerTargetEndTimeMillis - now + 999L) / 1000L).toInt().coerceAtLeast(0)
+            _pomodoroState.update { it.copy(isRunning = false, isPaused = true, remainingSeconds = rem) }
+        }
         persistTimerState()
 
         val state = _pomodoroState.value
@@ -630,6 +703,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vibrate(40)
         timerJob?.cancel()
         timerJob = null
+        NotificationHelper.cancelTimerEndAlarm(getApplication())
+        timerTargetEndTimeMillis = 0L
+        stopwatchStartTimeMillis = 0L
         val state = _pomodoroState.value
 
         if (state.isStopwatchMode && state.stopwatchSeconds >= 60 && state.selectedCategory.isNotBlank()) {
@@ -667,6 +743,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun onPhaseCompleted() {
         vibrate(250)
         NotificationHelper.cancelTimerNotification(getApplication())
+        NotificationHelper.cancelTimerEndAlarm(getApplication())
+        timerTargetEndTimeMillis = 0L
+        stopwatchStartTimeMillis = 0L
         val state = _pomodoroState.value
 
         if (state.currentPhase == PomodoroPhase.FOCUS) {
@@ -928,6 +1007,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 recordsError = "Erro na pasta Citra Records: ${e.message}"
             }
+
+            // Reconcile and deduplicate local notes seamlessly
+            try {
+                repository.deduplicateLocalNotes()
+            } catch (_: Exception) {}
 
             kotlinx.coroutines.delay(250)
             _isStartupScanDone.value = true
@@ -1316,7 +1400,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     tasks = parsed.tasks,
                     habits = parsed.habits,
                     sessions = parsed.focusSessions,
-                    categories = parsed.categories
+                    categories = parsed.categories,
+                    achievements = parsed.achievements
                 )
                 _userMessage.emit("Backup local restaurado com sucesso!")
             } catch (e: Exception) {
@@ -1333,12 +1418,133 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val parsed = BackupManager.parseNotesJson(jsonString)
-                val count = repository.insertNotes(parsed)
-                _userMessage.emit("$count anotações importadas com sucesso!")
+                val count = repository.upsertNotesFromCloud(parsed)
+                _userMessage.emit("$count anotações sincronizadas sem duplicatas!")
             } catch (e: Exception) {
                 _userMessage.emit("Erro ao importar anotações.")
             }
         }
+    }
+
+    suspend fun exportFinancesJson(): String {
+        return BackupManager.exportFinancesJson(database.financeDao())
+    }
+
+    fun restoreFinancesJson(jsonString: String?) {
+        if (jsonString.isNullOrBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                BackupManager.restoreFinancesJson(database.financeDao(), jsonString)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun getSettingsMapForCloud(): Map<String, Any> {
+        val notif = notificationSettings.value
+        val map = mutableMapOf<String, Any>(
+            "themeAccent" to themeAccent.value.name,
+            "defaultStartTab" to defaultStartTab.value,
+            "keepScreenOn" to keepScreenOn.value,
+            "financesEnabled" to financesEnabled.value,
+            "financeDefaultCurrency" to preferencesManager.financeDefaultCurrency.value,
+            "financeHideValues" to preferencesManager.financeHideValues.value,
+            "syncEnabled" to syncEnabled.value,
+            "syncFrequency" to syncFrequency.value,
+            // Sounds & Notifications
+            "taskSound" to notif.taskSound,
+            "taskSoundUri" to notif.taskSoundUri,
+            "habitSound" to notif.habitSound,
+            "habitSoundUri" to notif.habitSoundUri,
+            "pomodoroSound" to notif.pomodoroSound,
+            "pomodoroSoundUri" to notif.pomodoroSoundUri,
+            "achievementSound" to notif.achievementSound,
+            "alertSound" to notif.alertSound,
+            "vibrate" to notif.vibrate,
+            "headsUpBanner" to notif.headsUpBanner,
+            "notifyAchievements" to notif.notifyAchievements,
+            "notifyMissedHabits" to notif.notifyMissedHabits,
+            "ambientBreakMusicInApp" to notif.ambientBreakMusicInApp,
+            "ambientMusicVolume" to notif.ambientMusicVolume,
+            "overrideSilentMode" to notif.overrideSilentMode
+        )
+        isDarkTheme.value?.let { map["themeMode"] = it }
+        return map
+    }
+
+    fun applyCloudSettings(settings: Map<String, Any>?) {
+        if (settings == null) return
+        try {
+            // Theme Accent
+            val accentName = settings["themeAccent"] as? String
+            if (!accentName.isNullOrBlank()) {
+                try {
+                    preferencesManager.setThemeAccent(ThemeAccent.valueOf(accentName))
+                } catch (_: Exception) {}
+            }
+
+            // Theme Mode
+            if (settings.containsKey("themeMode")) {
+                val modeVal = settings["themeMode"]
+                if (modeVal is Boolean) {
+                    preferencesManager.setThemeMode(modeVal)
+                }
+            }
+
+            // Default Start Tab
+            val startTab = settings["defaultStartTab"] as? String
+            if (!startTab.isNullOrBlank()) {
+                preferencesManager.setDefaultStartTab(startTab)
+            }
+
+            // Keep Screen On
+            val keepOn = settings["keepScreenOn"] as? Boolean
+            if (keepOn != null) {
+                preferencesManager.setKeepScreenOn(keepOn)
+            }
+
+            // Finances Enabled
+            val finEnabled = settings["financesEnabled"] as? Boolean
+            if (finEnabled != null) {
+                preferencesManager.setFinancesEnabled(finEnabled)
+            }
+
+            // Finance currency & visibility
+            val finCurrency = settings["financeDefaultCurrency"] as? String
+            if (!finCurrency.isNullOrBlank()) {
+                preferencesManager.setFinanceDefaultCurrency(finCurrency)
+            }
+            val finHide = settings["financeHideValues"] as? Boolean
+            if (finHide != null) {
+                preferencesManager.setFinanceHideValues(finHide)
+            }
+
+            // Notification / Sounds
+            val currentNotif = notificationSettings.value
+            val updatedNotif = currentNotif.copy(
+                taskSound = (settings["taskSound"] as? String) ?: currentNotif.taskSound,
+                taskSoundUri = (settings["taskSoundUri"] as? String) ?: currentNotif.taskSoundUri,
+                habitSound = (settings["habitSound"] as? String) ?: currentNotif.habitSound,
+                habitSoundUri = (settings["habitSoundUri"] as? String) ?: currentNotif.habitSoundUri,
+                pomodoroSound = (settings["pomodoroSound"] as? String) ?: currentNotif.pomodoroSound,
+                pomodoroSoundUri = (settings["pomodoroSoundUri"] as? String) ?: currentNotif.pomodoroSoundUri,
+                achievementSound = (settings["achievementSound"] as? String) ?: currentNotif.achievementSound,
+                alertSound = (settings["alertSound"] as? String) ?: currentNotif.alertSound,
+                vibrate = (settings["vibrate"] as? Boolean) ?: currentNotif.vibrate,
+                headsUpBanner = (settings["headsUpBanner"] as? Boolean) ?: currentNotif.headsUpBanner,
+                notifyAchievements = (settings["notifyAchievements"] as? Boolean) ?: currentNotif.notifyAchievements,
+                notifyMissedHabits = (settings["notifyMissedHabits"] as? Boolean) ?: currentNotif.notifyMissedHabits,
+                ambientBreakMusicInApp = (settings["ambientBreakMusicInApp"] as? Boolean) ?: currentNotif.ambientBreakMusicInApp,
+                ambientMusicVolume = ((settings["ambientMusicVolume"] as? Number)?.toFloat()) ?: currentNotif.ambientMusicVolume,
+                overrideSilentMode = (settings["overrideSilentMode"] as? Boolean) ?: currentNotif.overrideSilentMode
+            )
+            preferencesManager.updateSettings(updatedNotif)
+
+            // Sync settings
+            val syncEn = settings["syncEnabled"] as? Boolean
+            if (syncEn != null) preferencesManager.setSyncEnabled(syncEn)
+            val syncFreq = settings["syncFrequency"] as? String
+            if (!syncFreq.isNullOrBlank()) preferencesManager.setSyncFrequency(syncFreq)
+        } catch (_: Exception) {}
     }
 
     fun getVersionsForNote(noteId: Long): Flow<List<NoteVersion>> = repository.getVersionsForNote(noteId)

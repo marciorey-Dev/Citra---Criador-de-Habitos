@@ -454,7 +454,8 @@ class AuthRepository(private val context: Context) {
         categories: List<Category>,
         focusSessions: List<FocusSession>,
         achievements: List<Achievement>,
-        settingsMap: Map<String, Any>
+        settingsMap: Map<String, Any>,
+        financesJson: String? = null
     ) {
         val user = _currentUser.value ?: return
         if (user.isGuest) return
@@ -485,13 +486,19 @@ class AuthRepository(private val context: Context) {
             )
             val notesJson = BackupManager.exportNotesJson(notes, context)
 
+            val cloudPayload = mutableMapOf<String, Any>(
+                "backupJson" to backupJson,
+                "notesJson" to notesJson,
+                "settings" to settingsMap,
+                "syncedAt" to System.currentTimeMillis()
+            )
+            if (!financesJson.isNullOrBlank()) {
+                cloudPayload["financesJson"] = financesJson
+            }
+
             userRef.collection("cloudSync").document("current").set(
-                mapOf(
-                    "backupJson" to backupJson,
-                    "notesJson" to notesJson,
-                    "settings" to settingsMap,
-                    "syncedAt" to System.currentTimeMillis()
-                )
+                cloudPayload,
+                SetOptions.merge()
             ).await()
         } catch (_: Exception) {}
     }
@@ -506,9 +513,10 @@ class AuthRepository(private val context: Context) {
             if (doc.exists()) {
                 val backupJson = doc.getString("backupJson")
                 val notesJson = doc.getString("notesJson")
+                val financesJson = doc.getString("financesJson")
                 @Suppress("UNCHECKED_CAST")
                 val settings = doc.get("settings") as? Map<String, Any>
-                CloudUserData(backupJson, notesJson, settings)
+                CloudUserData(backupJson, notesJson, settings, financesJson)
             } else null
         } catch (_: Exception) {
             null
@@ -611,5 +619,6 @@ class AuthRepository(private val context: Context) {
 data class CloudUserData(
     val backupJson: String?,
     val notesJson: String?,
-    val settings: Map<String, Any>?
+    val settings: Map<String, Any>?,
+    val financesJson: String? = null
 )

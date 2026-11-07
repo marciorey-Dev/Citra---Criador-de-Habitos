@@ -169,18 +169,68 @@ fun FinancesScreen(
         }
     }
 
+    // 5-day strip centered around anchorMillis (-2..+2 days)
+    val fiveDayStrip = remember(anchorMillis, realEntries, selectedType, activeCurrency, exchangeRates) {
+        val locale = Locale("pt", "AO")
+        val dayNameFmt = SimpleDateFormat("EEE", locale)
+        val dayNumFmt = SimpleDateFormat("dd", locale)
+        (-2..2).map { offset ->
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = anchorMillis
+                add(Calendar.DAY_OF_YEAR, offset)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val start = cal.timeInMillis
+            cal.set(Calendar.HOUR_OF_DAY, 23)
+            cal.set(Calendar.MINUTE, 59)
+            cal.set(Calendar.SECOND, 59)
+            cal.set(Calendar.MILLISECOND, 999)
+            val end = cal.timeInMillis
+            val dayTotal = realEntries
+                .filter { it.type == selectedType.id && it.dateMillis in start..end }
+                .sumOf { convertFinanceMinorUnits(it.totalAmountMinor, it.currencyCode, activeCurrency.code, exchangeRates) }
+            val rawDow = dayNameFmt.format(Date(start)).replace(".", "")
+                .replaceFirstChar { it.titlecase(locale) }
+            FinanceDayStripItem(
+                dayMillis = start,
+                label = "$rawDow ${dayNumFmt.format(Date(start))}",
+                totalMinor = dayTotal,
+                isSelected = offset == 0
+            )
+        }
+    }
+
+    val incomeCategoriesWithTotals = remember(allCategories, periodEntries, activeCurrency, exchangeRates) {
+        allCategories
+            .filter { it.type == FinanceEntryType.INCOME.id && !it.isArchived }
+            .map { cat ->
+                val sum = periodEntries
+                    .filter { it.categoryId == cat.id }
+                    .sumOf { convertFinanceMinorUnits(it.totalAmountMinor, it.currencyCode, activeCurrency.code, exchangeRates) }
+                cat to sum
+            }
+    }
+
+    val isExpenseMode = selectedType == FinanceEntryType.EXPENSE
+    val modeAccentColor = if (isExpenseMode) MaterialTheme.colorScheme.primary else GreenAccent
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("finances_screen"),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Top Balance & Currency Card
+        // 1. Top SALDO ATUAL & Wallets Card
         item {
             Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -189,70 +239,62 @@ fun FinancesScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable { showEditBalanceDialog = true }
-                                .padding(vertical = 2.dp)
+                                .padding(vertical = 2.dp, horizontal = 2.dp)
                         ) {
                             Text(
-                                text = "Saldo atual",
-                                fontSize = 12.sp,
+                                text = "SALDO ATUAL",
+                                fontSize = 11.5.sp,
+                                letterSpacing = 0.8.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Bold
                             )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = formatFinanceAmount(currentBalanceMinor, activeCurrency, hideValues),
-                                    fontSize = 24.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (!hideValues && currentBalanceMinor < 0L) {
-                                        RedAction
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Definir saldo atual",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Definir saldo atual",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(15.dp)
+                            )
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { viewModel.setFinanceHideValues(!hideValues) }
-                            ) {
-                                Icon(
-                                    imageVector = if (hideValues) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = if (hideValues) "Mostrar valores" else "Ocultar valores",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            // Currency selector (Kz first)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Currency selector pill (Kz ▾)
                             Box {
-                                AssistChip(
-                                    onClick = { currencyMenuExpanded = true },
-                                    label = {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { currencyMenuExpanded = true }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
                                             text = activeCurrency.symbol,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
+                                            fontSize = 12.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
-                                    },
-                                    trailingIcon = {
+                                        Spacer(modifier = Modifier.width(2.dp))
                                         Icon(
                                             Icons.Default.ArrowDropDown,
                                             contentDescription = "Mudar moeda",
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                )
+                                }
                                 DropdownMenu(
                                     expanded = currencyMenuExpanded,
                                     onDismissRequest = { currencyMenuExpanded = false }
@@ -269,10 +311,42 @@ fun FinancesScreen(
                                 }
                             }
 
-                            // Overflow menu with upcoming visual actions
+                            IconButton(
+                                onClick = { viewModel.setFinanceHideValues(!hideValues) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (hideValues) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (hideValues) "Mostrar valores" else "Ocultar valores",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showWalletsDialog = true },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = "Carteiras e contas",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Overflow menu
                             Box {
-                                IconButton(onClick = { overflowMenuExpanded = true }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "Mais opções")
+                                IconButton(
+                                    onClick = { overflowMenuExpanded = true },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.MoreVert,
+                                        contentDescription = "Mais opções",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                                 DropdownMenu(
                                     expanded = overflowMenuExpanded,
@@ -340,36 +414,128 @@ fun FinancesScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                    // Type Selector: [ DESPESAS ] [ RENDAS ]
-                    Row(
+                    Text(
+                        text = formatFinanceAmount(currentBalanceMinor, activeCurrency, hideValues),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (!hideValues && currentBalanceMinor < 0L) {
+                            RedAction
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                                RoundedCornerShape(14.dp)
-                            )
-                            .padding(4.dp)
-                    ) {
-                        FinanceEntryType.entries.forEach { type ->
-                            val selected = selectedType == type
-                            Button(
-                                onClick = { selectedType = type },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("finance_type_${type.id.lowercase()}")
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { showEditBalanceDialog = true }
+                    )
+
+                    if (wallets.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(wallets, key = { it.id }) { wallet ->
+                                val wNet = realEntries
+                                    .filter { it.walletName.equals(wallet.name, ignoreCase = true) }
+                                    .sumOf {
+                                        val conv = convertFinanceMinorUnits(it.totalAmountMinor, it.currencyCode, activeCurrency.code, exchangeRates)
+                                        if (it.type == FinanceEntryType.INCOME.id) conv else -conv
+                                    }
+                                val wInit = convertFinanceMinorUnits(wallet.initialBalanceMinor, wallet.currencyCode, activeCurrency.code, exchangeRates)
+                                val wBal = wInit + wNet
+                                val dotColor = Color(wallet.colorHex)
+
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { showWalletsDialog = true }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(dotColor, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "${wallet.name}: ",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = formatFinanceAmount(wBal, activeCurrency, hideValues),
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = dotColor
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Segmented Pill Toggle: [ ↘ DESPESAS ] [ ↗ RENDAS ]
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    FinanceEntryType.entries.forEach { type ->
+                        val selected = selectedType == type
+                        val pillBg = when {
+                            selected && type == FinanceEntryType.EXPENSE -> MaterialTheme.colorScheme.primary
+                            selected && type == FinanceEntryType.INCOME -> GreenAccent
+                            else -> Color.Transparent
+                        }
+                        val pillContent = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = pillBg,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { selectedType = type }
+                                .testTag("finance_type_${type.id.lowercase()}")
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Icon(
+                                    imageVector = if (type == FinanceEntryType.EXPENSE) Icons.Default.SouthEast else Icons.Default.NorthEast,
+                                    contentDescription = null,
+                                    tint = pillContent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = if (type == FinanceEntryType.EXPENSE) "DESPESAS" else "RENDAS",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp,
+                                    color = pillContent
                                 )
                             }
                         }
@@ -378,191 +544,520 @@ fun FinancesScreen(
             }
         }
 
-        // 2. Compact Calendar & Period Selector
+        // 3. Period Navigator & 5-Day Strip Card
         item {
             Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        IconButton(
-                            onClick = {
-                                if (periodMode == FinancePeriodMode.CUSTOM) {
-                                    showCustomRangePicker = true
-                                } else {
-                                    anchorMillis = shiftFinanceAnchor(anchorMillis, periodMode, -1)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    if (periodMode == FinancePeriodMode.CUSTOM) {
+                                        showCustomRangePicker = true
+                                    } else {
+                                        anchorMillis = shiftFinanceAnchor(anchorMillis, periodMode, -1)
+                                    }
                                 }
-                            }
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Período anterior")
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                    contentDescription = "Período anterior",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
 
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
                                 .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     if (periodMode == FinancePeriodMode.CUSTOM) {
                                         showCustomRangePicker = true
                                     }
                                 }
+                                .padding(vertical = 4.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarToday,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = periodTitle,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                text = "Total: ${formatFinanceAmount(periodTotalMinor, activeCurrency, hideValues)}",
-                                fontSize = 12.sp,
-                                color = if (selectedType == FinanceEntryType.EXPENSE) RedAction else GreenAccent,
-                                fontWeight = FontWeight.SemiBold
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
-                        IconButton(
-                            onClick = {
-                                if (periodMode == FinancePeriodMode.CUSTOM) {
-                                    showCustomRangePicker = true
-                                } else {
-                                    anchorMillis = shiftFinanceAnchor(anchorMillis, periodMode, 1)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    if (periodMode == FinancePeriodMode.CUSTOM) {
+                                        showCustomRangePicker = true
+                                    } else {
+                                        anchorMillis = shiftFinanceAnchor(anchorMillis, periodMode, 1)
+                                    }
                                 }
-                            }
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Próximo período")
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = "Próximo período",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    // Period Mode Pills
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(FinancePeriodMode.entries) { mode ->
+                        FinancePeriodMode.entries.forEach { mode ->
                             val selected = periodMode == mode
-                            FilterChip(
-                                selected = selected,
-                                onClick = {
-                                    periodMode = mode
-                                    if (mode == FinancePeriodMode.CUSTOM) {
-                                        showCustomRangePicker = true
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (selected) GreenAccent else MaterialTheme.colorScheme.surfaceContainerLow,
+                                border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        periodMode = mode
+                                        if (mode == FinancePeriodMode.CUSTOM) {
+                                            showCustomRangePicker = true
+                                        }
                                     }
-                                },
-                                label = { Text(mode.label, fontSize = 12.sp) }
-                            )
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = mode.label,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 5-Day Strip
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        fiveDayStrip.forEach { dayItem ->
+                            val cellBg = when {
+                                dayItem.isSelected && isExpenseMode -> MaterialTheme.colorScheme.primary
+                                dayItem.isSelected && !isExpenseMode -> GreenAccent.copy(alpha = 0.18f)
+                                else -> MaterialTheme.colorScheme.surfaceContainerLow
+                            }
+                            val cellBorder = when {
+                                dayItem.isSelected && isExpenseMode -> null
+                                dayItem.isSelected && !isExpenseMode -> androidx.compose.foundation.BorderStroke(1.5.dp, GreenAccent)
+                                else -> androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            }
+                            val topTextColor = when {
+                                dayItem.isSelected && isExpenseMode -> Color.White.copy(alpha = 0.9f)
+                                dayItem.isSelected && !isExpenseMode -> GreenAccent
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            val valTextColor = when {
+                                dayItem.isSelected && isExpenseMode -> Color.White
+                                dayItem.isSelected && !isExpenseMode -> GreenAccent
+                                dayItem.totalMinor > 0L -> MaterialTheme.colorScheme.onSurface
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = cellBg,
+                                border = cellBorder,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { anchorMillis = dayItem.dayMillis }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = dayItem.label,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = topTextColor,
+                                        maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = formatFinanceAmount(dayItem.totalMinor, activeCurrency, hideValues),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = valTextColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 3. Pie Chart Card
+        // 4. Distribution Card (Donut Chart + Legend, plus 2-col Income Categories in Rendas mode)
         item {
             Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                if (pieSlices.isEmpty()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 28.dp, horizontal = 16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PieChartOutline,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(44.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Sem ${if (selectedType == FinanceEntryType.EXPENSE) "despesas" else "rendas"} neste período",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Adicione um lançamento abaixo para ver a distribuição por categoria",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Canvas(
-                            modifier = Modifier.size(136.dp)
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (isExpenseMode) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            val strokeWidth = 28.dp.toPx()
-                            val diameter = size.minDimension - strokeWidth
-                            val topLeft = Offset(
-                                (size.width - diameter) / 2f,
-                                (size.height - diameter) / 2f
+                            Text(
+                                text = "Distribuição por Categoria",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            var startAngle = -90f
-                            pieSlices.forEach { slice ->
-                                val sweep = (slice.fraction * 360f).coerceAtLeast(2f)
-                                drawArc(
-                                    color = slice.color,
-                                    startAngle = startAngle,
-                                    sweepAngle = sweep,
-                                    useCenter = false,
-                                    topLeft = topLeft,
-                                    size = Size(diameter, diameter),
-                                    style = Stroke(width = strokeWidth)
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Text(
+                                    text = "${pieSlices.size} Categorias",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
-                                startAngle += sweep
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(16.dp))
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            pieSlices.take(5).forEach { slice ->
-                                val pct = kotlin.math.round(slice.fraction * 100f).toInt()
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                        if (pieSlices.isEmpty()) {
+                            EmptyFinanceChartPlaceholder(isExpenseMode = true)
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(164.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .background(slice.color, CircleShape)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = slice.categoryName,
-                                        fontSize = 12.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "$pct%",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val strokeWidth = 22.dp.toPx()
+                                        val diameter = size.minDimension - strokeWidth
+                                        val topLeft = Offset(
+                                            (size.width - diameter) / 2f,
+                                            (size.height - diameter) / 2f
+                                        )
+                                        var startAngle = -90f
+                                        pieSlices.forEach { slice ->
+                                            val sweep = (slice.fraction * 360f).coerceAtLeast(3f)
+                                            drawArc(
+                                                color = slice.color,
+                                                startAngle = startAngle,
+                                                sweepAngle = sweep,
+                                                useCenter = false,
+                                                topLeft = topLeft,
+                                                size = Size(diameter, diameter),
+                                                style = Stroke(width = strokeWidth)
+                                            )
+                                            startAngle += sweep
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = "TOTAL",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.8.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = formatFinanceAmount(periodTotalMinor, activeCurrency, hideValues),
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                pieSlices.take(6).forEach { slice ->
+                                    val pct = kotlin.math.round(slice.fraction * 100f).toInt()
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(slice.color, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = slice.categoryName,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Text(
+                                            text = "$pct%",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = slice.color
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // RENDAS MODE
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Distribuição de Renda",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Consolidado de $periodTitle",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = GreenAccent.copy(alpha = 0.14f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, GreenAccent.copy(alpha = 0.35f))
+                            ) {
+                                Text(
+                                    text = "+${formatFinanceAmount(periodTotalMinor, activeCurrency, hideValues)}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = GreenAccent,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+
+                        if (pieSlices.isEmpty()) {
+                            EmptyFinanceChartPlaceholder(isExpenseMode = false)
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(126.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val strokeWidth = 18.dp.toPx()
+                                        val diameter = size.minDimension - strokeWidth
+                                        val topLeft = Offset(
+                                            (size.width - diameter) / 2f,
+                                            (size.height - diameter) / 2f
+                                        )
+                                        var startAngle = -90f
+                                        pieSlices.forEach { slice ->
+                                            val sweep = (slice.fraction * 360f).coerceAtLeast(3f)
+                                            drawArc(
+                                                color = slice.color,
+                                                startAngle = startAngle,
+                                                sweepAngle = sweep,
+                                                useCenter = false,
+                                                topLeft = topLeft,
+                                                size = Size(diameter, diameter),
+                                                style = Stroke(width = strokeWidth)
+                                            )
+                                            startAngle += sweep
+                                        }
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = "Total",
+                                            fontSize = 10.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "+${formatFinanceAmount(periodTotalMinor, activeCurrency, hideValues)}",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = GreenAccent,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    pieSlices.take(4).forEach { slice ->
+                                        val pct = kotlin.math.round(slice.fraction * 100f).toInt()
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(9.dp)
+                                                        .background(slice.color, CircleShape)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = slice.categoryName,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = formatFinanceAmount(slice.amountMinor, activeCurrency, hideValues),
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = slice.color
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "$pct%",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = slice.color
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2-Column Grid: Categorias de Renda
+                        if (incomeCategoriesWithTotals.isNotEmpty()) {
+                            Text(
+                                text = "Categorias de Renda",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                incomeCategoriesWithTotals.chunked(2).forEach { rowCats ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        rowCats.forEach { (cat, sumMinor) ->
+                                            val catColor = Color(cat.colorHex)
+                                            val hasVal = sumMinor > 0L
+                                            Surface(
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = FinanceCategoryIcons.iconForName(cat.iconName),
+                                                        contentDescription = null,
+                                                        tint = if (hasVal) catColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = cat.name,
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = if (hasVal) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (hasVal) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = formatFinanceAmount(sumMinor, activeCurrency, hideValues),
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = if (hasVal) catColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (rowCats.size == 1) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -571,30 +1066,67 @@ fun FinancesScreen(
             }
         }
 
-        // 4. Primary "+ Adicionar despesa / renda" Button
+        // 5. Primary "+ Adicionar despesa / renda" CTA Button
         item {
             Button(
                 onClick = {
                     editingEntry = null
                     showEntryEditor = true
                 },
-                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = modeAccentColor,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(26.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .height(52.dp)
                     .testTag("add_finance_entry_btn")
             ) {
-                Icon(Icons.Default.Add, contentDescription = null)
+                Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (selectedType == FinanceEntryType.EXPENSE) "Adicionar despesa" else "Adicionar renda",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
+                    text = if (isExpenseMode) "Adicionar despesa" else "Adicionar renda",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.5.sp
                 )
             }
         }
 
-        // 5. Entries List
+        // 6. Entries Section Header + List
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (isExpenseMode) "Despesas do período" else "Lançamentos de Renda",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isExpenseMode) MaterialTheme.colorScheme.surface else GreenAccent.copy(alpha = 0.16f),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isExpenseMode) MaterialTheme.colorScheme.outlineVariant else GreenAccent.copy(alpha = 0.35f)
+                    )
+                ) {
+                    Text(
+                        text = if (isExpenseMode) "${periodEntries.size} itens" else "${periodEntries.size}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isExpenseMode) MaterialTheme.colorScheme.onSurfaceVariant else GreenAccent,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+
         items(periodEntries, key = { it.id }) { entry ->
             val category = categoryMap[entry.categoryId]
             val convertedAmt = convertFinanceMinorUnits(entry.totalAmountMinor, entry.currencyCode, activeCurrency.code, exchangeRates)
@@ -617,7 +1149,7 @@ fun FinancesScreen(
             )
         }
 
-        // 6. Planeados / Lista de Compras (Planeado vs. Real)
+        // 7. Planeados / Lista de Compras (Planeado vs. Real)
         if (plannedEntries.isNotEmpty()) {
             item {
                 Text(
@@ -631,11 +1163,12 @@ fun FinancesScreen(
             items(plannedEntries, key = { "planned_${it.id}" }) { pEntry ->
                 val curr = FinanceCurrency.fromCode(pEntry.currencyCode)
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .clickable {
                             editingEntry = pEntry
                             showEntryEditor = true
@@ -655,7 +1188,7 @@ fun FinancesScreen(
                         }
                         FilledTonalButton(
                             onClick = { completingPlannedEntry = pEntry },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -663,6 +1196,61 @@ fun FinancesScreen(
                             Text("Pago", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+                }
+            }
+        }
+
+        // 8. Bottom Linked Note Card
+        item {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { showLinkCreatorDialog = true }
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(MaterialTheme.colorScheme.surfaceContainer, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isExpenseMode) "Vincular este período a uma nota" else "Relatório Vinculado",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (isExpenseMode) "Sincronize com seu caderno de compras ou..." else "Modelo: 'Rendas do Mês' • Automático",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Vincular a nota →",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
@@ -964,12 +1552,18 @@ private fun FinanceEntryRowCard(
         }
     }
 
+    val isIncome = entry.type == FinanceEntryType.INCOME.id
+    val dateBadge = remember(entry.dateMillis) {
+        SimpleDateFormat("dd MMM", Locale("pt", "AO")).format(Date(entry.dateMillis))
+    }
+
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
             .clickable { onEdit() }
     ) {
         Row(
@@ -978,8 +1572,8 @@ private fun FinanceEntryRowCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .background(catColor.copy(alpha = 0.16f), CircleShape),
+                    .size(46.dp)
+                    .background(catColor.copy(alpha = 0.16f), RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -996,26 +1590,29 @@ private fun FinanceEntryRowCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = entry.name,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    if (entry.priority == FinancePriority.OPTIONAL.id) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer
-                        ) {
-                            Text(
-                                text = "Opcional",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isIncome) GreenAccent.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceContainer,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isIncome) GreenAccent.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outlineVariant
+                        )
+                    ) {
+                        Text(
+                            text = "$percentage%",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isIncome) GreenAccent else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                        )
                     }
                     if (!entry.attachmentUri.isNullOrBlank()) {
                         Spacer(modifier = Modifier.width(4.dp))
@@ -1045,31 +1642,59 @@ private fun FinanceEntryRowCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                if (entry.walletName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = if (isIncome) GreenAccent else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(11.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = entry.walletName,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isIncome) GreenAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "$percentage%",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    text = if (isIncome) {
+                        "+${formatFinanceAmount(entry.totalAmountMinor, entryCurrency, hideValues)}"
+                    } else {
+                        formatFinanceAmount(entry.totalAmountMinor, entryCurrency, hideValues)
+                    },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isIncome) GreenAccent else MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = formatFinanceAmount(entry.totalAmountMinor, entryCurrency, hideValues),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    text = dateBadge,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
+                IconButton(
+                    onClick = { menuExpanded = true },
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "Opções do lançamento",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
                 DropdownMenu(
@@ -1105,6 +1730,50 @@ private fun FinanceEntryRowCard(
         }
     }
 }
+
+@Composable
+private fun EmptyFinanceChartPlaceholder(isExpenseMode: Boolean) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 22.dp, horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .background(MaterialTheme.colorScheme.surfaceContainer, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PieChartOutline,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(26.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Sem ${if (isExpenseMode) "despesas" else "rendas"} neste período",
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = "Adicione um lançamento abaixo para ver a distribuição por categoria",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+private data class FinanceDayStripItem(
+    val dayMillis: Long,
+    val label: String,
+    val totalMinor: Long,
+    val isSelected: Boolean
+)
 
 private data class FinancePieSlice(
     val categoryName: String,

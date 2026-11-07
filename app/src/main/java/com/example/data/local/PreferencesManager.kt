@@ -470,12 +470,16 @@ class PreferencesManager(private val context: Context) {
             if (snapshot.linkedTaskId != null) putLong("timer_linked_task", snapshot.linkedTaskId)
             else remove("timer_linked_task")
             putLong("timer_last_ts", snapshot.lastTimestamp)
+            putLong("timer_target_end_ts", snapshot.targetEndTimeMillis)
+            putBoolean("timer_is_stopwatch", snapshot.isStopwatchMode)
+            putLong("timer_stopwatch_start_ts", snapshot.stopwatchStartTimeMillis)
+            putInt("timer_stopwatch_accum_secs", snapshot.stopwatchAccumulatedSeconds)
             apply()
         }
     }
 
     fun loadTimerSnapshot(): SavedTimerSnapshot? {
-        if (!prefs.contains("timer_rem_secs")) return null
+        if (!prefs.contains("timer_rem_secs") && !prefs.contains("timer_is_stopwatch")) return null
         val linkedTask = if (prefs.contains("timer_linked_task")) prefs.getLong("timer_linked_task", 0L) else null
         return SavedTimerSnapshot(
             focusMinutes = prefs.getInt("timer_focus_mins", 15),
@@ -488,7 +492,11 @@ class PreferencesManager(private val context: Context) {
             isPaused = prefs.getBoolean("timer_paused", false),
             selectedCategory = prefs.getString("timer_category", "Estudos") ?: "Estudos",
             linkedTaskId = linkedTask,
-            lastTimestamp = prefs.getLong("timer_last_ts", 0L)
+            lastTimestamp = prefs.getLong("timer_last_ts", 0L),
+            targetEndTimeMillis = prefs.getLong("timer_target_end_ts", 0L),
+            isStopwatchMode = prefs.getBoolean("timer_is_stopwatch", false),
+            stopwatchStartTimeMillis = prefs.getLong("timer_stopwatch_start_ts", 0L),
+            stopwatchAccumulatedSeconds = prefs.getInt("timer_stopwatch_accum_secs", 0)
         )
     }
 
@@ -587,5 +595,9 @@ data class SavedTimerSnapshot(
     val isPaused: Boolean = false,
     val selectedCategory: String = "Estudos",
     val linkedTaskId: Long? = null,
-    val lastTimestamp: Long = 0L
+    val lastTimestamp: Long = 0L,
+    val targetEndTimeMillis: Long = 0L,
+    val isStopwatchMode: Boolean = false,
+    val stopwatchStartTimeMillis: Long = 0L,
+    val stopwatchAccumulatedSeconds: Int = 0
 )

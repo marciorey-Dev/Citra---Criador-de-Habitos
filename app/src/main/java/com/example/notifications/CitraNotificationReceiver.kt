@@ -6,6 +6,10 @@ import android.content.Intent
 import android.os.PowerManager
 import com.example.data.local.AppDatabase
 import com.example.data.local.PreferencesManager
+import com.example.data.model.FocusSession
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -18,12 +22,69 @@ class CitraNotificationReceiver : BroadcastReceiver() {
             PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
             "citra:alarm_wakelock"
         )
-        wakeLock?.acquire(30_000L) // Hold wake lock for up to 30 seconds to ensure screen turns on and sound completes
+        wakeLock?.acquire(30_000L) // Hold wake lock for up to 30 seconds
 
-        if (intent.action == NotificationHelper.ACTION_DAILY_MIDNIGHT) {
-            val prefs = PreferencesManager(context)
-            prefs.checkDailyRandomColor(force = true)
-            NotificationHelper.scheduleDailyMidnightColorAlarm(context)
+        val action = intent.action
+
+        if (action == NotificationHelper.ACTION_DAILY_MIDNIGHT) {
+            try {
+                val prefs = PreferencesManager(context)
+                prefs.checkDailyRandomColor(force = true)
+                NotificationHelper.scheduleDailyMidnightColorAlarm(context)
+            } finally {
+                wakeLock?.release()
+            }
+            return
+        }
+
+        // Handle exact timer completion in background/lockscreen
+        if (action == NotificationHelper.ACTION_TIMER_END) {
+            try {
+                val prefs = PreferencesManager(context)
+                val settings = prefs.settings.value
+                val sound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
+
+                NotificationHelper.showInstantNotification(
+                    context = context,
+                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
+                    channelId = NotificationHelper.CHANNEL_ALERTS,
+                    title = "Sessão Concluída!",
+                    message = "Seu tempo de foco no Arancia foi concluído com sucesso!",
+                    customSoundUriString = sound,
+                    vibratePhone = settings.vibrate,
+                    loopAlarm = false
+                )
+
+                // Save completed focus session to Room
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val snapshot = prefs.loadTimerSnapshot()
+                        if (snapshot != null) {
+                            if (snapshot.phaseName == "FOCUS") {
+                                val db = AppDatabase.getInstance(context)
+                                val session = FocusSession(
+                                    durationMinutes = snapshot.focusMinutes,
+                                    category = snapshot.selectedCategory,
+                                    timestamp = System.currentTimeMillis()
+                                )
+                                db.focusSessionDao().insertSession(session)
+                            }
+                            prefs.saveTimerSnapshot(
+                                snapshot.copy(
+                                    isRunning = false,
+                                    isPaused = false,
+                                    remainingSeconds = 0,
+                                    targetEndTimeMillis = 0L
+                                )
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
+            } finally {
+                try {
+                    if (wakeLock?.isHeld == true) wakeLock.release()
+                } catch (_: Exception) {}
+            }
             return
         }
 
@@ -33,7 +94,12 @@ class CitraNotificationReceiver : BroadcastReceiver() {
             val message = intent.getStringExtra(NotificationHelper.EXTRA_MESSAGE) ?: "Você tem um lembrete pendente."
             val id = intent.getIntExtra(NotificationHelper.EXTRA_ID, (System.currentTimeMillis() % 10000).toInt())
             val soundUriExtra = intent.getStringExtra(NotificationHelper.EXTRA_SOUND_URI) ?: ""
-            val loopAlarm = intent.getBooleanExtra(NotificationHelper.EXTRA_LOOP_ALARM, false)
+            // Habits NEVER use loopAlarm, preventing sticky 00:00 lockscreen on app open
+            val loopAlarm = if (type == NotificationHelper.TYPE_HABIT || type == NotificationHelper.TYPE_HABIT_MISSED) {
+                false
+            } else {
+                intent.getBooleanExtra(NotificationHelper.EXTRA_LOOP_ALARM, false)
+            }
 
             val prefs = PreferencesManager(context)
             val settings = prefs.settings.value
@@ -50,12 +116,10 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                     }
                     val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                     val isDoneToday = habit?.completedDatesCsv?.contains(todayStr) == true
-                    // If already completed today, do not alert as missed!
                     if (isDoneToday) return
                 }
             }
 
-            // Fallback to active settings if extra is blank
             val effectiveSound = if (soundUriExtra.isNotBlank()) {
                 soundUriExtra
             } else {
@@ -89,29 +153,8 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                 habitId = habitIdExtra
             )
 
-            // For habits: reschedule for the exact same time tomorrow
-            if (type == NotificationHelper.TYPE_HABIT || type == NotificationHelper.TYPE_HABIT_MISSED) {
-                val habitId = intent.getLongExtra(NotificationHelper.EXTRA_HABIT_ID, -1L)
-                val habitTime = intent.getStringExtra(NotificationHelper.EXTRA_HABIT_TIME)
-                val habitLead = intent.getIntExtra(NotificationHelper.EXTRA_HABIT_LEAD, 10)
-                val isAdvance = intent.getBooleanExtra(NotificationHelper.EXTRA_IS_ADVANCE, false)
-
-                if (habitId > 0 && !habitTime.isNullOrBlank() && type == NotificationHelper.TYPE_HABIT) {
-                    val cleanTitle = title
-                        .replace("Hora do Hábito: ", "")
-                        .replace(Regex("Hábito em \\d+ min: "), "")
-                    NotificationHelper.rescheduleHabitOccurrenceForNextDay(
-                        context = context,
-                        habitId = habitId,
-                        title = cleanTitle,
-                        timeString = habitTime,
-                        leadMinutes = habitLead,
-                        customSoundUri = effectiveSound,
-                        isAdvance = isAdvance,
-                        loopAlarm = loopAlarm
-                    )
-                }
-            }
+            // Immediately schedule the NEXT single alarm from Room truth
+            NextAlarmScheduler.scheduleNextAlarm(context)
         } finally {
             try {
                 if (wakeLock?.isHeld == true) {

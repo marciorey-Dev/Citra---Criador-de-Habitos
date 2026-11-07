@@ -254,53 +254,7 @@ fun CitraPhysicsOverlay(
         }
 
         Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = { tapOffset ->
-                            // Find topmost ball under double-tap
-                            var hitIndex = -1
-                            for (i in balls.size - 1 downTo 0) {
-                                val b = balls[i]
-                                val d = hypot(tapOffset.x - b.x, tapOffset.y - b.y)
-                                if (d <= b.radius * 1.25f) {
-                                    hitIndex = i
-                                    break
-                                }
-                            }
-                            if (hitIndex != -1) {
-                                val removed = balls.removeAt(hitIndex)
-                                // Spawn explosion particles
-                                val particleColors = listOf(
-                                    Color(0xFFFF7A00),
-                                    Color(0xFFFFA726),
-                                    Color(0xFFFFE082),
-                                    Color(0xFF4CAF50),
-                                    Color.White
-                                )
-                                repeat(16) { p ->
-                                    val ang = (p / 16f) * 2f * PI.toFloat() + Random.nextFloat() * 0.3f
-                                    val spd = 120f + Random.nextFloat() * 240f
-                                    particles.add(
-                                        ExplosionParticle(
-                                            x = removed.x,
-                                            y = removed.y,
-                                            vx = cos(ang) * spd,
-                                            vy = sin(ang) * spd,
-                                            radius = (removed.radius * (0.14f + Random.nextFloat() * 0.14f)).coerceAtLeast(3f),
-                                            color = particleColors[p % particleColors.size]
-                                        )
-                                    )
-                                }
-                                // Persist updated list
-                                val newArr = JSONArray()
-                                balls.forEach { newArr.put(it.durationMinutes) }
-                                onBallsChanged(newArr.toString())
-                            }
-                        }
-                    )
-                }
+            modifier = Modifier.fillMaxSize()
         ) {
             // Read frameTick to trigger redraw at 60fps
             @Suppress("UNUSED_EXPRESSION")

@@ -253,15 +253,36 @@ object BackupManager {
             }
         }
 
-        return BackupParsedData(tasksList, habitsList, sessionsList, categoriesList)
+        val achievementsList = mutableListOf<Achievement>()
+        if (root.has("achievements")) {
+            val arr = root.getJSONArray("achievements")
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                achievementsList.add(
+                    Achievement(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        description = obj.optString("description", ""),
+                        iconEmoji = obj.optString("iconEmoji", "🏆"),
+                        category = obj.optString("category", "Geral"),
+                        isUnlocked = obj.optBoolean("isUnlocked", false),
+                        unlockedAt = if (obj.isNull("unlockedAt")) null else obj.optLong("unlockedAt"),
+                        currentProgress = obj.optInt("currentProgress", 0),
+                        maxProgress = obj.optInt("maxProgress", 1)
+                    )
+                )
+            }
+        }
+
+        return BackupParsedData(tasksList, habitsList, sessionsList, categoriesList, achievementsList)
     }
 
     /**
-     * Exports multiple notes as JSON, embedding media attachments <= 3MB if context is provided.
+     * Exports multiple notes as JSON without heavy media attachments (pure text & markdown).
      */
     fun exportNotesJson(notes: List<Note>, context: android.content.Context? = null): String {
         val root = JSONObject()
-        root.put("version", 2)
+        root.put("version", 3)
         root.put("exportedAt", System.currentTimeMillis())
         val arr = JSONArray()
         notes.forEach { n ->
@@ -280,13 +301,6 @@ object BackupManager {
                 put("isDeleted", n.isDeleted)
                 put("deletedAt", n.deletedAt ?: JSONObject.NULL)
                 put("updatedAt", n.updatedAt)
-
-                if (context != null) {
-                    val attachments = com.example.util.MediaStorageHelper.extractMediaAttachmentsForNote(context, n.content)
-                    if (attachments.length() > 0) {
-                        put("attachments", attachments)
-                    }
-                }
             }
             arr.put(obj)
         }
@@ -295,7 +309,7 @@ object BackupManager {
     }
 
     /**
-     * Parses notes from JSON, preserving UUIDs and silently restoring attachments <= 3MB.
+     * Parses notes from JSON, preserving UUIDs and timestamps for conflict-free reconciliation.
      */
     fun parseNotesJson(jsonString: String, context: android.content.Context? = null): List<Note> {
         val root = JSONObject(jsonString)
@@ -304,16 +318,7 @@ object BackupManager {
             val arr = root.getJSONArray("notes")
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
-                var contentText = obj.optString("content", "")
-
-                // Regra dos 3 MB: restauração silenciosa de mídias em segundo plano
-                if (context != null && obj.has("attachments")) {
-                    contentText = com.example.util.MediaStorageHelper.restoreMediaAttachments(
-                        context,
-                        obj.optJSONArray("attachments"),
-                        contentText
-                    )
-                }
+                val contentText = obj.optString("content", "")
 
                 val parsedUuid = obj.optString("uuid").ifBlank {
                     java.util.UUID.randomUUID().toString()
@@ -321,7 +326,7 @@ object BackupManager {
 
                 list.add(
                     Note(
-                        id = 0L, // new IDs to avoid collision in Room
+                        id = 0L,
                         uuid = parsedUuid,
                         title = obj.getString("title"),
                         content = contentText,
@@ -341,11 +346,350 @@ object BackupManager {
         }
         return list
     }
+
+    /**
+     * Exports full financial data as JSON.
+     */
+    suspend fun exportFinancesJson(dao: com.example.data.local.FinanceDao): String {
+        val root = JSONObject()
+        root.put("version", 1)
+        root.put("exportedAt", System.currentTimeMillis())
+
+        val catsArr = JSONArray()
+        dao.getAllCategoriesSync().forEach { c ->
+            catsArr.put(JSONObject().apply {
+                put("id", c.id)
+                put("type", c.type)
+                put("name", c.name)
+                put("iconName", c.iconName)
+                put("colorHex", c.colorHex)
+                put("isDefault", c.isDefault)
+                put("isArchived", c.isArchived)
+                put("updatedAt", c.updatedAt)
+            })
+        }
+        root.put("categories", catsArr)
+
+        val entriesArr = JSONArray()
+        dao.getAllEntriesIncludingDeleted().forEach { e ->
+            entriesArr.put(JSONObject().apply {
+                put("id", e.id)
+                put("type", e.type)
+                put("name", e.name)
+                put("comment", e.comment)
+                put("categoryId", e.categoryId)
+                put("walletName", e.walletName)
+                put("currencyCode", e.currencyCode)
+                put("dateMillis", e.dateMillis)
+                put("quantity", e.quantity)
+                put("unit", e.unit)
+                put("unitPriceMinor", e.unitPriceMinor ?: JSONObject.NULL)
+                put("totalAmountMinor", e.totalAmountMinor)
+                put("priority", e.priority)
+                put("tagsCsv", e.tagsCsv)
+                put("attachmentUri", e.attachmentUri ?: JSONObject.NULL)
+                put("isPlanned", e.isPlanned)
+                put("plannedAmountMinor", e.plannedAmountMinor ?: JSONObject.NULL)
+                put("createdAt", e.createdAt)
+                put("updatedAt", e.updatedAt)
+                put("deletedAt", e.deletedAt ?: JSONObject.NULL)
+            })
+        }
+        root.put("entries", entriesArr)
+
+        val walletsArr = JSONArray()
+        dao.getAllWalletsSync().forEach { w ->
+            walletsArr.put(JSONObject().apply {
+                put("id", w.id)
+                put("name", w.name)
+                put("type", w.type)
+                put("currencyCode", w.currencyCode)
+                put("initialBalanceMinor", w.initialBalanceMinor)
+                put("colorHex", w.colorHex)
+                put("isDefault", w.isDefault)
+                put("updatedAt", w.updatedAt)
+            })
+        }
+        root.put("wallets", walletsArr)
+
+        val ratesArr = JSONArray()
+        dao.getAllExchangeRatesSync().forEach { r ->
+            ratesArr.put(JSONObject().apply {
+                put("id", r.id)
+                put("fromCurrency", r.fromCurrency)
+                put("toCurrency", r.toCurrency)
+                put("rate", r.rate)
+                put("recordedAt", r.recordedAt)
+                put("updatedAt", r.updatedAt)
+            })
+        }
+        root.put("exchangeRates", ratesArr)
+
+        val budgetsArr = JSONArray()
+        dao.getAllBudgetsSync().forEach { b ->
+            budgetsArr.put(JSONObject().apply {
+                put("id", b.id)
+                put("categoryId", b.categoryId)
+                put("limitMinor", b.limitMinor)
+                put("currencyCode", b.currencyCode)
+                put("alert80SentMonth", b.alert80SentMonth)
+                put("alert100SentMonth", b.alert100SentMonth)
+                put("updatedAt", b.updatedAt)
+            })
+        }
+        root.put("budgets", budgetsArr)
+
+        val rulesArr = JSONArray()
+        dao.getAllRecurringRulesSync().forEach { r ->
+            rulesArr.put(JSONObject().apply {
+                put("id", r.id)
+                put("type", r.type)
+                put("name", r.name)
+                put("categoryId", r.categoryId)
+                put("walletName", r.walletName)
+                put("currencyCode", r.currencyCode)
+                put("amountMinor", r.amountMinor)
+                put("priority", r.priority)
+                put("frequency", r.frequency)
+                put("reminderDaysBefore", r.reminderDaysBefore)
+                put("nextDueMillis", r.nextDueMillis)
+                put("lastRemindedDueMillis", r.lastRemindedDueMillis)
+                put("isActive", r.isActive)
+                put("updatedAt", r.updatedAt)
+            })
+        }
+        root.put("recurringRules", rulesArr)
+
+        val linksArr = JSONArray()
+        dao.getAllLinksSync().forEach { l ->
+            linksArr.put(JSONObject().apply {
+                put("id", l.id)
+                put("noteId", l.noteId)
+                put("noteUuid", l.noteUuid)
+                put("blockId", l.blockId)
+                put("sourceType", l.sourceType)
+                put("frequency", l.frequency)
+                put("scheduleHour", l.scheduleHour)
+                put("scheduleMinute", l.scheduleMinute)
+                put("writeMode", l.writeMode)
+                put("newNoteTitleTemplate", l.newNoteTitleTemplate)
+                put("groupBy", l.groupBy)
+                put("mergeSameItems", l.mergeSameItems)
+                put("extraColumnsCsv", l.extraColumnsCsv)
+                put("includeBalanceSummary", l.includeBalanceSummary)
+                put("includeAutoSummary", l.includeAutoSummary)
+                put("includeMermaidChart", l.includeMermaidChart)
+                put("filterCategoriesCsv", l.filterCategoriesCsv)
+                put("filterPriority", l.filterPriority)
+                put("filterWallet", l.filterWallet)
+                put("filterTagsCsv", l.filterTagsCsv)
+                put("filterCurrency", l.filterCurrency)
+                put("notifyOnUpdate", l.notifyOnUpdate)
+                put("emptyPeriodBehavior", l.emptyPeriodBehavior)
+                put("status", l.status)
+                put("lastExecutedAt", l.lastExecutedAt ?: JSONObject.NULL)
+                put("createdAt", l.createdAt)
+                put("updatedAt", l.updatedAt)
+            })
+        }
+        root.put("links", linksArr)
+
+        return root.toString(2)
+    }
+
+    /**
+     * Parses and restores financial data.
+     */
+    suspend fun restoreFinancesJson(dao: com.example.data.local.FinanceDao, jsonString: String) {
+        val root = JSONObject(jsonString)
+
+        if (root.has("categories")) {
+            val arr = root.getJSONArray("categories")
+            val list = mutableListOf<FinanceCategory>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceCategory(
+                        id = o.getString("id"),
+                        type = o.getString("type"),
+                        name = o.getString("name"),
+                        iconName = o.getString("iconName"),
+                        colorHex = o.getLong("colorHex"),
+                        isDefault = o.optBoolean("isDefault", false),
+                        isArchived = o.optBoolean("isArchived", false),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertCategories(list)
+        }
+
+        if (root.has("wallets")) {
+            val arr = root.getJSONArray("wallets")
+            val list = mutableListOf<FinanceWallet>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceWallet(
+                        id = o.getString("id"),
+                        name = o.getString("name"),
+                        type = o.optString("type", FinanceWalletType.CASH.id),
+                        currencyCode = o.optString("currencyCode", "AOA"),
+                        initialBalanceMinor = o.optLong("initialBalanceMinor", 0L),
+                        colorHex = o.optLong("colorHex", 0xFFFF8B1F),
+                        isDefault = o.optBoolean("isDefault", false),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertWallets(list)
+        }
+
+        if (root.has("entries")) {
+            val arr = root.getJSONArray("entries")
+            val list = mutableListOf<FinanceEntry>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceEntry(
+                        id = o.getString("id"),
+                        type = o.getString("type"),
+                        name = o.getString("name"),
+                        comment = o.optString("comment", ""),
+                        categoryId = o.getString("categoryId"),
+                        walletName = o.optString("walletName", "Carteira Principal"),
+                        currencyCode = o.optString("currencyCode", "AOA"),
+                        dateMillis = o.optLong("dateMillis", System.currentTimeMillis()),
+                        quantity = o.optDouble("quantity", 1.0),
+                        unit = o.optString("unit", ""),
+                        unitPriceMinor = if (o.isNull("unitPriceMinor")) null else o.optLong("unitPriceMinor"),
+                        totalAmountMinor = o.getLong("totalAmountMinor"),
+                        priority = o.optString("priority", "MANDATORY"),
+                        tagsCsv = o.optString("tagsCsv", ""),
+                        attachmentUri = if (o.isNull("attachmentUri")) null else o.optString("attachmentUri"),
+                        isPlanned = o.optBoolean("isPlanned", false),
+                        plannedAmountMinor = if (o.isNull("plannedAmountMinor")) null else o.optLong("plannedAmountMinor"),
+                        createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis()),
+                        deletedAt = if (o.isNull("deletedAt")) null else o.optLong("deletedAt")
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertEntries(list)
+        }
+
+        if (root.has("exchangeRates")) {
+            val arr = root.getJSONArray("exchangeRates")
+            val list = mutableListOf<FinanceExchangeRate>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceExchangeRate(
+                        id = o.getString("id"),
+                        fromCurrency = o.getString("fromCurrency"),
+                        toCurrency = o.getString("toCurrency"),
+                        rate = o.getDouble("rate"),
+                        recordedAt = o.optLong("recordedAt", System.currentTimeMillis()),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertExchangeRates(list)
+        }
+
+        if (root.has("budgets")) {
+            val arr = root.getJSONArray("budgets")
+            val list = mutableListOf<FinanceBudget>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceBudget(
+                        id = o.getString("id"),
+                        categoryId = o.getString("categoryId"),
+                        limitMinor = o.getLong("limitMinor"),
+                        currencyCode = o.optString("currencyCode", "AOA"),
+                        alert80SentMonth = o.optString("alert80SentMonth", ""),
+                        alert100SentMonth = o.optString("alert100SentMonth", ""),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertBudgets(list)
+        }
+
+        if (root.has("recurringRules")) {
+            val arr = root.getJSONArray("recurringRules")
+            val list = mutableListOf<FinanceRecurringRule>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceRecurringRule(
+                        id = o.getString("id"),
+                        type = o.optString("type", FinanceEntryType.EXPENSE.id),
+                        name = o.getString("name"),
+                        categoryId = o.getString("categoryId"),
+                        walletName = o.optString("walletName", "Carteira Principal"),
+                        currencyCode = o.optString("currencyCode", "AOA"),
+                        amountMinor = o.getLong("amountMinor"),
+                        priority = o.optString("priority", FinancePriority.MANDATORY.id),
+                        frequency = o.optString("frequency", FinanceLinkFrequency.MONTHLY.id),
+                        reminderDaysBefore = o.optInt("reminderDaysBefore", 1),
+                        nextDueMillis = o.optLong("nextDueMillis", System.currentTimeMillis()),
+                        lastRemindedDueMillis = o.optLong("lastRemindedDueMillis", 0L),
+                        isActive = o.optBoolean("isActive", true),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertRecurringRules(list)
+        }
+
+        if (root.has("links")) {
+            val arr = root.getJSONArray("links")
+            val list = mutableListOf<FinanceNoteLink>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceNoteLink(
+                        id = o.getString("id"),
+                        noteId = o.optLong("noteId", 0L),
+                        noteUuid = o.optString("noteUuid", ""),
+                        blockId = o.optString("blockId", ""),
+                        sourceType = o.optString("sourceType", FinanceLinkSource.BOTH.id),
+                        frequency = o.optString("frequency", FinanceLinkFrequency.MONTHLY.id),
+                        scheduleHour = o.optInt("scheduleHour", 23),
+                        scheduleMinute = o.optInt("scheduleMinute", 59),
+                        writeMode = o.optString("writeMode", FinanceLinkWriteMode.REPLACE_BLOCK.id),
+                        newNoteTitleTemplate = o.optString("newNoteTitleTemplate", "Despesas Mensais · {mês} {ano}"),
+                        groupBy = o.optString("groupBy", FinanceLinkGroupBy.PRIORITY.id),
+                        mergeSameItems = o.optBoolean("mergeSameItems", false),
+                        extraColumnsCsv = o.optString("extraColumnsCsv", ""),
+                        includeBalanceSummary = o.optBoolean("includeBalanceSummary", true),
+                        includeAutoSummary = o.optBoolean("includeAutoSummary", false),
+                        includeMermaidChart = o.optBoolean("includeMermaidChart", false),
+                        filterCategoriesCsv = o.optString("filterCategoriesCsv", ""),
+                        filterPriority = o.optString("filterPriority", ""),
+                        filterWallet = o.optString("filterWallet", ""),
+                        filterTagsCsv = o.optString("filterTagsCsv", ""),
+                        filterCurrency = o.optString("filterCurrency", ""),
+                        notifyOnUpdate = o.optBoolean("notifyOnUpdate", false),
+                        emptyPeriodBehavior = o.optString("emptyPeriodBehavior", "WRITE_EMPTY"),
+                        status = o.optString("status", "ACTIVE"),
+                        lastExecutedAt = if (o.isNull("lastExecutedAt")) null else o.optLong("lastExecutedAt"),
+                        createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertLinks(list)
+        }
+    }
 }
 
 data class BackupParsedData(
     val tasks: List<Task>,
     val habits: List<Habit>,
     val focusSessions: List<FocusSession>,
-    val categories: List<Category>
+    val categories: List<Category>,
+    val achievements: List<Achievement> = emptyList()
 )

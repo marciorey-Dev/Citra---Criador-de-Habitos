@@ -477,12 +477,8 @@ fun ProfileScreen(
                                                 onClick = {
                                                     isSyncingNow = true
                                                     coroutineScope.launch {
-                                                        val settingsMap = mapOf<String, Any>(
-                                                            "themeAccent" to viewModel.themeAccent.value.name,
-                                                            "keepScreenOn" to viewModel.keepScreenOn.value,
-                                                            "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
-                                                            "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
-                                                        )
+                                                        val settingsMap = viewModel.getSettingsMapForCloud()
+                                                        val financesJson = viewModel.exportFinancesJson()
                                                         authRepository.syncAllUserDataToCloud(
                                                             tasks = tasks,
                                                             habits = habits,
@@ -490,10 +486,11 @@ fun ProfileScreen(
                                                             categories = categories,
                                                             focusSessions = focusSessions,
                                                             achievements = achievements,
-                                                            settingsMap = settingsMap
+                                                            settingsMap = settingsMap,
+                                                            financesJson = financesJson
                                                         )
                                                         isSyncingNow = false
-                                                        Toast.makeText(context, "Dados sincronizados com o Firestore!", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, "Dados, estatísticas e finanças sincronizados!", Toast.LENGTH_SHORT).show()
                                                     }
                                                 },
                                                 shape = RoundedCornerShape(10.dp),
@@ -512,9 +509,11 @@ fun ProfileScreen(
                                                         val cloudData = authRepository.fetchCloudUserData()
                                                         isSyncingNow = false
                                                         if (cloudData != null) {
+                                                            viewModel.applyCloudSettings(cloudData.settings)
                                                             cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
                                                             cloudData.notesJson?.let { viewModel.importNotesJson(it) }
-                                                            Toast.makeText(context, "Dados restaurados da nuvem!", Toast.LENGTH_SHORT).show()
+                                                            cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
+                                                            Toast.makeText(context, "Dados, estatísticas e finanças restaurados da nuvem!", Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             Toast.makeText(context, "Nenhum backup em nuvem encontrado.", Toast.LENGTH_SHORT).show()
                                                         }
