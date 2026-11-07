@@ -264,6 +264,12 @@ class CitraRepository(
 
     suspend fun deleteNote(note: Note) = moveToTrash(note)
 
+    val allArchivedNotes: Flow<List<Note>> = noteDao.getArchivedNotes()
+
+    suspend fun setNoteArchived(note: Note, isArchived: Boolean) {
+        noteDao.setArchived(note.id, isArchived)
+    }
+
     suspend fun getAllNotesSync(): List<Note> = noteDao.getAllNotesSync()
 
     // Focus Sessions

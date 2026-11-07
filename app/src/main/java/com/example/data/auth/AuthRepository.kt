@@ -230,10 +230,10 @@ class AuthRepository(private val context: Context) {
 
             val targetContext: Context = activity ?: resolvedContext
             val serverClientId = try {
-                targetContext.getString(R.string.default_web_client_id)
-            } catch (_: Exception) {
                 val resId = targetContext.resources.getIdentifier("default_web_client_id", "string", targetContext.packageName)
                 if (resId != 0) targetContext.getString(resId) else ""
+            } catch (_: Exception) {
+                ""
             }
             if (serverClientId.isBlank() || serverClientId == "default_web_client_id") {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))

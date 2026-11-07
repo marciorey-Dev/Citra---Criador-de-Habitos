@@ -168,24 +168,59 @@ object CitraDocsFileManager {
     /**
      * Deletes a .md file from Documents/Citra Docs/
      */
-    fun deleteNoteMarkdown(context: Context, title: String): Boolean {
+    fun deleteNoteMarkdown(context: Context, title: String, uuid: String? = null): Boolean {
         return try {
             val folder = getDocsFolder(context)
-            val file = File(folder, "${sanitizeFilename(title)}.md")
-            if (file.exists()) {
-                val deleted = file.delete()
-                try {
-                    MediaScannerConnection.scanFile(
-                        context,
-                        arrayOf(file.absolutePath),
-                        null,
-                        null
-                    )
-                } catch (_: Exception) {}
-                deleted
-            } else {
-                false
+            var deletedAny = false
+            val fileByName = File(folder, "${sanitizeFilename(title)}.md")
+            if (fileByName.exists()) {
+                val ok = fileByName.delete()
+                if (ok) {
+                    deletedAny = true
+                    try {
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(fileByName.absolutePath),
+                            null,
+                            null
+                        )
+                    } catch (_: Exception) {}
+                }
             }
+
+            if (uuid != null && uuid.isNotBlank()) {
+                val allFiles = folder.listFiles { f -> f.isFile && f.name.endsWith(".md", ignoreCase = true) }
+                allFiles?.forEach { f ->
+                    try {
+                        val header = f.bufferedReader().use { reader ->
+                            val sb = StringBuilder()
+                            var line = reader.readLine()
+                            var linesRead = 0
+                            while (line != null && linesRead < 15) {
+                                sb.append(line).append("\n")
+                                line = reader.readLine()
+                                linesRead++
+                            }
+                            sb.toString()
+                        }
+                        if (header.contains(uuid)) {
+                            val ok = f.delete()
+                            if (ok) {
+                                deletedAny = true
+                                try {
+                                    MediaScannerConnection.scanFile(
+                                        context,
+                                        arrayOf(f.absolutePath),
+                                        null,
+                                        null
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            deletedAny
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete markdown file for: $title", e)
             false

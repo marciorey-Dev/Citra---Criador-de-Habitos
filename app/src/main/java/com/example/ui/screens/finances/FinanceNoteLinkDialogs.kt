@@ -458,7 +458,6 @@ fun FinanceNoteLinkCreatorDialog(
                     LinkSwitchRow("Juntar itens iguais", mergeSameItems) { mergeSameItems = it }
                     LinkSwitchRow("Resumo de saldo e simulação", includeBalanceSummary) { includeBalanceSummary = it }
                     LinkSwitchRow("Resumo automático", includeAutoSummary) { includeAutoSummary = it }
-                    LinkSwitchRow("Gráfico Mermaid", includeMermaidChart) { includeMermaidChart = it }
                     LinkSwitchRow("Notificar ao atualizar", notifyOnUpdate) { notifyOnUpdate = it }
 
                     // Optional Filters

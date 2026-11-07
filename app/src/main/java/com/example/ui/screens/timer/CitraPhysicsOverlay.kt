@@ -265,7 +265,8 @@ fun CitraPhysicsOverlay(
                 drawCitraMascotBall(
                     center = Offset(b.x, b.y),
                     radius = b.radius,
-                    angleDeg = b.angleDeg
+                    angleDeg = b.angleDeg,
+                    durationMinutes = b.durationMinutes
                 )
             }
 
@@ -284,8 +285,34 @@ fun CitraPhysicsOverlay(
 private fun DrawScope.drawCitraMascotBall(
     center: Offset,
     radius: Float,
-    angleDeg: Float
+    angleDeg: Float,
+    durationMinutes: Int
 ) {
+    val bodyColors = when {
+        durationMinutes >= 120 -> listOf(
+            Color(0xFFFFF9C4),
+            Color(0xFFFFD54F),
+            Color(0xFFFFB300),
+            Color(0xFFFF8F00)
+        )
+        durationMinutes >= 60 -> listOf(
+            Color(0xFFFFFF8D),
+            Color(0xFFFFEE58),
+            Color(0xFFFDD835),
+            Color(0xFFFBC02D)
+        )
+        else -> listOf(
+            Color(0xFFFFB74D),
+            Color(0xFFFF7A00),
+            Color(0xFFE65100)
+        )
+    }
+    val rimColor = when {
+        durationMinutes >= 120 -> Color(0xFFFFFDE7).copy(alpha = 0.85f)
+        durationMinutes >= 60 -> Color(0xFFFFFFCC).copy(alpha = 0.75f)
+        else -> Color(0xFFFFCC80).copy(alpha = 0.55f)
+    }
+
     rotate(degrees = angleDeg, pivot = center) {
         // Soft drop shadow
         drawCircle(
@@ -294,14 +321,10 @@ private fun DrawScope.drawCitraMascotBall(
             center = Offset(center.x, center.y + radius * 0.08f)
         )
 
-        // Orange body gradient
+        // Body gradient (Golden, Yellow, or Classic Orange)
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    Color(0xFFFFB74D),
-                    Color(0xFFFF7A00),
-                    Color(0xFFE65100)
-                ),
+                colors = bodyColors,
                 center = Offset(center.x - radius * 0.28f, center.y - radius * 0.28f),
                 radius = radius * 1.35f
             ),
@@ -311,7 +334,7 @@ private fun DrawScope.drawCitraMascotBall(
 
         // Subtle rim
         drawCircle(
-            color = Color(0xFFFFCC80).copy(alpha = 0.55f),
+            color = rimColor,
             radius = radius,
             center = center,
             style = Stroke(width = (radius * 0.06f).coerceAtLeast(1f))

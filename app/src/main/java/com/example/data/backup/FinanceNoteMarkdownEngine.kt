@@ -417,20 +417,7 @@ object FinanceNoteMarkdownEngine {
             sb.append("\n")
         }
 
-        // Mermaid Chart
-        if (link.includeMermaidChart && expenses.isNotEmpty()) {
-            val validExpenses = expenses.filter { !isPending(it) && it.totalAmountMinor > 0L }
-            if (validExpenses.isNotEmpty()) {
-                sb.append("```mermaid\n")
-                sb.append("pie title Despesas (${window.label})\n")
-                validExpenses.groupBy { categoryMap[it.categoryId]?.name ?: "Outros" }
-                    .forEach { (cat, list) ->
-                        val sumWhole = list.sumOf { it.totalAmountMinor } / 100.0
-                        sb.append("    \"$cat\" : $sumWhole\n")
-                    }
-                sb.append("```\n\n")
-            }
-        }
+
 
         if (hasInconsistency) {
             sb.append("> ⚠️ **Alerta de inconsistência:** alguns itens possuem quantidade × valor unitário diferente do valor total.\n")

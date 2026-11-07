@@ -251,9 +251,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val hasSocialNotifications: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
 
-    // Flexible Pomodoro State
-    private val _pomodoroState = MutableStateFlow(FlexiblePomodoroState())
+    // Flexible Pomodoro State (remembers last used session size)
+    private val _pomodoroState = MutableStateFlow(
+        FlexiblePomodoroState(
+            focusMinutes = preferencesManager.lastUsedFocusMinutes.value,
+            remainingSeconds = preferencesManager.lastUsedFocusMinutes.value * 60,
+            totalPhaseSeconds = preferencesManager.lastUsedFocusMinutes.value * 60
+        )
+    )
     val pomodoroState: StateFlow<FlexiblePomodoroState> = _pomodoroState.asStateFlow()
+
+    // Archived notes & preferences
+    val archivedNotes: StateFlow<List<Note>> = repository.allArchivedNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val defaultNoteOpenMode: StateFlow<String> = preferencesManager.defaultNoteOpenMode
+    fun setDefaultNoteOpenMode(mode: String) = preferencesManager.setDefaultNoteOpenMode(mode)
+
+    fun setNoteArchived(note: Note, isArchived: Boolean) {
+        viewModelScope.launch {
+            repository.setNoteArchived(note, isArchived)
+            _userMessage.emit(if (isArchived) "Nota arquivada com sucesso" else "Nota restaurada para as notas principais")
+        }
+    }
+
+    // Pending note to open from Finances creation
+    private val _pendingOpenNoteFromFinances = MutableStateFlow<Note?>(null)
+    val pendingOpenNoteFromFinances: StateFlow<Note?> = _pendingOpenNoteFromFinances.asStateFlow()
+    fun clearPendingOpenNoteFromFinances() { _pendingOpenNoteFromFinances.value = null }
+
+    fun getSavedToolbarPosition(): Pair<Float, Float> = preferencesManager.getSavedToolbarPosition()
+    fun saveToolbarPosition(x: Float, y: Float) = preferencesManager.saveToolbarPosition(x, y)
 
     // Calendar selected date (YYYY-MM-DD)
     val todayString: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -516,7 +544,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Flexible Pomodoro Actions
     fun setFocusDuration(minutes: Int) {
-        val safe = minutes.coerceIn(10, 120)
+        val safe = minutes.coerceIn(1, 180)
+        preferencesManager.saveLastUsedFocusMinutes(safe)
         _pomodoroState.update { current ->
             if (current.isRunning) current
             else {
@@ -528,6 +557,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
         }
+    }
+
+    fun startBreakCountdown() {
+        val current = _pomodoroState.value
+        if (current.currentPhase != PomodoroPhase.BREAK) return
+        startPomodoro()
+    }
+
+    fun skipToNextSession() {
+        val current = _pomodoroState.value
+        timerJob?.cancel()
+        timerJob = null
+        musicPlayer.stop()
+        val nextCycle = (current.currentCycle + 1).coerceAtMost(current.totalCycles)
+        val focusSec = current.focusMinutes * 60
+        _pomodoroState.update {
+            it.copy(
+                isRunning = false,
+                isPaused = false,
+                currentCycle = nextCycle,
+                currentPhase = PomodoroPhase.FOCUS,
+                remainingSeconds = focusSec,
+                totalPhaseSeconds = focusSec
+            )
+        }
+        startPomodoro()
+    }
+
+    fun stopCycle() {
+        resetPomodoro()
     }
 
     fun setBreakDuration(minutes: Int) {
@@ -1251,6 +1310,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         backgroundBrightness: Float = 0.5f,
         uuid: String? = null,
         oldTitle: String? = null,
+        noteColor: String? = null,
+        isArchived: Boolean = false,
         onSaved: ((Long) -> Unit)? = null
     ) {
         viewModelScope.launch {
@@ -1273,6 +1334,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 backgroundBlur = backgroundBlur,
                 backgroundBrightness = backgroundBrightness,
                 isDeleted = false,
+                isArchived = isArchived || (existing?.isArchived == true),
+                noteColor = noteColor ?: existing?.noteColor,
                 updatedAt = System.currentTimeMillis()
             )
             val resultId = if (id == 0L) {
@@ -1326,11 +1389,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun permanentlyDeleteNote(note: Note, context: Context? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            context?.let { ctx ->
-                com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title)
-            }
+            val ctx = context ?: getApplication()
+            com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
             repository.permanentlyDeleteNote(note)
-            _userMessage.emit("Anotação excluída definitivamente do Citra e do armazenamento.")
+            _userMessage.emit("Anotação excluída definitivamente do Citra e dos arquivos do dispositivo.")
         }
     }
 
@@ -1338,13 +1400,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val currentTrash = trashNotes.value
             if (currentTrash.isEmpty()) return@launch
+            val ctx = context ?: getApplication()
             currentTrash.forEach { note ->
-                context?.let { ctx ->
-                    com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title)
-                }
+                com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
                 repository.permanentlyDeleteNote(note)
             }
-            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} anotações excluídas).")
+            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} anotações excluídas do Citra e do disco).")
         }
     }
 
@@ -1920,7 +1981,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val initialNote = Note(
                     uuid = newUuid,
                     title = newNoteTitle,
-                    content = "# $newNoteTitle\n\n$startMarker\n$endMarker",
+                    content = "# $newNoteTitle\n\n",
                     category = "Finanças",
                     iconEmoji = "💰",
                     updatedAt = now
@@ -1938,6 +1999,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isManualTrigger = true,
                 nowMillis = now
             )
+            val finalNote = database.noteDao().getNoteById(finalLink.noteId)
+            if (finalNote != null) {
+                _pendingOpenNoteFromFinances.value = finalNote
+            }
             emitLinkOutcomeMessage(outcome)
             backupFinancesNow(showToast = false)
         }

@@ -568,6 +568,35 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putLong("last_finance_sync_timestamp", timestamp).apply()
     }
 
+    // Default note open mode (EDIT or READ)
+    private val _defaultNoteOpenMode = MutableStateFlow(prefs.getString("default_note_open_mode", "EDIT") ?: "EDIT")
+    val defaultNoteOpenMode: StateFlow<String> = _defaultNoteOpenMode.asStateFlow()
+
+    fun setDefaultNoteOpenMode(mode: String) {
+        _defaultNoteOpenMode.value = mode
+        prefs.edit().putString("default_note_open_mode", mode).apply()
+    }
+
+    // Last used focus session minutes (remember size of last session)
+    private val _lastUsedFocusMinutes = MutableStateFlow(prefs.getInt("last_used_focus_mins", 15))
+    val lastUsedFocusMinutes: StateFlow<Int> = _lastUsedFocusMinutes.asStateFlow()
+
+    fun saveLastUsedFocusMinutes(minutes: Int) {
+        val safe = minutes.coerceIn(1, 180)
+        _lastUsedFocusMinutes.value = safe
+        prefs.edit().putInt("last_used_focus_mins", safe).apply()
+    }
+
+    fun getSavedToolbarPosition(): Pair<Float, Float> {
+        val x = prefs.getFloat("saved_tb_offset_x", 0f)
+        val y = prefs.getFloat("saved_tb_offset_y", 0f)
+        return Pair(x, y)
+    }
+
+    fun saveToolbarPosition(x: Float, y: Float) {
+        prefs.edit().putFloat("saved_tb_offset_x", x).putFloat("saved_tb_offset_y", y).apply()
+    }
+
     fun resetFinanceDataPreferences() {
         _financeBaseBalanceMinor.value = 0L
         _financeHideValues.value = false

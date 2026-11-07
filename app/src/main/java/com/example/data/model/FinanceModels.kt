@@ -30,15 +30,74 @@ enum class FinancePriority(val id: String, val label: String) {
 }
 
 enum class FinanceCurrency(val code: String, val symbol: String, val displayName: String) {
-    AOA("AOA", "Kz", "Kwanza (Kz)"),
-    USD("USD", "$", "Dólar ($)"),
+    // Principais e PALOP
+    AOA("AOA", "Kz", "Kwanza Angolano (Kz)"),
+    MZN("MZN", "MT", "Metical Moçambicano (MT)"),
+    BRL("BRL", "R$", "Real Brasileiro (R$)"),
     EUR("EUR", "€", "Euro (€)"),
-    BRL("BRL", "R$", "Real (R$)"),
-    GBP("GBP", "£", "Libra (£)");
+    USD("USD", "$", "Dólar Americano ($)"),
+    GBP("GBP", "£", "Libra Esterlina (£)"),
+    CVE("CVE", "Esc", "Escudo Cabo-verdiano (Esc)"),
+    STN("STN", "Db", "Dobra São-tomense (Db)"),
+
+    // América
+    CAD("CAD", "C$", "Dólar Canadense (C$)"),
+    MXN("MXN", "Mex$", "Peso Mexicano (Mex$)"),
+    ARS("ARS", "ARS$", "Peso Argentino (ARS$)"),
+    CLP("CLP", "CLP$", "Peso Chileno (CLP$)"),
+    COP("COP", "COL$", "Peso Colombiano (COL$)"),
+    PEN("PEN", "S/", "Sol Peruano (S/)"),
+    UYU("UYU", "\$U", "Peso Uruguaio (\$U)"),
+
+    // Europa
+    CHF("CHF", "CHF", "Franco Suíço (CHF)"),
+    SEK("SEK", "kr", "Coroa Sueca (kr)"),
+    NOK("NOK", "kr", "Coroa Norueguesa (kr)"),
+    DKK("DKK", "kr", "Coroa Dinamarquesa (kr)"),
+    PLN("PLN", "zł", "Złoty Polonês (zł)"),
+    RUB("RUB", "₽", "Rublo Russo (₽)"),
+    TRY("TRY", "₺", "Lira Turca (₺)"),
+
+    // África
+    ZAR("ZAR", "R", "Rand Sul-Africano (R)"),
+    NGN("NGN", "₦", "Naira Nigeriana (₦)"),
+    GHS("GHS", "GH₵", "Cedi Ganês (GH₵)"),
+    KES("KES", "KSh", "Xelim Queniano (KSh)"),
+    EGP("EGP", "E£", "Libra Egípcia (E£)"),
+    MAD("MAD", "DH", "Dirham Marroquino (DH)"),
+
+    // Ásia e Oceania
+    JPY("JPY", "¥", "Iene Japonês (¥)"),
+    CNY("CNY", "¥", "Yuan Chinês (¥)"),
+    INR("INR", "₹", "Rúpia Indiana (₹)"),
+    KRW("KRW", "₩", "Won Sul-Coreano (₩)"),
+    SGD("SGD", "S$", "Dólar de Singapura (S$)"),
+    HKD("HKD", "HK$", "Dólar de Hong Kong (HK$)"),
+    AUD("AUD", "A$", "Dólar Australiano (A$)"),
+    NZD("NZD", "NZ$", "Dólar Neozelandês (NZ$)"),
+    AED("AED", "AED", "Dirham dos EAU (AED)"),
+    SAR("SAR", "SAR", "Rial Saudita (SAR)"),
+    QAR("QAR", "QAR", "Rial Catari (QAR)"),
+    ILS("ILS", "₪", "Novo Shekel Israelense (₪)"),
+    THB("THB", "฿", "Baht Tailandês (฿)"),
+    IDR("IDR", "Rp", "Rupia Indonésia (Rp)"),
+    MYR("MYR", "RM", "Ringgit Malaio (RM)"),
+    PHP("PHP", "₱", "Peso Filipino (₱)"),
+    VND("VND", "₫", "Dong Vietnamita (₫)"),
+    TWD("TWD", "NT$", "Novo Dólar Taiwanês (NT$)"),
+
+    // Criptomoedas
+    BTC("BTC", "₿", "Bitcoin (BTC)"),
+    ETH("ETH", "Ξ", "Ethereum (ETH)"),
+    USDT("USDT", "₮", "Tether USD (USDT)"),
+    SOL("SOL", "SOL", "Solana (SOL)"),
+    BNB("BNB", "BNB", "BNB (BNB)"),
+    XRP("XRP", "XRP", "XRP (XRP)"),
+    ADA("ADA", "ADA", "Cardano (ADA)");
 
     companion object {
         fun fromCode(code: String): FinanceCurrency =
-            entries.find { it.code == code } ?: AOA
+            entries.find { it.code.equals(code, ignoreCase = true) } ?: AOA
     }
 }
 

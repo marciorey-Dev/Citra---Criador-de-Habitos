@@ -106,7 +106,6 @@ fun FinancesScreen(
     var customEndMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showCustomRangePicker by remember { mutableStateOf(false) }
 
-    var showEditBalanceDialog by remember { mutableStateOf(false) }
     var showEntryEditor by remember { mutableStateOf(false) }
     var editingEntry by remember { mutableStateOf<FinanceEntry?>(null) }
     var currencyMenuExpanded by remember { mutableStateOf(false) }
@@ -242,8 +241,6 @@ fun FinancesScreen(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { showEditBalanceDialog = true }
                                 .padding(vertical = 2.dp, horizontal = 2.dp)
                         ) {
                             Text(
@@ -424,10 +421,7 @@ fun FinancesScreen(
                             RedAction
                         } else {
                             MaterialTheme.colorScheme.onSurface
-                        },
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { showEditBalanceDialog = true }
+                        }
                     )
 
                     if (wallets.isNotEmpty()) {
@@ -1260,64 +1254,7 @@ fun FinancesScreen(
         }
     }
 
-    // Edit Current Balance Dialog
-    if (showEditBalanceDialog) {
-        var balanceInput by remember {
-            mutableStateOf(formatMinorUnitsForInput(currentBalanceMinor))
-        }
-        var balanceError by remember { mutableStateOf<String?>(null) }
 
-        AlertDialog(
-            onDismissRequest = { showEditBalanceDialog = false },
-            icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Definir Saldo Atual", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Informe o valor que tem disponível agora. As próximas despesas subtraem e as rendas somam a este saldo.",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = balanceInput,
-                        onValueChange = {
-                            balanceInput = it
-                            balanceError = null
-                        },
-                        label = { Text("Saldo atual") },
-                        suffix = { Text(activeCurrency.symbol, fontWeight = FontWeight.Bold) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    if (balanceError != null) {
-                        Text(balanceError!!, color = RedAction, fontSize = 12.sp)
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val parsed = parseDecimalToMinorUnits(balanceInput)
-                        if (parsed == null) {
-                            balanceError = "Valor inválido"
-                            return@Button
-                        }
-                        viewModel.setFinanceCurrentBalance(parsed)
-                        showEditBalanceDialog = false
-                    }
-                ) {
-                    Text("Guardar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditBalanceDialog = false }) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
 
     // Custom Date Range Picker Dialog
     if (showCustomRangePicker) {

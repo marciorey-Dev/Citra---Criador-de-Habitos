@@ -54,6 +54,10 @@ data class DividerBlock(
     override val id: String = UUID.randomUUID().toString()
 ) : VisualBlock
 
+data class PageBreakBlock(
+    override val id: String = UUID.randomUUID().toString()
+) : VisualBlock
+
 data class ImageBlock(
     override val id: String = UUID.randomUUID().toString(),
     val alt: String = "",
@@ -150,6 +154,19 @@ object SmoothMarkdownConverter {
                     if (parsed != null) {
                         blocks.add(parsed)
                     }
+                    continue
+                }
+
+                // Ignore/hide finance markers so they do not pollute the UI
+                trimmed.startsWith("<!-- citra:fin:") || trimmed.startsWith("<!--citra:fin:") -> {
+                    i++
+                    continue
+                }
+
+                // Page break (<!-- pagebreak --> or \pagebreak or <!-- citra:pagebreak -->)
+                trimmed == "<!-- pagebreak -->" || trimmed == "<!-- citra:pagebreak -->" || trimmed.equals("\\pagebreak", ignoreCase = true) || trimmed.equals("<div class=\"page-break\"></div>", ignoreCase = true) -> {
+                    blocks.add(PageBreakBlock())
+                    i++
                     continue
                 }
 
@@ -353,6 +370,9 @@ object SmoothMarkdownConverter {
                 }
                 is DividerBlock -> {
                     sb.append("---\n")
+                }
+                is PageBreakBlock -> {
+                    sb.append("<!-- pagebreak -->\n")
                 }
                 is ImageBlock -> {
                     val encodedSide = block.sideText.replace("\n", "<br>").replace("|", "&#124;")

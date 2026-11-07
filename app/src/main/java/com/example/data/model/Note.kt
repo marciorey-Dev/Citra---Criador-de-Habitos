@@ -19,5 +19,7 @@ data class Note(
     val backgroundBrightness: Float = 0.5f,
     val isDeleted: Boolean = false,
     val deletedAt: Long? = null,
+    val isArchived: Boolean = false,
+    val noteColor: String? = null,
     val updatedAt: Long = System.currentTimeMillis()
 )

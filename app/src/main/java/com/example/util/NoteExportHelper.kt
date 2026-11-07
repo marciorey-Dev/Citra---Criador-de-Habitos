@@ -26,7 +26,132 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.max
 
+enum class NotePaginationType(val label: String) {
+    NONE("Nenhuma"),
+    ARABIC("1."),
+    ROMAN("I.")
+}
+
 object NoteExportHelper {
+
+    fun toRoman(num: Int): String {
+        if (num <= 0) return num.toString()
+        val values = intArrayOf(1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1)
+        val symbols = arrayOf("M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I")
+        var n = num
+        val sb = StringBuilder()
+        for (i in values.indices) {
+            while (n >= values[i]) {
+                sb.append(symbols[i])
+                n -= values[i]
+            }
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Estimates page positions of headings and generates an Index / Table of Contents
+     * formatted with title, dotted lines, and (Página X), followed by an automatic page break.
+     */
+    fun generateTableOfContents(rawMarkdown: String): String {
+        val blocks = SmoothMarkdownConverter.markdownToBlocks(rawMarkdown)
+        val pageLimit = 762f
+        var curY = 40f
+        var curPage = 1
+        val headingsWithPages = mutableListOf<Pair<HeadingBlock, Int>>()
+
+        for (block in blocks) {
+            when (block) {
+                is PageBreakBlock -> {
+                    curPage++
+                    curY = 40f
+                }
+                is HeadingBlock -> {
+                    val neededH = 34f
+                    if (curY + neededH > pageLimit) {
+                        curPage++
+                        curY = 40f
+                    }
+                    headingsWithPages.add(Pair(block, curPage))
+                    curY += neededH
+                }
+                is TextBlock -> {
+                    val lines = (block.text.length / 50).coerceAtLeast(1)
+                    val neededH = lines * 16f
+                    if (curY + neededH > pageLimit) {
+                        curPage += (neededH / pageLimit).toInt().coerceAtLeast(1)
+                        curY = (curY + neededH) % pageLimit
+                    } else {
+                        curY += neededH
+                    }
+                }
+                is TableBlock -> {
+                    val neededH = (block.rows.size + 1) * 24f
+                    if (curY + neededH > pageLimit) {
+                        curPage++
+                        curY = 40f
+                    }
+                    curY += neededH
+                }
+                is CodeBlock -> {
+                    val neededH = (block.code.lines().size * 18f) + 24f
+                    if (curY + neededH > pageLimit) {
+                        curPage++
+                        curY = 40f
+                    }
+                    curY += neededH
+                }
+                is ImageBlock -> {
+                    val neededH = 260f
+                    if (curY + neededH > pageLimit) {
+                        curPage++
+                        curY = 40f
+                    }
+                    curY += neededH
+                }
+                else -> {
+                    curY += 24f
+                    if (curY > pageLimit) {
+                        curPage++
+                        curY = 40f
+                    }
+                }
+            }
+        }
+
+        if (headingsWithPages.isEmpty()) {
+            return rawMarkdown
+        }
+
+        val tocSb = StringBuilder()
+        tocSb.append("# Índice\n\n")
+        for ((heading, page) in headingsWithPages) {
+            val indent = when (heading.level) {
+                1 -> ""
+                2 -> "  • "
+                3 -> "    - "
+                else -> "      - "
+            }
+            val cleanTitle = heading.text.replace(Regex("(?s)<[^>]*>|\\*\\*|\\*|~~|==|`|\\$"), "").trim()
+            tocSb.append("$indent$cleanTitle -------------------- (Página $page)\n\n")
+        }
+        tocSb.append("<!-- pagebreak -->\n\n")
+
+        // Clean out existing index at top if already present
+        val cleanMarkdown = if (rawMarkdown.trimStart().startsWith("# Índice")) {
+            val idxEnd = rawMarkdown.indexOf("<!-- pagebreak -->")
+            if (idxEnd != -1) {
+                rawMarkdown.substring(idxEnd + "<!-- pagebreak -->".length).trimStart()
+            } else {
+                rawMarkdown
+            }
+        } else {
+            rawMarkdown
+        }
+
+        return tocSb.toString() + cleanMarkdown
+    }
+
 
     private fun sanitizeFilename(name: String): String {
         return name.replace(Regex("[^a-zA-Z0-9._\\- ]"), "_").trim().ifBlank { "Nota" }
@@ -366,7 +491,8 @@ object NoteExportHelper {
         noteTitle: String,
         noteCategory: String,
         blocks: List<VisualBlock>,
-        themeColor: Int = Color.parseColor("#FF6F00")
+        themeColor: Int = Color.parseColor("#FF6F00"),
+        paginationType: NotePaginationType = NotePaginationType.NONE
     ): Uri {
         val themeHex = colorToHex(themeColor)
         val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
@@ -553,6 +679,10 @@ object NoteExportHelper {
                     docSb.append("<w:spacing w:before=\"140\" w:after=\"140\"/></w:pPr></w:p>\n")
                 }
 
+                is PageBreakBlock -> {
+                    docSb.append("<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>\n")
+                }
+
                 is ImageBlock -> {
                     val bmp = loadBitmapFromUrl(context, block.url)
                     if (bmp != null) {
@@ -650,7 +780,13 @@ object NoteExportHelper {
 
         // Section properties
         docSb.append("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/>") // A4 size in twips
-        docSb.append("<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/></w:sectPr>\n")
+        docSb.append("<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/>")
+        if (paginationType != NotePaginationType.NONE) {
+            val numFmt = if (paginationType == NotePaginationType.ROMAN) "upperRoman" else "decimal"
+            docSb.append("<w:footerReference w:type=\"default\" r:id=\"rIdFooter1\"/>")
+            docSb.append("<w:pgNumType w:fmt=\"$numFmt\"/>")
+        }
+        docSb.append("</w:sectPr>\n")
         docSb.append("</w:body></w:document>")
 
         // Assemble DOCX ZIP
@@ -658,6 +794,9 @@ object NoteExportHelper {
         ZipOutputStream(FileOutputStream(file)).use { zos ->
             // 1. [Content_Types].xml
             zos.putNextEntry(ZipEntry("[Content_Types].xml"))
+            val footerOverride = if (paginationType != NotePaginationType.NONE) {
+                "\n  <Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>"
+            } else ""
             val contentTypes = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -665,7 +804,7 @@ object NoteExportHelper {
   <Default Extension="jpeg" ContentType="image/jpeg"/>
   <Default Extension="jpg" ContentType="image/jpeg"/>
   <Default Extension="png" ContentType="image/png"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>$footerOverride
 </Types>"""
             zos.write(contentTypes.toByteArray())
             zos.closeEntry()
@@ -684,6 +823,9 @@ object NoteExportHelper {
             val docRelsSb = StringBuilder()
             docRelsSb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n")
             docRelsSb.append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n")
+            if (paginationType != NotePaginationType.NONE) {
+                docRelsSb.append("  <Relationship Id=\"rIdFooter1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>\n")
+            }
             for ((idx, item) in imageEntries.withIndex()) {
                 val relId = item.first
                 docRelsSb.append("  <Relationship Id=\"$relId\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image_${idx + 1}.jpeg\"/>\n")
@@ -696,6 +838,28 @@ object NoteExportHelper {
             zos.putNextEntry(ZipEntry("word/document.xml"))
             zos.write(docSb.toString().toByteArray())
             zos.closeEntry()
+
+            // 4.1 word/footer1.xml (if pagination is active)
+            if (paginationType != NotePaginationType.NONE) {
+                zos.putNextEntry(ZipEntry("word/footer1.xml"))
+                val footerXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:pPr>
+      <w:jc w:val="right"/>
+    </w:pPr>
+    <w:r>
+      <w:rPr>
+        <w:sz w:val="20"/>
+        <w:color w:val="94A3B8"/>
+      </w:rPr>
+      <w:fldSimple w:instr="PAGE"/>
+    </w:r>
+  </w:p>
+</w:ftr>"""
+                zos.write(footerXml.toByteArray())
+                zos.closeEntry()
+            }
 
             // 5. word/media/image_X.jpeg
             for ((idx, item) in imageEntries.withIndex()) {
