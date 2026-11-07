@@ -1275,6 +1275,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteHabit(habit: Habit) {
         viewModelScope.launch {
             repository.deleteHabit(habit)
+            com.example.notifications.NotificationHelper.cancelHabitReminder(getApplication(), habit.id)
+            com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(getApplication())
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             if (_pomodoroState.value.linkedHabit?.id == habit.id) {
                 _pomodoroState.update { it.copy(linkedHabit = null) }

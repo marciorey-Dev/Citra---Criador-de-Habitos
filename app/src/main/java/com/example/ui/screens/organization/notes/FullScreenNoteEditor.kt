@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -147,10 +148,11 @@ fun FullScreenNoteEditor(
 
     // Floating toolbar is persistent: it stays visible and accompanies the user on scroll with drag mobility
     val isToolbarVisible = true
-    var toolbarOffsetX by remember { mutableFloatStateOf(0f) }
-    var toolbarOffsetY by remember { mutableFloatStateOf(0f) }
     var savedFloatingOffsetX by rememberSaveable { mutableFloatStateOf(0f) }
     var savedFloatingOffsetY by rememberSaveable { mutableFloatStateOf(0f) }
+    var isToolbarPinnedToBottom by rememberSaveable { mutableStateOf(true) }
+    var toolbarOffsetX by rememberSaveable { mutableFloatStateOf(savedFloatingOffsetX) }
+    var toolbarOffsetY by rememberSaveable { mutableFloatStateOf(savedFloatingOffsetY) }
     var isToolbarMinimized by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
@@ -173,13 +175,6 @@ fun FullScreenNoteEditor(
         mutableStateOf(NoteEditorMode.LIVE_PREVIEW)
     }
 
-    fun switchEditorMode(newMode: NoteEditorMode) {
-        if (newMode == NoteEditorMode.READING && editorMode != NoteEditorMode.READING) {
-            saveCurrent(close = false, silent = true)
-        }
-        editorMode = newMode
-        onModeChanged?.invoke(newMode)
-    }
 
     val bodyFocusRequester = remember { FocusRequester() }
     val isDarkBg = bgUri != null
@@ -448,6 +443,14 @@ fun FullScreenNoteEditor(
         }
     }
 
+    fun switchEditorMode(newMode: NoteEditorMode) {
+        if (newMode == NoteEditorMode.READING && editorMode != NoteEditorMode.READING) {
+            saveCurrent(close = false, silent = true)
+        }
+        editorMode = newMode
+        onModeChanged?.invoke(newMode)
+    }
+
     // Auto-save and pause audio when app is put to background, user switches apps or exits
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -710,7 +713,6 @@ fun FullScreenNoteEditor(
     var showLinkToEntityDialog by remember { mutableStateOf(false) }
     var showBgSettingsSheet by remember { mutableStateOf(false) }
     var showAdvancedToolbar by remember { mutableStateOf(false) }
-    var isToolbarPinnedToBottom by remember { mutableStateOf(true) }
     var checklistItemToConvert by remember { mutableStateOf<String?>(null) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     var fullscreenBlockIndex by remember { mutableStateOf<Int?>(null) }
@@ -1811,23 +1813,20 @@ fun FullScreenNoteEditor(
                 visible = isToolbarVisible,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
-                modifier = if (isToolbarPinnedToBottom) {
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .imePadding()
-                        .navigationBarsPadding()
-                        .padding(bottom = if (isRecordingAudio) 64.dp else 0.dp)
-                } else {
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .imePadding()
-                        .padding(bottom = if (isRecordingAudio) 72.dp else 12.dp, start = 8.dp, end = 8.dp)
-                        .offset {
-                            IntOffset(toolbarOffsetX.roundToInt(), toolbarOffsetY.roundToInt())
-                        }
-                }
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .imePadding()
+                    .navigationBarsPadding()
+                    .padding(
+                        bottom = if (isRecordingAudio) 72.dp else if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) 0.dp else 12.dp,
+                        start = if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) 0.dp else 8.dp,
+                        end = if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) 0.dp else 8.dp
+                    )
+                    .offset {
+                        IntOffset(toolbarOffsetX.roundToInt(), toolbarOffsetY.roundToInt())
+                    }
             ) {
-                val toolbarShape = if (isToolbarPinnedToBottom) {
+                val toolbarShape = if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) {
                     RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
                 } else {
                     RoundedCornerShape(26.dp)
@@ -1908,7 +1907,7 @@ fun FullScreenNoteEditor(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                // Mobility Drag Handle (only shown when unpinned / floating)
+                                // Mobility Drag Handle when unpinned; Lock indicator when fixed
                                 if (!isToolbarPinnedToBottom) {
                                     Box(
                                         modifier = Modifier
@@ -1938,6 +1937,19 @@ fun FullScreenNoteEditor(
                                             contentDescription = "Arrastar menu flutuante (duplo clique para resetar)",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                } else if (toolbarOffsetX != 0f || toolbarOffsetY != 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clickable { isToolbarPinnedToBottom = false }
+                                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PushPin,
+                                            contentDescription = "Barra fixada neste local (toque para desafixar)",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -2238,14 +2250,10 @@ fun FullScreenNoteEditor(
                                         ) {
                                             if (isToolbarPinnedToBottom) {
                                                 isToolbarPinnedToBottom = false
-                                                toolbarOffsetX = savedFloatingOffsetX
-                                                toolbarOffsetY = savedFloatingOffsetY
                                             } else {
                                                 savedFloatingOffsetX = toolbarOffsetX
                                                 savedFloatingOffsetY = toolbarOffsetY
                                                 isToolbarPinnedToBottom = true
-                                                toolbarOffsetX = 0f
-                                                toolbarOffsetY = 0f
                                             }
                                         }
                                     }

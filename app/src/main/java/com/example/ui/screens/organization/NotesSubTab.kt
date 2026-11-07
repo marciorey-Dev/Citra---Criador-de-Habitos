@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -810,7 +811,7 @@ fun NotesSubTab(
                                 tint = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                             )
                             Text(
-                                text = "Empilhar",
+                                text = if (isGridStackedByCategory) "Empilhar: Ativo" else "Empilhar: Opcional",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -1225,7 +1226,7 @@ private fun QuickDraftTile(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 175.dp)
+            .heightIn(min = 260.dp)
             .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
             .testTag("notes_quick_draft_tile")
@@ -1324,7 +1325,7 @@ fun SquareNoteCard(
         isPinned = note.isPinned,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 250.dp)
+            .heightIn(min = 260.dp)
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }

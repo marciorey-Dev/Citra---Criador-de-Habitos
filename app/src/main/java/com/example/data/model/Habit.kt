@@ -21,3 +21,55 @@ data class Habit(
     val loopAlarm: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+fun Habit.isScheduledForDate(dateStr: String, dateCal: java.util.Calendar): Boolean {
+    // If completed on this date, always include it
+    if (completedDatesCsv.split(",").any { it.trim() == dateStr }) return true
+
+    val cleanFreq = frequencyDays.trim()
+    return when {
+        cleanFreq.equals("ALL", ignoreCase = true) || cleanFreq.isBlank() || cleanFreq.equals("Todos os dias", ignoreCase = true) -> true
+        cleanFreq.equals("ALTERNATE", ignoreCase = true) || cleanFreq.equals("ALTERNADO", ignoreCase = true) -> {
+            val createdCal = java.util.Calendar.getInstance().apply {
+                timeInMillis = createdAt
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val targetZero = (dateCal.clone() as java.util.Calendar).apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val diffDays = ((targetZero.timeInMillis - createdCal.timeInMillis) / (1000L * 60 * 60 * 24)).toInt()
+            diffDays >= 0 && (diffDays % 2 == 0)
+        }
+        else -> {
+            val dayOfWeek = dateCal.get(java.util.Calendar.DAY_OF_WEEK)
+            val daysList = cleanFreq.split(",").mapNotNull { it.trim().toIntOrNull() }
+            if (daysList.isEmpty()) true else daysList.contains(dayOfWeek)
+        }
+    }
+}
+
+fun Habit.getFrequencyLabel(): String {
+    val cleanFreq = frequencyDays.trim()
+    return when {
+        cleanFreq.equals("ALL", ignoreCase = true) || cleanFreq.isBlank() || cleanFreq.equals("Todos os dias", ignoreCase = true) -> "Diário"
+        cleanFreq.equals("ALTERNATE", ignoreCase = true) || cleanFreq.equals("ALTERNADO", ignoreCase = true) -> "Dia sim, dia não"
+        cleanFreq == "2,3,4,5,6" -> "Dias úteis (Seg-Sex)"
+        cleanFreq == "1,7" -> "Fim de semana (Sáb-Dom)"
+        cleanFreq == "7" -> "Todo sábado"
+        cleanFreq == "1" -> "Todo domingo"
+        else -> {
+            val dayMap = mapOf(
+                1 to "Dom", 2 to "Seg", 3 to "Ter", 4 to "Qua", 5 to "Qui", 6 to "Sex", 7 to "Sáb"
+            )
+            val parts = cleanFreq.split(",").mapNotNull { it.trim().toIntOrNull() }
+            if (parts.isEmpty()) "Diário"
+            else parts.sorted().joinToString(", ") { dayMap[it] ?: "Dia $it" }
+        }
+    }
+}

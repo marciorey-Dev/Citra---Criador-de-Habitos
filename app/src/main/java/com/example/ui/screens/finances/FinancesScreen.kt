@@ -1478,6 +1478,79 @@ fun FinancesScreen(
             onDeleteLink = { viewModel.deleteFinanceNoteLink(it) }
         )
     }
+
+    if (activeFinanceEditorNote != null) {
+        FullScreenNoteEditor(
+            initialNote = activeFinanceEditorNote,
+            categories = noteCategoriesForEditor,
+            allNotes = allNotesForEditor,
+            tasks = allTasksForEditor,
+            habits = allHabitsForEditor,
+            pomodoroState = pomodoroStateForEditor,
+            onSaveAndClose = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
+                viewModel.saveNote(
+                    id = activeFinanceEditorNote?.id ?: 0L,
+                    title = title,
+                    content = content,
+                    category = category,
+                    iconEmoji = "💰",
+                    associatedDate = activeFinanceEditorNote?.associatedDate,
+                    isPinned = isPinned,
+                    backgroundImageUri = bgUri,
+                    backgroundBlur = blur,
+                    backgroundBrightness = brightness,
+                    uuid = activeFinanceEditorNote?.uuid,
+                    oldTitle = activeFinanceEditorNote?.title,
+                    noteColor = nColor
+                )
+                activeFinanceEditorNote = null
+                viewModel.setNoteEditorOpen(false)
+            },
+            onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
+                val currentUuid = activeFinanceEditorNote?.uuid ?: java.util.UUID.randomUUID().toString()
+                viewModel.saveNote(
+                    id = activeFinanceEditorNote?.id ?: 0L,
+                    title = title,
+                    content = content,
+                    category = category,
+                    iconEmoji = "💰",
+                    associatedDate = activeFinanceEditorNote?.associatedDate,
+                    isPinned = isPinned,
+                    backgroundImageUri = bgUri,
+                    backgroundBlur = blur,
+                    backgroundBrightness = brightness,
+                    uuid = currentUuid,
+                    oldTitle = activeFinanceEditorNote?.title,
+                    noteColor = nColor,
+                    onSaved = { savedId ->
+                        activeFinanceEditorNote = Note(
+                            id = savedId,
+                            uuid = currentUuid,
+                            title = title,
+                            content = content,
+                            category = category,
+                            iconEmoji = "💰",
+                            isPinned = isPinned,
+                            backgroundImageUri = bgUri,
+                            backgroundBlur = blur,
+                            backgroundBrightness = brightness,
+                            noteColor = nColor
+                        )
+                    }
+                )
+            },
+            onClose = {
+                activeFinanceEditorNote = null
+                viewModel.setNoteEditorOpen(false)
+            },
+            onDelete = {
+                activeFinanceEditorNote?.let { viewModel.deleteNote(it) }
+                activeFinanceEditorNote = null
+                viewModel.setNoteEditorOpen(false)
+            },
+            financesEnabled = true
+        )
+    }
 }
 
 @Composable

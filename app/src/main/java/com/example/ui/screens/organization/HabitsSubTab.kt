@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Category
 import com.example.data.model.Habit
+import com.example.data.model.getFrequencyLabel
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.theme.OrangeContainer
@@ -501,7 +502,7 @@ fun HabitItemCard(
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
-                            text = habit.reminderTime,
+                            text = "${habit.reminderTime} • ${habit.getFrequencyLabel()}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -723,6 +724,11 @@ fun AddHabitDialog(
                     }
                 }
 
+                HabitFrequencySelector(
+                    frequencyDays = frequencyDays,
+                    onFrequencyChanged = { frequencyDays = it }
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -774,6 +780,7 @@ fun EditHabitDialog(
     var selectedEmoji by remember { mutableStateOf(habit.iconEmoji) }
     var reminderTime by remember { mutableStateOf(habit.reminderTime) }
     var reminderLeadMinutes by remember { mutableStateOf(habit.reminderLeadMinutes) }
+    var frequencyDays by remember { mutableStateOf(habit.frequencyDays) }
     var customSoundUri by remember { mutableStateOf(habit.customSoundUri) }
     var loopAlarm by remember { mutableStateOf(habit.loopAlarm) }
 
@@ -845,6 +852,11 @@ fun EditHabitDialog(
                     }
                 }
 
+                HabitFrequencySelector(
+                    frequencyDays = frequencyDays,
+                    onFrequencyChanged = { frequencyDays = it }
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -872,6 +884,7 @@ fun EditHabitDialog(
                                 iconEmoji = selectedEmoji,
                                 reminderTime = reminderTime,
                                 reminderLeadMinutes = reminderLeadMinutes,
+                                frequencyDays = frequencyDays,
                                 customSoundUri = customSoundUri,
                                 loopAlarm = loopAlarm
                             )
@@ -891,6 +904,108 @@ fun EditHabitDialog(
         },
         shape = RoundedCornerShape(20.dp)
     )
+}
+
+@Composable
+private fun HabitFrequencySelector(
+    frequencyDays: String,
+    onFrequencyChanged: (String) -> Unit
+) {
+    var mode by remember(frequencyDays) {
+        mutableStateOf(
+            when {
+                frequencyDays.equals("ALL", ignoreCase = true) || frequencyDays.isBlank() || frequencyDays.equals("Todos os dias", ignoreCase = true) -> "ALL"
+                frequencyDays.equals("ALTERNATE", ignoreCase = true) -> "ALTERNATE"
+                else -> "CUSTOM"
+            }
+        )
+    }
+    val daysOfWeek = listOf(
+        1 to "Dom",
+        2 to "Seg",
+        3 to "Ter",
+        4 to "Qua",
+        5 to "Qui",
+        6 to "Sex",
+        7 to "Sáb"
+    )
+    val selectedDays = remember(frequencyDays, mode) {
+        if (mode == "CUSTOM") {
+            frequencyDays.split(",").mapNotNull { it.trim().toIntOrNull() }.toSet()
+        } else emptySet()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Frequência de Repetição:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChip(
+                selected = mode == "ALL",
+                onClick = {
+                    mode = "ALL"
+                    onFrequencyChanged("ALL")
+                },
+                label = { Text("Diário", fontSize = 11.sp) }
+            )
+            FilterChip(
+                selected = mode == "ALTERNATE",
+                onClick = {
+                    mode = "ALTERNATE"
+                    onFrequencyChanged("ALTERNATE")
+                },
+                label = { Text("Dia sim, dia não", fontSize = 11.sp) }
+            )
+            FilterChip(
+                selected = mode == "CUSTOM",
+                onClick = {
+                    mode = "CUSTOM"
+                    val fallback = if (selectedDays.isEmpty()) "7" else selectedDays.joinToString(",")
+                    onFrequencyChanged(fallback)
+                },
+                label = { Text("Dias da semana", fontSize = 11.sp) }
+            )
+        }
+
+        if (mode == "CUSTOM") {
+            Text(
+                text = "Selecione os dias da semana (ex: todo sábado):",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                daysOfWeek.forEach { (dayInt, dayLabel) ->
+                    val isDaySelected = selectedDays.contains(dayInt)
+                    FilterChip(
+                        selected = isDaySelected,
+                        onClick = {
+                            val newSet = if (isDaySelected) {
+                                if (selectedDays.size > 1) selectedDays - dayInt else selectedDays
+                            } else {
+                                selectedDays + dayInt
+                            }
+                            onFrequencyChanged(newSet.sorted().joinToString(","))
+                        },
+                        label = { Text(dayLabel, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = "📅 Vinculado ao Calendário: fica assinalado e tocará para sempre nos dias definidos. Apagar o hábito remove os agendamentos.",
+            fontSize = 10.5.sp,
+            color = MaterialTheme.colorScheme.primary,
+            lineHeight = 14.sp
+        )
+    }
 }
 
 @Composable

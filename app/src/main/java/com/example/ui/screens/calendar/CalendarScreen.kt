@@ -28,6 +28,8 @@ import com.example.data.model.Habit
 import com.example.data.model.Note
 import com.example.data.model.Task
 import com.example.data.model.TaskPriority
+import com.example.data.model.isScheduledForDate
+import com.example.data.model.getFrequencyLabel
 import com.example.ui.MainViewModel
 import com.example.ui.screens.organization.QuickAddTaskDialog
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
@@ -137,13 +139,15 @@ fun CalendarScreen(
         }
     }
 
-    val habitsForDay = remember(habits, selectedDateStr, todayStr) {
-        if (selectedDateStr == todayStr) {
-            habits
-        } else {
-            habits.filter { habit ->
-                habit.completedDatesCsv.split(",").any { it.trim() == selectedDateStr }
+    val habitsForDay = remember(habits, selectedDateStr) {
+        val parts = selectedDateStr.split("-")
+        val cal = Calendar.getInstance().apply {
+            if (parts.size == 3) {
+                set(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt())
             }
+        }
+        habits.filter { habit ->
+            habit.isScheduledForDate(selectedDateStr, cal)
         }
     }
 
@@ -507,7 +511,13 @@ fun CalendarScreen(
                                                     (t.dueDateTimestamp != null && dayFormat.format(Date(t.dueDateTimestamp)) == dateStr)
                                             }
                                             val hasHabits = habits.any { h ->
-                                                h.completedDatesCsv.split(",").any { it.trim() == dateStr }
+                                                val parts = dateStr.split("-")
+                                                val c = Calendar.getInstance().apply {
+                                                    if (parts.size == 3) {
+                                                        set(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt())
+                                                    }
+                                                }
+                                                h.isScheduledForDate(dateStr, c)
                                             }
                                             val hasNotes = notes.any { n ->
                                                 n.associatedDate == dateStr
@@ -1083,9 +1093,9 @@ private fun TimelineHabitCard(
                         )
                         Text(
                             text = if (isDone) {
-                                "Meta alcançada • ${habit.currentStreak} dias seguidos"
+                                "Meta alcançada • ${habit.getFrequencyLabel()} • ${habit.currentStreak}d seguidos"
                             } else {
-                                "Avisa ${habit.reminderLeadMinutes}m antes • ${habit.currentStreak} dias seguidos"
+                                "${habit.getFrequencyLabel()} • Avisa ${habit.reminderLeadMinutes}m antes • ${habit.currentStreak}d seguidos"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = if (isDone) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,

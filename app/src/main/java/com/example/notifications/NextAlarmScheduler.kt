@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import com.example.data.model.isScheduledForDate
 
 object NextAlarmScheduler {
     const val REQUEST_CODE_NEXT_REMINDER = 90001
@@ -113,12 +114,18 @@ object NextAlarmScheduler {
                             set(Calendar.MILLISECOND, 0)
                         }
 
-                        // Check target date (today or tomorrow)
-                        val targetCal = if (calToday.timeInMillis > now + 1500L) {
-                            calToday
-                        } else {
-                            (calToday.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
+                        // Find next target date matching habit frequency (within next 14 days)
+                        val dayFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                        var targetCal: Calendar? = null
+                        for (dayOffset in 0..14) {
+                            val checkCal = (calToday.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
+                            val dateStr = dayFormat.format(checkCal.time)
+                            if (checkCal.timeInMillis > now + 1500L && habit.isScheduledForDate(dateStr, checkCal)) {
+                                targetCal = checkCal
+                                break
+                            }
                         }
+                        if (targetCal == null) return@forEach
 
                         // Advance reminder for habit
                         if (habit.reminderLeadMinutes > 0) {

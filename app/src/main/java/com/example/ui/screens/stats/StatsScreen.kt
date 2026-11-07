@@ -532,52 +532,72 @@ fun StatsScreen(
                     }
                 }
 
-                val maxMins = (periodInfo.bars.maxOfOrNull { it.second } ?: 60).coerceAtLeast(60)
+                val maxObserved = periodInfo.bars.maxOfOrNull { it.second } ?: 0
+                // Expected standard reference ceiling (60 min)
+                val baselineMins = 60
+                // If any bar exceeds expected baseline time, maxScale expands so the highest bar
+                // stays exactly at the 100% boundary limit without overflowing, while all other bars
+                // scale proportionally lower to accurately symbolize the distance between them.
+                val maxMins = maxOf(baselineMins, maxObserved)
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(136.dp)
+                        .height(144.dp)
                         .padding(top = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Bottom
                 ) {
                     periodInfo.bars.forEach { (label, mins, isCurrent) ->
-                        val heightFraction = (mins.toFloat() / maxMins.toFloat()).coerceIn(0.12f, 1f)
+                        // Strictly clamped so no bar ever exceeds the track container
+                        val heightFraction = if (mins <= 0) {
+                            0.06f
+                        } else {
+                            (mins.toFloat() / maxMins.toFloat()).coerceIn(0.08f, 1f)
+                        }
 
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Bottom,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .weight(1f)
                         ) {
+                            // Enclosed track area taking remaining vertical space above label
                             Box(
                                 modifier = Modifier
-                                    .width(if (periodInfo.bars.size > 8) 14.dp else 22.dp)
-                                    .fillMaxHeight(heightFraction)
-                                    .background(
-                                        color = if (isCurrent) {
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                                        },
-                                        shape = CircleShape
-                                    )
-                                    .padding(2.dp),
+                                    .weight(1f)
+                                    .fillMaxWidth(),
                                 contentAlignment = Alignment.BottomCenter
                             ) {
-                                if (mins > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(
+                                Box(
+                                    modifier = Modifier
+                                        .width(if (periodInfo.bars.size > 8) 14.dp else 22.dp)
+                                        .fillMaxHeight(heightFraction)
+                                        .clip(CircleShape)
+                                        .background(
+                                            color = if (isCurrent) {
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                            }
+                                        )
+                                        .padding(2.dp),
+                                    contentAlignment = Alignment.BottomCenter
+                                ) {
+                                    if (mins > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape)
+                                                .background(
                                                 color = if (isCurrent) {
                                                     MaterialTheme.colorScheme.primary
                                                 } else {
                                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
-                                                },
-                                                shape = CircleShape
+                                                }
                                             )
-                                    )
+                                        )
+                                    }
                                 }
                             }
 
