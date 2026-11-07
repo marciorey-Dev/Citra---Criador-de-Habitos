@@ -43,7 +43,7 @@ fun OrganizationScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
             ) {
                 Surface(
                     shape = CircleShape,

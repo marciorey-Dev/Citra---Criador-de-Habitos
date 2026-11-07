@@ -431,7 +431,8 @@ fun CategoryNoteStack(
                                         Text(
                                             text = dateText,
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = paperColors.onBackgroundColor.copy(alpha = 0.5f)
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
                                         )
                                     }
 

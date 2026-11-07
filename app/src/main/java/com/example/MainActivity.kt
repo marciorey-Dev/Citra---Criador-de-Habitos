@@ -467,26 +467,48 @@ class MainActivity : ComponentActivity() {
 
                 val currentScreen = screens[pagerState.currentPage]
 
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
-                                screens[pagerState.currentPage] == Screen.Timer
-                        if (!isNoteEditorOpen && !isTimerImmersive) {
-                            val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .statusBarsPadding()
-                                    .padding(horizontal = 14.dp, vertical = 2.dp)
-                            ) {
-                                Row(
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
+                    if (processedAppBgBitmap != null) {
+                        Image(
+                            bitmap = processedAppBgBitmap!!.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Color.Black.copy(alpha = (1f - appBgBrightness).coerceIn(0.15f, 0.85f))
+                                )
+                        )
+                    }
+
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        containerColor = Color.Transparent,
+                        topBar = {
+                            val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
+                                    screens[pagerState.currentPage] == Screen.Timer
+                            if (!isNoteEditorOpen && !isTimerImmersive) {
+                                val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(38.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        .statusBarsPadding()
+                                        .padding(horizontal = 14.dp, vertical = 0.dp)
                                 ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(26.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
                                     // Left / Center area
                                     if (screens[pagerState.currentPage] == Screen.Home) {
                                         Row(
@@ -575,14 +597,14 @@ class MainActivity : ComponentActivity() {
                                             IconButton(
                                                 onClick = { showSettingsDialog = true },
                                                 modifier = Modifier
-                                                    .size(36.dp)
+                                                    .size(26.dp)
                                                     .testTag("top_settings_gear_btn")
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Default.Settings,
                                                     contentDescription = "Configurações",
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(20.dp)
+                                                    modifier = Modifier.size(19.dp)
                                                 )
                                             }
                                         }
@@ -594,7 +616,7 @@ class MainActivity : ComponentActivity() {
                                                     viewModel.startTutorial(CitraTutorialArea.MENU)
                                                 },
                                                 modifier = Modifier
-                                                    .size(36.dp)
+                                                    .size(26.dp)
                                                     .tutorialTarget("top_menu_button")
                                                     .testTag("top_menu_button")
                                             ) {
@@ -602,7 +624,7 @@ class MainActivity : ComponentActivity() {
                                                     imageVector = Icons.Default.MoreVert,
                                                     contentDescription = "Mais Opções",
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(22.dp)
+                                                    modifier = Modifier.size(21.dp)
                                                 )
                                             }
 
@@ -795,22 +817,6 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    if (processedAppBgBitmap != null) {
-                        Image(
-                            bitmap = processedAppBgBitmap!!.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Color.Black.copy(alpha = (1f - appBgBrightness).coerceIn(0.15f, 0.85f))
-                                )
-                        )
-                    }
-
                     // HorizontalPager: instant tab navigation on button clicks while preserving smooth user manual swiping
                     HorizontalPager(
                         state = pagerState,
@@ -879,6 +885,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+                }
 
                 if (showAuthDialog) {
                     Dialog(

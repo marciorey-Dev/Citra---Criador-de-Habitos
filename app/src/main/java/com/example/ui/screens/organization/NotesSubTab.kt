@@ -145,6 +145,7 @@ fun NotesSubTab(
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
     var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
+    var isGridStackedByCategory by rememberSaveable { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var expandedCategories by remember { mutableStateOf(setOf<String>()) }
 
@@ -468,7 +469,7 @@ fun NotesSubTab(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Pesquisar",
-                            tint = MaterialTheme.colorScheme.outline,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -480,7 +481,7 @@ fun NotesSubTab(
                                 Text(
                                     text = "Pesquisar notas ou ideias...",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.outline,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -490,7 +491,8 @@ fun NotesSubTab(
                                 onValueChange = { searchQuery = it },
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Medium
                                 ),
                                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.fillMaxWidth()
@@ -787,6 +789,35 @@ fun NotesSubTab(
                         }
                     }
                 }
+
+                if (currentLayout == NoteLayoutMode.GRID_2) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primaryContainer else surfaceContainerLow,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { isGridStackedByCategory = !isGridStackedByCategory }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Layers,
+                                contentDescription = "Empilhar categorias no modo grade",
+                                modifier = Modifier.size(15.dp),
+                                tint = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                            )
+                            Text(
+                                text = "Empilhar",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -840,6 +871,27 @@ fun NotesSubTab(
                     if (sortedNotes.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             emptyNotesItem()
+                        }
+                    } else if (isGridStackedByCategory) {
+                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
+                        items(categoriesWithNotes.keys.toList(), key = { "grid_stack_$it" }, span = { GridItemSpan(maxLineSpan) }) { catName ->
+                            val catNotes = categoriesWithNotes[catName] ?: emptyList()
+                            CategoryNoteStack(
+                                categoryName = catName,
+                                notes = catNotes,
+                                isExpanded = expandedCategories.contains(catName),
+                                onToggleExpand = {
+                                    expandedCategories = if (expandedCategories.contains(catName)) {
+                                        expandedCategories - catName
+                                    } else {
+                                        expandedCategories + catName
+                                    }
+                                },
+                                onNoteClick = { activeNoteToEdit = it },
+                                onNoteLongClick = { noteForSubmenu = it },
+                                onTogglePin = { viewModel.togglePinNote(it) },
+                                onDeleteNote = { noteToDelete = it }
+                            )
                         }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
@@ -1246,7 +1298,7 @@ fun SquareNoteCard(
     }
     val previewImageUri = extractFirstImageUri(note)
     val hasImage = previewImageUri != null
-    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 120)
+    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 200)
 
     val badgeBg = if (note.noteColor != null) {
         paperColors.badgeBg
@@ -1272,7 +1324,7 @@ fun SquareNoteCard(
         isPinned = note.isPinned,
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 175.dp)
+            .heightIn(min = 250.dp)
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
@@ -1357,7 +1409,7 @@ fun SquareNoteCard(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(64.dp)
+                            .height(88.dp)
                             .clip(RoundedCornerShape(12.dp))
                     )
                 }
@@ -1379,10 +1431,10 @@ fun SquareNoteCard(
                     Text(
                         text = cleanExcerpt,
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.75f),
-                        maxLines = if (previewImageUri != null) 2 else 3,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = paperColors.onBackgroundColor.copy(alpha = 0.88f),
+                        maxLines = if (previewImageUri != null) 4 else 6,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -1403,14 +1455,14 @@ fun SquareNoteCard(
                     Icon(
                         imageVector = Icons.Default.Schedule,
                         contentDescription = null,
-                        tint = paperColors.onBackgroundColor.copy(alpha = 0.55f),
+                        tint = paperColors.onBackgroundColor.copy(alpha = 0.85f),
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = dateText,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.65f)
+                        fontWeight = FontWeight.SemiBold,
+                        color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
                     )
                 }
 
@@ -1525,8 +1577,8 @@ fun SmallSquareNoteCard(
             Text(
                 text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
                 fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = paperColors.onBackgroundColor.copy(alpha = 0.6f)
+                fontWeight = FontWeight.SemiBold,
+                color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
             )
         }
     }
@@ -1597,7 +1649,8 @@ fun DetailNoteCard(
                     Text(
                         text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
                         fontSize = 10.sp,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.6f)
+                        fontWeight = FontWeight.SemiBold,
+                        color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {

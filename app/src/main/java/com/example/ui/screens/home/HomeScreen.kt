@@ -65,7 +65,7 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
         // 1. Greeting & Date Header

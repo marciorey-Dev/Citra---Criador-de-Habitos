@@ -4,7 +4,18 @@ Bem-vindo às notas de atualização do **Citra**! Aqui pode acompanhar todas as
 
 ---
 
-## 🍊 Versão 1.2.3 (Atual)
+## 🍊 Versão 1.2.4 (Atual)
+- **Seleção de Texto no Modo Leitura:** Habilitada a seleção suave e livre de texto em blocos de parágrafos, listas e citações no Modo Leitura sem interferência de detetores de toque.
+- **Espaço Final de Página Reduzido:** Ajustada a margem inferior de rolagem no editor de notas em 6 parágrafos para uma leitura mais compacta e proporcional.
+- **Inserção Direta no Modo Leitura:** Clicar nos botões de Tabela, Bloco de Código ou Bloco Matemático adiciona-os automaticamente no final da nota com scroll suave.
+- **Fontes com Visibilidade e Contraste Otimizados:** O texto da barra de pesquisa de notas e as datas das notas (em grade, lista e pilhas) receberam tons com alto contraste e legibilidade tanto no Modo Claro quanto no Modo Escuro.
+- **Interface de Notas Mais Limpa:** Removidos textos redundantes de status "editando/salvo" no editor de notas para foco total na escrita.
+- **Cartões de Notas no Modo Padrão Aprimorados:** Altura vertical expandida (`min = 215.dp`), com maior pré-visualização de texto (até 5 linhas de excerto) e imagem ampliada para melhor leitura visual.
+- **Barra Superior & Menu de Três Pontos Estreitado:** O cabeçalho superior foi estreitado à altura exata do ícone e integrado transparentemente com o fundo do aplicativo, eliminando o contraste cinza e subindo as interfaces para máximo aproveitamento do ecrã.
+
+---
+
+## 🍊 Versão 1.2.3
 - **Mascote no Ecrã de Carregamento:** Substituição do logótipo estático pelo mascote animado **Citra** (`CitraMascote`) no ecrã de carregamento inicial.
 - **Separação Visual & Contraste Aprimorado (Modo Claro e Escuro):** Refinamento da hierarquia tonal entre o fundo, cartões (`surface`), pílulas, círculos e contornos (`outlineVariant`) mantendo o tom quente característico do Citra.
 - **Nova Interface de Conquistas:** Cartão de resumo com troféu, progresso do **Nível Pomar**, barra motivacional, filtros por categoria com contagem e cartões de medalhas com data de desbloqueio.

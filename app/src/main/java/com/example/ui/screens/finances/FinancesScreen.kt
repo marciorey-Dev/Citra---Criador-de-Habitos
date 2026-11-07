@@ -1,5 +1,6 @@
 package com.example.ui.screens.finances
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -116,6 +118,27 @@ fun FinancesScreen(
     var showBudgetsDialog by remember { mutableStateOf(false) }
     var showRecurringDialog by remember { mutableStateOf(false) }
     var showExchangeRatesDialog by remember { mutableStateOf(false) }
+
+    val pendingNoteToOpen by viewModel.pendingOpenNoteFromFinances.collectAsState()
+    var activeFinanceEditorNote by remember { mutableStateOf<Note?>(null) }
+    val allNotesForEditor by viewModel.notes.collectAsState()
+    val allTasksForEditor by viewModel.tasks.collectAsState()
+    val allHabitsForEditor by viewModel.habits.collectAsState()
+    val pomodoroStateForEditor by viewModel.pomodoroState.collectAsState()
+    val noteCategoriesForEditor by viewModel.categories.collectAsState()
+
+    LaunchedEffect(pendingNoteToOpen) {
+        pendingNoteToOpen?.let { note ->
+            activeFinanceEditorNote = note
+            viewModel.clearPendingOpenNoteFromFinances()
+            viewModel.setNoteEditorOpen(true)
+        }
+    }
+
+    BackHandler(enabled = activeFinanceEditorNote != null) {
+        activeFinanceEditorNote = null
+        viewModel.setNoteEditorOpen(false)
+    }
     var completingPlannedEntry by remember { mutableStateOf<FinanceEntry?>(null) }
 
     // Compute period [startMillis, endMillis]

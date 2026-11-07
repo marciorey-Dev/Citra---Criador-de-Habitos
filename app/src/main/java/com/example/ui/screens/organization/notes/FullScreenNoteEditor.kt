@@ -149,6 +149,8 @@ fun FullScreenNoteEditor(
     val isToolbarVisible = true
     var toolbarOffsetX by remember { mutableFloatStateOf(0f) }
     var toolbarOffsetY by remember { mutableFloatStateOf(0f) }
+    var savedFloatingOffsetX by rememberSaveable { mutableFloatStateOf(0f) }
+    var savedFloatingOffsetY by rememberSaveable { mutableFloatStateOf(0f) }
     var isToolbarMinimized by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
@@ -172,6 +174,9 @@ fun FullScreenNoteEditor(
     }
 
     fun switchEditorMode(newMode: NoteEditorMode) {
+        if (newMode == NoteEditorMode.READING && editorMode != NoteEditorMode.READING) {
+            saveCurrent(close = false, silent = true)
+        }
         editorMode = newMode
         onModeChanged?.invoke(newMode)
     }
@@ -376,7 +381,7 @@ fun FullScreenNoteEditor(
         return title.isBlank() && editorValue.text.isBlank()
     }
 
-    fun saveCurrent(close: Boolean = true) {
+    fun saveCurrent(close: Boolean = true, silent: Boolean = false) {
         if (isCompletelyEmpty() && initialNote == null) {
             if (close) onClose()
             return
@@ -414,7 +419,9 @@ fun FullScreenNoteEditor(
                 noteColor
             )
         } else {
-            saveFeedbackTimestamp = System.currentTimeMillis()
+            if (!silent) {
+                saveFeedbackTimestamp = System.currentTimeMillis()
+            }
             if (onSaveOnly != null) {
                 onSaveOnly(
                     finalTitle,
@@ -1197,7 +1204,8 @@ fun FullScreenNoteEditor(
                         Text(
                             text = formattedTimestamp,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (isDarkBg) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
 
@@ -1506,6 +1514,9 @@ fun FullScreenNoteEditor(
                                             val annotated = remember(block.text, isDarkBg) {
                                                 InlineMarkdownHelper.parseInlineFormatting(block.text, isDark = isDarkBg)
                                             }
+                                            val hasLinks = remember(annotated) {
+                                                annotated.getStringAnnotations("LINK", 0, annotated.length).isNotEmpty()
+                                            }
                                             Text(
                                                 text = annotated,
                                                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -1516,17 +1527,21 @@ fun FullScreenNoteEditor(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .padding(vertical = 2.dp)
-                                                    .pointerInput(block.text) {
-                                                        detectTapGestures(
-                                                            onTap = { pos ->
-                                                                val offset = layoutResult?.getOffsetForPosition(pos) ?: -1
-                                                                val links = if (offset != -1) annotated.getStringAnnotations("LINK", offset, offset) else emptyList()
-                                                                if (links.isNotEmpty()) {
-                                                                    handleLinkClick(links.first().item)
-                                                                }
+                                                    .then(
+                                                        if (hasLinks) {
+                                                            Modifier.pointerInput(block.text) {
+                                                                detectTapGestures(
+                                                                    onTap = { pos ->
+                                                                        val offset = layoutResult?.getOffsetForPosition(pos) ?: -1
+                                                                        val links = if (offset != -1) annotated.getStringAnnotations("LINK", offset, offset) else emptyList()
+                                                                        if (links.isNotEmpty()) {
+                                                                            handleLinkClick(links.first().item)
+                                                                        }
+                                                                    }
+                                                                )
                                                             }
-                                                        )
-                                                    }
+                                                        } else Modifier
+                                                    )
                                             )
                                         }
                                     }
@@ -1558,15 +1573,7 @@ fun FullScreenNoteEditor(
                                                     textDecoration = if (block.isChecked) TextDecoration.LineThrough else null,
                                                     color = if (block.isChecked) Color.Gray else (if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface)
                                                 ),
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .pointerInput(block.text) {
-                                                        detectTapGestures(
-                                                            onLongPress = {
-                                                                checklistItemToConvert = block.text
-                                                            }
-                                                        )
-                                                    }
+                                                modifier = Modifier.weight(1f)
                                             )
                                         }
                                     }
@@ -1789,12 +1796,13 @@ fun FullScreenNoteEditor(
                         }
                     }
                 }
+                }
 
                 // Espaço vazio ajustado para rolagem (reduzido em 6 parágrafos)
                 Spacer(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(290.dp)
+                        .height(110.dp)
                 )
             }
 
@@ -1847,6 +1855,8 @@ fun FullScreenNoteEditor(
                                             onDoubleTap = {
                                                 toolbarOffsetX = 0f
                                                 toolbarOffsetY = 0f
+                                                savedFloatingOffsetX = 0f
+                                                savedFloatingOffsetY = 0f
                                             }
                                         )
                                     }
@@ -1855,6 +1865,8 @@ fun FullScreenNoteEditor(
                                             change.consume()
                                             toolbarOffsetX += dragAmount.x
                                             toolbarOffsetY += dragAmount.y
+                                            savedFloatingOffsetX = toolbarOffsetX
+                                            savedFloatingOffsetY = toolbarOffsetY
                                         }
                                     }
                             ) {
@@ -1905,6 +1917,8 @@ fun FullScreenNoteEditor(
                                                     onDoubleTap = {
                                                         toolbarOffsetX = 0f
                                                         toolbarOffsetY = 0f
+                                                        savedFloatingOffsetX = 0f
+                                                        savedFloatingOffsetY = 0f
                                                     }
                                                 )
                                             }
@@ -1913,6 +1927,8 @@ fun FullScreenNoteEditor(
                                                     change.consume()
                                                     toolbarOffsetX += dragAmount.x
                                                     toolbarOffsetY += dragAmount.y
+                                                    savedFloatingOffsetX = toolbarOffsetX
+                                                    savedFloatingOffsetY = toolbarOffsetY
                                                 }
                                             }
                                             .padding(horizontal = 4.dp, vertical = 4.dp)
@@ -1951,8 +1967,12 @@ fun FullScreenNoteEditor(
                                     editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "*", "*")
                                 }
                                 ToolbarToolButton(label = "<>", icon = Icons.Default.Code) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
+                                    if (editorMode == NoteEditorMode.READING) {
+                                        appendToEndOfNote("```kotlin\n// código\n```")
+                                    } else {
+                                        pushHistory()
+                                        editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
+                                    }
                                 }
 
                                 VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -2216,8 +2236,14 @@ fun FullScreenNoteEditor(
                                             label = if (isToolbarPinnedToBottom) "Desafixar" else "Fixar barra",
                                             icon = if (isToolbarPinnedToBottom) Icons.Default.OpenWith else Icons.Default.PushPin
                                         ) {
-                                            isToolbarPinnedToBottom = !isToolbarPinnedToBottom
                                             if (isToolbarPinnedToBottom) {
+                                                isToolbarPinnedToBottom = false
+                                                toolbarOffsetX = savedFloatingOffsetX
+                                                toolbarOffsetY = savedFloatingOffsetY
+                                            } else {
+                                                savedFloatingOffsetX = toolbarOffsetX
+                                                savedFloatingOffsetY = toolbarOffsetY
+                                                isToolbarPinnedToBottom = true
                                                 toolbarOffsetX = 0f
                                                 toolbarOffsetY = 0f
                                             }
@@ -2276,9 +2302,9 @@ fun FullScreenNoteEditor(
                 }
             }
 
-            // Bottom-center pop-up feedback when saving note (2 seconds, no emoji, matches current theme palette)
+            // Bottom-center pop-up feedback when saving note (removed per user request)
             androidx.compose.animation.AnimatedVisibility(
-                visible = showSaveFeedback,
+                visible = false,
                 enter = fadeIn() + slideInVertically { it },
                 exit = fadeOut() + slideOutVertically { it },
                 modifier = Modifier
@@ -2381,6 +2407,7 @@ fun FullScreenNoteEditor(
                 val bodyLines = (1..safeRows).map { r ->
                     (1..safeCols).joinToString(" | ", prefix = "| ", postfix = " |") { "" }
                 }
+                val tableMarkdown = (listOf(header, separator) + bodyLines).joinToString("\n") + "\n"
                 if (editorMode == NoteEditorMode.READING) {
                     appendToEndOfNote(tableMarkdown)
                 } else {
