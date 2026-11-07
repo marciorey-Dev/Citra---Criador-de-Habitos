@@ -132,10 +132,12 @@ fun NotesSubTab(
 ) {
     val context = LocalContext.current
     val notes by viewModel.notes.collectAsState()
+    val archivedNotes by viewModel.archivedNotes.collectAsState()
     val trashNotes by viewModel.trashNotes.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val selectedCategoryFilter by viewModel.selectedNoteCategoryFilter.collectAsState()
     val openCreateTrigger by viewModel.openCreateNoteTrigger.collectAsState()
+    val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var activeNoteToEdit by remember { mutableStateOf<Note?>(null) }
@@ -143,6 +145,7 @@ fun NotesSubTab(
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteForSubmenu by remember { mutableStateOf<Note?>(null) }
     var showTrashDialog by remember { mutableStateOf(false) }
+    var showArchivedNotesDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
     var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
@@ -163,6 +166,14 @@ fun NotesSubTab(
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
         if (openCreateTrigger) {
+            val draftCat = viewModel.ensureCategoryForDraft()
+            activeNoteToEdit = Note(
+                id = 0L,
+                title = "",
+                content = "",
+                category = draftCat,
+                iconEmoji = "📝"
+            )
             isCreatingNew = true
             viewModel.resetCreateNoteTrigger()
         }
@@ -353,7 +364,7 @@ fun NotesSubTab(
                     activeNoteToEdit = note
                     isCreatingNew = false
                 },
-                initialMode = NoteEditorMode.LIVE_PREVIEW,
+                initialMode = if (defaultNoteOpenMode == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
                 onModeChanged = null,
                 onToggleChecklistTaskSync = { checklistText, isChecked ->
                     viewModel.syncChecklistToTask(checklistText, isChecked)
@@ -515,23 +526,46 @@ fun NotesSubTab(
                     }
                 }
 
-                // Create New Folder Circular Button
-                Surface(
-                    shape = CircleShape,
-                    color = surfaceContainerLow,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .clickable { showAddFolderDialog = true }
-                        .testTag("notes_create_folder_btn")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.CreateNewFolder,
-                            contentDescription = "Criar nova pasta",
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(21.dp)
-                        )
+                // Archived Notes Circular Button with Badge
+                Box(modifier = Modifier.size(48.dp)) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (archivedNotes.isNotEmpty()) {
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                        } else {
+                            surfaceContainerLow
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .clickable { showArchivedNotesDialog = true }
+                            .testTag("notes_archived_btn")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Archive,
+                                contentDescription = "Notas Arquivadas",
+                                tint = if (archivedNotes.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
+                    }
+                    if (archivedNotes.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = (-2).dp, y = 2.dp)
+                                .size(18.dp)
+                                .background(MaterialTheme.colorScheme.tertiary, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${archivedNotes.size}",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiary
+                            )
+                        }
                     }
                 }
 
@@ -791,32 +825,22 @@ fun NotesSubTab(
                     }
                 }
 
-                if (currentLayout == NoteLayoutMode.GRID_2) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primaryContainer else surfaceContainerLow,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { isGridStackedByCategory = !isGridStackedByCategory }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Layers,
-                                contentDescription = "Empilhar categorias no modo grade",
-                                modifier = Modifier.size(15.dp),
-                                tint = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                            )
-                            Text(
-                                text = if (isGridStackedByCategory) "Empilhar: Ativo" else "Empilhar: Opcional",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                Surface(
+                    shape = CircleShape,
+                    color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primaryContainer else surfaceContainerLow,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable { isGridStackedByCategory = !isGridStackedByCategory }
+                        .testTag("notes_stack_toggle_btn")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesomeMotion,
+                            contentDescription = "Empilhar por categoria",
+                            modifier = Modifier.size(18.dp),
+                            tint = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                        )
                     }
                 }
             }
@@ -875,24 +899,36 @@ fun NotesSubTab(
                         }
                     } else if (isGridStackedByCategory) {
                         val categoriesWithNotes = sortedNotes.groupBy { it.category }
-                        items(categoriesWithNotes.keys.toList(), key = { "grid_stack_$it" }, span = { GridItemSpan(maxLineSpan) }) { catName ->
-                            val catNotes = categoriesWithNotes[catName] ?: emptyList()
-                            CategoryNoteStack(
-                                categoryName = catName,
-                                notes = catNotes,
-                                isExpanded = expandedCategories.contains(catName),
-                                onToggleExpand = {
-                                    expandedCategories = if (expandedCategories.contains(catName)) {
-                                        expandedCategories - catName
-                                    } else {
-                                        expandedCategories + catName
-                                    }
-                                },
-                                onNoteClick = { activeNoteToEdit = it },
-                                onNoteLongClick = { noteForSubmenu = it },
-                                onTogglePin = { viewModel.togglePinNote(it) },
-                                onDeleteNote = { noteToDelete = it }
-                            )
+                        categoriesWithNotes.forEach { (catName, catNotes) ->
+                            val isExpanded = expandedCategories.contains(catName)
+                            if (!isExpanded) {
+                                item(key = "g2_stack_$catName") {
+                                    CategoryGridStackCard(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        topNoteTitle = catNotes.firstOrNull()?.title.orEmpty(),
+                                        isCompact = false,
+                                        onClick = { expandedCategories = expandedCategories + catName }
+                                    )
+                                }
+                            } else {
+                                item(key = "g2_hdr_$catName", span = { GridItemSpan(maxLineSpan) }) {
+                                    CategoryExpandedHeader(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        onCollapse = { expandedCategories = expandedCategories - catName }
+                                    )
+                                }
+                                items(catNotes, key = { it.id }) { note ->
+                                    SquareNoteCard(
+                                        note = note,
+                                        onClick = { activeNoteToEdit = note },
+                                        onLongClick = { noteForSubmenu = note },
+                                        onTogglePin = { viewModel.togglePinNote(note) },
+                                        onDelete = { noteToDelete = note }
+                                    )
+                                }
+                            }
                         }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
@@ -905,10 +941,19 @@ fun NotesSubTab(
                             )
                         }
                     }
-                    // Quick Draft Tile (Card 6 from HTML)
                     item {
                         QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
+                            onClick = {
+                                val draftCat = viewModel.ensureCategoryForDraft()
+                                activeNoteToEdit = Note(
+                                    id = 0L,
+                                    title = "",
+                                    content = "",
+                                    category = draftCat,
+                                    iconEmoji = "📝"
+                                )
+                                isCreatingNew = true
+                            }
                         )
                     }
                 }
@@ -930,6 +975,39 @@ fun NotesSubTab(
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             emptyNotesItem()
                         }
+                    } else if (isGridStackedByCategory) {
+                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
+                        categoriesWithNotes.forEach { (catName, catNotes) ->
+                            val isExpanded = expandedCategories.contains(catName)
+                            if (!isExpanded) {
+                                item(key = "g3_stack_$catName") {
+                                    CategoryGridStackCard(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        topNoteTitle = catNotes.firstOrNull()?.title.orEmpty(),
+                                        isCompact = true,
+                                        onClick = { expandedCategories = expandedCategories + catName }
+                                    )
+                                }
+                            } else {
+                                item(key = "g3_hdr_$catName", span = { GridItemSpan(maxLineSpan) }) {
+                                    CategoryExpandedHeader(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        onCollapse = { expandedCategories = expandedCategories - catName }
+                                    )
+                                }
+                                items(catNotes, key = { it.id }) { note ->
+                                    SmallSquareNoteCard(
+                                        note = note,
+                                        onClick = { activeNoteToEdit = note },
+                                        onLongClick = { noteForSubmenu = note },
+                                        onTogglePin = { viewModel.togglePinNote(note) },
+                                        onDelete = { noteToDelete = note }
+                                    )
+                                }
+                            }
+                        }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
                             SmallSquareNoteCard(
@@ -943,7 +1021,17 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
+                            onClick = {
+                                val draftCat = viewModel.ensureCategoryForDraft()
+                                activeNoteToEdit = Note(
+                                    id = 0L,
+                                    title = "",
+                                    content = "",
+                                    category = draftCat,
+                                    iconEmoji = "📝"
+                                )
+                                isCreatingNew = true
+                            }
                         )
                     }
                 }
@@ -963,6 +1051,37 @@ fun NotesSubTab(
                         item {
                             emptyNotesItem()
                         }
+                    } else if (isGridStackedByCategory) {
+                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
+                        categoriesWithNotes.forEach { (catName, catNotes) ->
+                            val isExpanded = expandedCategories.contains(catName)
+                            if (!isExpanded) {
+                                item(key = "det_stack_$catName") {
+                                    CategoryDetailsStackCard(
+                                        categoryName = catName,
+                                        notes = catNotes,
+                                        onClick = { expandedCategories = expandedCategories + catName }
+                                    )
+                                }
+                            } else {
+                                item(key = "det_hdr_$catName") {
+                                    CategoryExpandedHeader(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        onCollapse = { expandedCategories = expandedCategories - catName }
+                                    )
+                                }
+                                items(catNotes, key = { it.id }) { note ->
+                                    DetailNoteCard(
+                                        note = note,
+                                        onClick = { activeNoteToEdit = note },
+                                        onLongClick = { noteForSubmenu = note },
+                                        onTogglePin = { viewModel.togglePinNote(note) },
+                                        onDelete = { noteToDelete = note }
+                                    )
+                                }
+                            }
+                        }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
                             DetailNoteCard(
@@ -976,7 +1095,17 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
+                            onClick = {
+                                val draftCat = viewModel.ensureCategoryForDraft()
+                                activeNoteToEdit = Note(
+                                    id = 0L,
+                                    title = "",
+                                    content = "",
+                                    category = draftCat,
+                                    iconEmoji = "📝"
+                                )
+                                isCreatingNew = true
+                            }
                         )
                     }
                 }
@@ -996,6 +1125,37 @@ fun NotesSubTab(
                         item {
                             emptyNotesItem()
                         }
+                    } else if (isGridStackedByCategory) {
+                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
+                        categoriesWithNotes.forEach { (catName, catNotes) ->
+                            val isExpanded = expandedCategories.contains(catName)
+                            if (!isExpanded) {
+                                item(key = "list_stack_$catName") {
+                                    CategoryListStackCard(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        onClick = { expandedCategories = expandedCategories + catName }
+                                    )
+                                }
+                            } else {
+                                item(key = "list_hdr_$catName") {
+                                    CategoryExpandedHeader(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        onCollapse = { expandedCategories = expandedCategories - catName }
+                                    )
+                                }
+                                items(catNotes, key = { it.id }) { note ->
+                                    ListNoteCard(
+                                        note = note,
+                                        onClick = { activeNoteToEdit = note },
+                                        onLongClick = { noteForSubmenu = note },
+                                        onTogglePin = { viewModel.togglePinNote(note) },
+                                        onDelete = { noteToDelete = note }
+                                    )
+                                }
+                            }
+                        }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
                             ListNoteCard(
@@ -1009,7 +1169,17 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
+                            onClick = {
+                                val draftCat = viewModel.ensureCategoryForDraft()
+                                activeNoteToEdit = Note(
+                                    id = 0L,
+                                    title = "",
+                                    content = "",
+                                    category = draftCat,
+                                    iconEmoji = "📝"
+                                )
+                                isCreatingNew = true
+                            }
                         )
                     }
                 }
@@ -1019,7 +1189,7 @@ fun NotesSubTab(
                     sortedNotes.groupBy { it.category }
                 }
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
@@ -1035,27 +1205,46 @@ fun NotesSubTab(
                     } else {
                         items(categoriesWithNotes.keys.toList(), key = { it }) { catName ->
                             val catNotes = categoriesWithNotes[catName] ?: emptyList()
-                            CategoryNoteStack(
-                                categoryName = catName,
-                                notes = catNotes,
-                                isExpanded = expandedCategories.contains(catName),
-                                onToggleExpand = {
-                                    expandedCategories = if (expandedCategories.contains(catName)) {
-                                        expandedCategories - catName
-                                    } else {
-                                        expandedCategories + catName
+                            val isExpanded = expandedCategories.contains(catName)
+                            if (!isExpanded) {
+                                CategoryDetailsStackCard(
+                                    categoryName = catName,
+                                    notes = catNotes,
+                                    onClick = { expandedCategories = expandedCategories + catName }
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CategoryExpandedHeader(
+                                        categoryName = catName,
+                                        noteCount = catNotes.size,
+                                        onCollapse = { expandedCategories = expandedCategories - catName }
+                                    )
+                                    catNotes.forEach { note ->
+                                        DetailNoteCard(
+                                            note = note,
+                                            onClick = { activeNoteToEdit = note },
+                                            onLongClick = { noteForSubmenu = note },
+                                            onTogglePin = { viewModel.togglePinNote(note) },
+                                            onDelete = { noteToDelete = note }
+                                        )
                                     }
-                                },
-                                onNoteClick = { activeNoteToEdit = it },
-                                onNoteLongClick = { noteForSubmenu = it },
-                                onTogglePin = { viewModel.togglePinNote(it) },
-                                onDeleteNote = { noteToDelete = it }
-                            )
+                                }
+                            }
                         }
                     }
                     item {
                         QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
+                            onClick = {
+                                val draftCat = viewModel.ensureCategoryForDraft()
+                                activeNoteToEdit = Note(
+                                    id = 0L,
+                                    title = "",
+                                    content = "",
+                                    category = draftCat,
+                                    iconEmoji = "📝"
+                                )
+                                isCreatingNew = true
+                            }
                         )
                     }
                 }
@@ -1064,7 +1253,17 @@ fun NotesSubTab(
 
         // Circular Citrus Glow FAB
         FloatingActionButton(
-            onClick = { isCreatingNew = true },
+            onClick = {
+                val draftCat = viewModel.ensureCategoryForDraft()
+                activeNoteToEdit = Note(
+                    id = 0L,
+                    title = "",
+                    content = "",
+                    category = draftCat,
+                    iconEmoji = "📝"
+                )
+                isCreatingNew = true
+            },
             shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -1116,6 +1315,7 @@ fun NotesSubTab(
             onDismiss = { noteForSubmenu = null },
             onTogglePin = { viewModel.togglePinNote(note) },
             onDelete = { noteToDelete = note },
+            onToggleArchive = { viewModel.setNoteArchived(note, !note.isArchived) },
             onDuplicate = {
                 viewModel.saveNote(
                     id = 0L,
@@ -1141,6 +1341,23 @@ fun NotesSubTab(
             onPermanentDelete = { viewModel.permanentlyDeleteNote(it, context) },
             onEmptyTrash = { viewModel.emptyNoteTrash(context) },
             onDismiss = { showTrashDialog = false }
+        )
+    }
+
+    // Archived Notes Dialog
+    if (showArchivedNotesDialog) {
+        ArchivedNotesDialog(
+            archivedNotes = archivedNotes,
+            onOpenNote = { note ->
+                activeNoteToEdit = note
+                isCreatingNew = false
+                showArchivedNotesDialog = false
+            },
+            onUnarchive = { viewModel.setNoteArchived(it, false) },
+            onDelete = {
+                viewModel.deleteNote(it)
+            },
+            onDismiss = { showArchivedNotesDialog = false }
         )
     }
 }
@@ -2024,7 +2241,8 @@ fun NoteSubmenuDialog(
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
-    onDuplicate: () -> Unit
+    onDuplicate: () -> Unit,
+    onToggleArchive: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -2077,6 +2295,30 @@ fun NoteSubmenuDialog(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(if (note.isPinned) "Desafixar nota" else "Fixar nota no topo", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+
+                // Archive / Unarchive
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color.Transparent,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onToggleArchive()
+                            onDismiss()
+                        }
+                        .padding(vertical = 8.dp, horizontal = 4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = if (note.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(if (note.isArchived) "Desarquivar nota" else "Arquivar nota", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
 
@@ -2256,3 +2498,511 @@ fun NoteSubmenuDialog(
         }
     )
 }
+
+@Composable
+fun ArchivedNotesDialog(
+    archivedNotes: List<Note>,
+    onOpenNote: (Note) -> Unit,
+    onUnarchive: (Note) -> Unit,
+    onDelete: (Note) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val filtered = remember(archivedNotes, searchQuery) {
+        if (searchQuery.isBlank()) archivedNotes
+        else archivedNotes.filter {
+            it.title.contains(searchQuery, ignoreCase = true) ||
+            it.content.contains(searchQuery, ignoreCase = true) ||
+            it.category.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Archive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "Notas Arquivadas",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Search field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Buscar notas arquivadas...", fontSize = 13.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Archive,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = if (searchQuery.isNotBlank()) "Nenhuma nota encontrada" else "Nenhuma nota arquivada",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(filtered, key = { it.id }) { note ->
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onOpenNote(note) }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = note.title.ifBlank { "Sem título" },
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = note.content.take(80).replace("\n", " ").trim(),
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+                                        ) {
+                                            Text(
+                                                text = note.category,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { onUnarchive(note) },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Unarchive,
+                                                contentDescription = "Desarquivar",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { onDelete(note) },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Excluir",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryGridStackCard(
+    categoryName: String,
+    noteCount: Int,
+    topNoteTitle: String,
+    isCompact: Boolean = false,
+    onClick: () -> Unit
+) {
+    val categoryIcon = categoryIconFor(categoryName)
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.5.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        ),
+        shadowElevation = 2.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (isCompact) 130.dp else 175.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(if (isCompact) 10.dp else 14.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                    modifier = Modifier.size(if (isCompact) 28.dp else 34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = categoryIcon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(if (isCompact) 16.dp else 18.dp)
+                        )
+                    }
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = "$noteCount",
+                        fontSize = if (isCompact) 11.sp else 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = categoryName,
+                    fontSize = if (isCompact) 13.sp else 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (!isCompact && topNoteTitle.isNotBlank()) {
+                    Text(
+                        text = topNoteTitle,
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Toque para abrir",
+                    fontSize = if (isCompact) 9.5.sp else 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryExpandedHeader(
+    categoryName: String,
+    noteCount: Int,
+    onCollapse: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = categoryIconFor(categoryName),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = categoryName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.5.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = "$noteCount notas",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 1.dp,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onCollapse)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Recolher",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Recolher",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryDetailsStackCard(
+    categoryName: String,
+    notes: List<Note>,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.5.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = categoryIconFor(categoryName),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column {
+                        Text(
+                            text = categoryName,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = "${notes.size} anotações empilhadas",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Expandir",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            if (notes.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = notes.take(3).joinToString(" • ") { it.title.ifBlank { "Sem título" } },
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryListStackCard(
+    categoryName: String,
+    noteCount: Int,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = categoryIconFor(categoryName),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = categoryName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "$noteCount notas",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Expandir",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+

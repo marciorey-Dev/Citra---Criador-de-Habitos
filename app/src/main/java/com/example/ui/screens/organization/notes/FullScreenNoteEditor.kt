@@ -157,8 +157,17 @@ fun FullScreenNoteEditor(
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
     var currentSavedTitle by remember { mutableStateOf(initialNote?.title) }
-    val noteUuid = remember { initialNote?.uuid ?: java.util.UUID.randomUUID().toString() }
-    var category by remember { mutableStateOf(initialNote?.category ?: categories.firstOrNull()?.name ?: "Geral") }
+    val defaultCat = remember(categories) {
+        categories.find { it.name.equals("Rascunhos", ignoreCase = true) }?.name
+            ?: categories.find { it.name.equals("Geral", ignoreCase = true) }?.name
+            ?: categories.firstOrNull()?.name
+            ?: "Rascunhos"
+    }
+    var category by remember {
+        mutableStateOf(
+            initialNote?.category?.takeIf { cat -> categories.any { it.name.equals(cat, ignoreCase = true) } } ?: defaultCat
+        )
+    }
     var isPinned by remember { mutableStateOf(initialNote?.isPinned ?: false) }
     var bgUri by remember { mutableStateOf(initialNote?.backgroundImageUri) }
     var bgBlur by remember { mutableStateOf(initialNote?.backgroundBlur ?: 0.5f) }
@@ -170,9 +179,8 @@ fun FullScreenNoteEditor(
     var editorValue by remember {
         mutableStateOf(TextFieldValue(initialNote?.content ?: ""))
     }
-    // Always start in Live Preview (do not remember last mode across notes)
     var editorMode by remember {
-        mutableStateOf(NoteEditorMode.LIVE_PREVIEW)
+        mutableStateOf(initialMode)
     }
 
 
@@ -389,7 +397,7 @@ fun FullScreenNoteEditor(
             context = context,
             title = finalTitle,
             content = finalContent,
-            uuid = noteUuid,
+            uuid = initialNote?.uuid.orEmpty(),
             oldTitle = currentSavedTitle
         )
         currentSavedTitle = finalTitle
@@ -1790,7 +1798,8 @@ fun FullScreenNoteEditor(
                                             onDelete = {
                                                 val list = readingBlocks.toMutableList().apply { removeAt(idx) }
                                                 updateBlocksAndMarkdown(list)
-                                            }
+                                            },
+                                            isReadOnly = true
                                         )
                                     }
                                 }
@@ -1809,8 +1818,9 @@ fun FullScreenNoteEditor(
             }
 
             // Obsidian Formatting Toolbar (pinned to bottom by default, or floating when unpinned)
+            // No modo leitura, a barra de inserção de formatação fica oculta para evitar corrupção de blocos
             AnimatedVisibility(
-                visible = isToolbarVisible,
+                visible = isToolbarVisible && editorMode != NoteEditorMode.READING,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier

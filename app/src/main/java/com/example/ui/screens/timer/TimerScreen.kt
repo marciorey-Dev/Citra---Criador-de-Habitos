@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -124,7 +125,7 @@ fun TimerScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         AnimatedVisibility(
-            visible = pomodoroState.isRunning && !pomodoroState.isStopwatchMode,
+            visible = !pomodoroState.isStopwatchMode && citraTimerBallsJson.isNotBlank() && citraTimerBallsJson != "[]",
             enter = fadeIn(tween(350)),
             exit = fadeOut(tween(280))
         ) {
@@ -524,103 +525,202 @@ fun TimerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(22.dp))
+                    if (!pomodoroState.isStopwatchMode && pomodoroState.currentPhase != PomodoroPhase.BREAK) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        FluidMinutesScrollPicker(
+                            selectedMinutes = pomodoroState.focusMinutes,
+                            onMinuteSelected = { mins ->
+                                viewModel.setFocusDuration(mins)
+                            }
+                        )
+                    }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Left: Reset Button
-                        IconButton(
-                            onClick = { viewModel.resetPomodoro() },
-                            modifier = Modifier
-                                .size(58.dp)
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
-                                .testTag("pomodoro_reset_button")
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    if (pomodoroState.currentPhase == PomodoroPhase.BREAK && !pomodoroState.isStopwatchMode) {
+                        val hasPendingSessions = pomodoroState.currentCycle < pomodoroState.totalCycles
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Reiniciar",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(26.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(26.dp))
-
-                        // Center: Primary Play Button
-                        Button(
-                            onClick = {
-                                if (pomodoroState.selectedCategory.isBlank()) {
-                                    showSelectCategoryBeforeStartDialog = true
-                                } else {
-                                    viewModel.toggleStartPausePomodoro()
-                                }
-                            },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp),
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier
-                                .size(84.dp)
-                                .testTag("pomodoro_play_pause_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Iniciar",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(44.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(26.dp))
-
-                        // Right: Cronômetro / Timer Mode Toggle Button
-                        IconButton(
-                            onClick = { viewModel.toggleStopwatchMode() },
-                            modifier = Modifier
-                                .size(58.dp)
-                                .background(
-                                    color = if (pomodoroState.isStopwatchMode) {
-                                        MaterialTheme.colorScheme.primaryContainer
+                            // 1. Interromper / Parar Button (asks confirmation only if pending sessions exist in cycle)
+                            OutlinedButton(
+                                onClick = {
+                                    if (hasPendingSessions) {
+                                        showResetConfirmDialog = true
                                     } else {
-                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
-                                    },
-                                    shape = CircleShape
+                                        viewModel.stopCycle()
+                                    }
+                                },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
+                                border = androidx.compose.foundation.BorderStroke(1.5.dp, RedAction.copy(alpha = 0.5f)),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .testTag("pomodoro_break_stop_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = "Interromper Pausa",
+                                    tint = RedAction,
+                                    modifier = Modifier.size(22.dp)
                                 )
-                                .border(
-                                    width = if (pomodoroState.isStopwatchMode) 1.5.dp else 0.dp,
-                                    color = if (pomodoroState.isStopwatchMode) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Parar", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = RedAction)
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            // 2. Iniciar Pausa Button
+                            Button(
+                                onClick = { viewModel.startBreakCountdown() },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 5.dp),
+                                contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
+                                modifier = Modifier
+                                    .height(54.dp)
+                                    .testTag("pomodoro_start_break_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Iniciar Pausa",
+                                    tint = MaterialTheme.colorScheme.onSecondary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Iniciar Pausa", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondary)
+                            }
+
+                            // 3. Pular para próxima sessão (se definido mais de um ciclo e houver sessões restantes)
+                            if (pomodoroState.totalCycles > 1 && hasPendingSessions) {
+                                Spacer(modifier = Modifier.width(14.dp))
+                                FilledTonalButton(
+                                    onClick = { viewModel.skipToNextSession() },
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                                    modifier = Modifier
+                                        .height(52.dp)
+                                        .testTag("pomodoro_skip_to_next_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SkipNext,
+                                        contentDescription = "Pular para Próxima Sessão",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        "Próxima",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Left: Reset Button
+                            IconButton(
+                                onClick = { viewModel.resetPomodoro() },
+                                modifier = Modifier
+                                    .size(58.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
+                                    .testTag("pomodoro_reset_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reiniciar",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(26.dp))
+
+                            // Center: Primary Play Button
+                            Button(
+                                onClick = {
+                                    if (pomodoroState.selectedCategory.isBlank()) {
+                                        showSelectCategoryBeforeStartDialog = true
+                                    } else {
+                                        viewModel.toggleStartPausePomodoro()
+                                    }
+                                },
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp),
+                                contentPadding = PaddingValues(0.dp),
+                                modifier = Modifier
+                                    .size(84.dp)
+                                    .testTag("pomodoro_play_pause_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Iniciar",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(44.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(26.dp))
+
+                            // Right: Cronômetro / Timer Mode Toggle Button
+                            IconButton(
+                                onClick = { viewModel.toggleStopwatchMode() },
+                                modifier = Modifier
+                                    .size(58.dp)
+                                    .background(
+                                        color = if (pomodoroState.isStopwatchMode) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                                        },
+                                        shape = CircleShape
+                                    )
+                                    .border(
+                                        width = if (pomodoroState.isStopwatchMode) 1.5.dp else 0.dp,
+                                        color = if (pomodoroState.isStopwatchMode) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            Color.Transparent
+                                        },
+                                        shape = CircleShape
+                                    )
+                                    .tutorialTarget("timer_mode_toggle")
+                                    .testTag("pomodoro_stopwatch_toggle_btn")
+                            ) {
+                                Icon(
+                                    imageVector = if (pomodoroState.isStopwatchMode) {
+                                        Icons.Default.HourglassBottom
+                                    } else {
+                                        Icons.Default.Timer
+                                    },
+                                    contentDescription = if (pomodoroState.isStopwatchMode) {
+                                        "Voltar para Timer"
+                                    } else {
+                                        "Mudar para Cronômetro"
+                                    },
+                                    tint = if (pomodoroState.isStopwatchMode) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
-                                        Color.Transparent
+                                        MaterialTheme.colorScheme.onSurfaceVariant
                                     },
-                                    shape = CircleShape
+                                    modifier = Modifier.size(26.dp)
                                 )
-                                .tutorialTarget("timer_mode_toggle")
-                                .testTag("pomodoro_stopwatch_toggle_btn")
-                        ) {
-                            Icon(
-                                imageVector = if (pomodoroState.isStopwatchMode) {
-                                    Icons.Default.HourglassBottom
-                                } else {
-                                    Icons.Default.Timer
-                                },
-                                contentDescription = if (pomodoroState.isStopwatchMode) {
-                                    "Voltar para Timer"
-                                } else {
-                                    "Mudar para Cronômetro"
-                                },
-                                tint = if (pomodoroState.isStopwatchMode) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(26.dp)
-                            )
+                            }
                         }
                     }
 
@@ -803,7 +903,14 @@ fun TimerScreen(
 
                     // Interromper (Stop) Button
                     OutlinedButton(
-                        onClick = { showResetConfirmDialog = true },
+                        onClick = {
+                            val hasPendingSessions = !pomodoroState.isStopwatchMode && pomodoroState.currentCycle < pomodoroState.totalCycles
+                            if (hasPendingSessions) {
+                                showResetConfirmDialog = true
+                            } else {
+                                viewModel.resetPomodoro()
+                            }
+                        },
                         shape = CircleShape,
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = RedAction
@@ -1105,3 +1212,106 @@ fun TimerScreen(
         )
     }
 }
+
+@Composable
+fun FluidMinutesScrollPicker(
+    selectedMinutes: Int,
+    onMinuteSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val rawValues = remember { (10..120 step 5).toList() }
+    val minuteList = remember(selectedMinutes) {
+        if (selectedMinutes in 10..120 && selectedMinutes !in rawValues) {
+            (rawValues + selectedMinutes).sorted()
+        } else {
+            rawValues
+        }
+    }
+    val listState = rememberLazyListState()
+
+    // Smoothly center the selected minute
+    LaunchedEffect(selectedMinutes) {
+        val targetIdx = minuteList.indexOf(selectedMinutes)
+        if (targetIdx >= 0) {
+            val scrollIndex = (targetIdx - 2).coerceAtLeast(0)
+            listState.animateScrollToItem(scrollIndex)
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Duração da Sessão • 10m a 120m",
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        LazyRow(
+            state = listState,
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+            contentPadding = PaddingValues(horizontal = 48.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            items(minuteList, key = { it }) { mins ->
+                val isSelected = mins == selectedMinutes
+                val distance = kotlin.math.abs(mins - selectedMinutes)
+                val targetAlpha = when {
+                    isSelected -> 1f
+                    distance <= 5 -> 0.45f
+                    distance <= 10 -> 0.30f
+                    distance <= 20 -> 0.18f
+                    else -> 0.10f
+                }
+                val alpha by animateFloatAsState(targetValue = targetAlpha, label = "alpha_$mins")
+                val scale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.15f else 0.92f,
+                    label = "scale_$mins"
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    },
+                    modifier = Modifier
+                        .scale(scale)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            width = if (isSelected) 1.5.dp else 0.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable { onMinuteSelected(mins) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "${mins}m",
+                            fontSize = if (isSelected) 15.sp else 13.sp,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

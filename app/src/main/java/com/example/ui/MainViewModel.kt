@@ -275,6 +275,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun ensureCategoryForDraft(): String {
+        val existing = categories.value.find { it.name.equals("Rascunhos", ignoreCase = true) }
+        if (existing != null) return existing.name
+        val fallback = categories.value.firstOrNull()?.name ?: "Rascunhos"
+        viewModelScope.launch {
+            repository.addCategory("Rascunhos", "📝")
+        }
+        return fallback
+    }
+
     // Pending note to open from Finances creation
     private val _pendingOpenNoteFromFinances = MutableStateFlow<Note?>(null)
     val pendingOpenNoteFromFinances: StateFlow<Note?> = _pendingOpenNoteFromFinances.asStateFlow()
@@ -821,6 +831,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.recordFocusSession(session)
                 spawnTimerCitraBall(state.focusMinutes)
 
+                val awardMessage = when {
+                    state.focusMinutes >= 120 -> "🌟 Incrível! Você ganhou o Citra Dourado (120 min)!"
+                    state.focusMinutes >= 60 -> "🍋 Parabéns! Você ganhou o Citra Amarelo (60 min)!"
+                    else -> "🍊 Novo Citra criado no menu do timer!"
+                }
+                _userMessage.emit(awardMessage)
+
                 if (state.linkedTask != null) {
                     val updatedTask = state.linkedTask.copy(
                         focusMinutesCompleted = state.linkedTask.focusMinutesCompleted + state.focusMinutes
@@ -843,9 +860,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             musicPlayer.stop()
 
             val vibEnabled = notificationSettings.value.vibrate
-            val nextCycle = state.currentCycle + 1
+            val breakSec = state.breakMinutes * 60
+            _pomodoroState.update {
+                it.copy(
+                    isRunning = false,
+                    isPaused = false,
+                    currentPhase = PomodoroPhase.BREAK,
+                    remainingSeconds = breakSec,
+                    totalPhaseSeconds = breakSec
+                )
+            }
+            persistTimerState()
 
-            if (nextCycle > state.totalCycles) {
+            NotificationHelper.showInstantNotification(
+                context = getApplication(),
+                id = 101,
+                channelId = NotificationHelper.CHANNEL_ALERTS,
+                title = "Sessão ${state.currentCycle} de ${state.totalCycles} Concluída!",
+                message = "Excelente dedicação de ${state.focusMinutes}m! Pausa de ${state.breakMinutes}m pronta.",
+                customSoundUriString = notificationSettings.value.pomodoroSoundUri,
+                vibratePhone = vibEnabled
+            )
+        } else {
+            timerJob?.cancel()
+            timerJob = null
+            musicPlayer.stop()
+
+            val vibEnabled = notificationSettings.value.vibrate
+            if (state.currentCycle < state.totalCycles) {
+                val nextCycle = state.currentCycle + 1
+                val focusSec = state.focusMinutes * 60
+                _pomodoroState.update {
+                    it.copy(
+                        isRunning = false,
+                        isPaused = false,
+                        currentPhase = PomodoroPhase.FOCUS,
+                        currentCycle = nextCycle,
+                        remainingSeconds = focusSec,
+                        totalPhaseSeconds = focusSec
+                    )
+                }
+                persistTimerState()
+
+                NotificationHelper.showInstantNotification(
+                    context = getApplication(),
+                    id = 103,
+                    channelId = NotificationHelper.CHANNEL_ALERTS,
+                    title = "Pausa Concluída",
+                    message = "Pronto para o Ciclo $nextCycle de ${state.totalCycles} de foco?",
+                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
+                    vibratePhone = vibEnabled
+                )
+            } else {
                 val focusSec = state.focusMinutes * 60
                 val randomQuote = getRandomQuote()
                 _pomodoroState.update {
@@ -866,60 +932,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     context = getApplication(),
                     id = 102,
                     channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "🎉 Sessão Completa de Foco!",
+                    title = "🎉 Ciclos Concluídos!",
                     message = "Parabéns! Todos os ${state.totalCycles} ciclos foram finalizados com êxito.",
                     customSoundUriString = notificationSettings.value.pomodoroSoundUri,
                     vibratePhone = vibEnabled
                 )
-            } else {
-                NotificationHelper.showInstantNotification(
-                    context = getApplication(),
-                    id = 101,
-                    channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "Ciclo ${state.currentCycle} de ${state.totalCycles} Concluído!",
-                    message = "Excelente dedicação de ${state.focusMinutes}m! Pausa opcional de ${state.breakMinutes}m pronta.",
-                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
-                    vibratePhone = vibEnabled
-                )
-
-                val breakSec = state.breakMinutes * 60
-                _pomodoroState.update {
-                    it.copy(
-                        isRunning = false,
-                        isPaused = false,
-                        currentPhase = PomodoroPhase.BREAK,
-                        currentCycle = nextCycle,
-                        remainingSeconds = breakSec,
-                        totalPhaseSeconds = breakSec
-                    )
-                }
-                persistTimerState()
             }
-        } else {
-            timerJob?.cancel()
-            timerJob = null
-            musicPlayer.stop()
-
-            val focusSec = state.focusMinutes * 60
-            _pomodoroState.update {
-                it.copy(
-                    isRunning = false,
-                    isPaused = false,
-                    currentPhase = PomodoroPhase.FOCUS,
-                    remainingSeconds = focusSec,
-                    totalPhaseSeconds = focusSec
-                )
-            }
-            persistTimerState()
-
-            NotificationHelper.showInstantNotification(
-                context = getApplication(),
-                id = 103,
-                channelId = NotificationHelper.CHANNEL_ALERTS,
-                title = "Pausa Concluída",
-                message = "Pronto para o Ciclo ${state.currentCycle} de ${state.totalCycles} de foco?",
-                customSoundUriString = notificationSettings.value.pomodoroSoundUri
-            )
         }
     }
 

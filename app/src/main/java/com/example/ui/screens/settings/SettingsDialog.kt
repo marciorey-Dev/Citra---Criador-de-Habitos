@@ -18,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -51,6 +52,7 @@ fun SettingsDialog(
     val appBgBrightness by viewModel.appBgBrightness.collectAsState()
     val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
     val disabledWelcomeCategories by viewModel.disabledWelcomeCategories.collectAsState()
+    val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
 
     // Finance Module States
     val financesEnabled by viewModel.financesEnabled.collectAsState()
@@ -870,7 +872,103 @@ fun SettingsDialog(
                         }
                     }
 
-                    // 6. TUTORIAL DO APLICATIVO
+                    // 6. NOTAS & ANOTAÇÕES (MODO PADRÃO DE ABERTURA)
+                    item {
+                        Text(
+                            text = "Notas & Anotações",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "Modo padrão ao abrir notas",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.5.sp
+                                )
+                                Text(
+                                    text = "Escolha como as anotações são abertas por padrão ao selecioná-las na lista ou calendário.",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val isReading = defaultNoteOpenMode == "READING"
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (!isReading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { viewModel.setDefaultNoteOpenMode("EDIT") }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = null,
+                                                tint = if (!isReading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Modo Edição",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = if (!isReading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isReading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { viewModel.setDefaultNoteOpenMode("READING") }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MenuBook,
+                                                contentDescription = null,
+                                                tint = if (isReading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Modo Leitura",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = if (isReading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 7. TUTORIAL DO APLICATIVO
                     item {
                         Text(
                             text = "Tutorial do Aplicativo",

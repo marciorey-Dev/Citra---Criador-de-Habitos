@@ -273,13 +273,6 @@ fun FinancesScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Definir saldo atual",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
-                            )
                         }
 
                         Row(

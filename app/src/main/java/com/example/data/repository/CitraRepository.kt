@@ -440,6 +440,7 @@ class CitraRepository(
         }
         // Seed default categories
         val defaultCategories = listOf(
+            Category(name = "Rascunhos", emoji = "📝", isCustom = false),
             Category(name = "Estudos", emoji = "📚", isCustom = false),
             Category(name = "Trabalho", emoji = "💼", isCustom = false),
             Category(name = "Leitura", emoji = "📖", isCustom = false),
@@ -455,9 +456,9 @@ class CitraRepository(
             Achievement("focus_25", "Arancia Clássico", "Complete uma sessão de foco de 25 minutos", "⏱️", "Foco"),
             Achievement("focus_30", "Foco Dedicado", "Complete uma sessão de foco de 30 minutos", "🎯", "Foco"),
             Achievement("focus_45", "Imersão Criativa", "Complete uma sessão de foco de 45 minutos", "🎨", "Foco"),
-            Achievement("focus_60", "Hora de Ouro", "Complete uma sessão ininterrupta de 60 minutos", "⭐", "Foco"),
+            Achievement("focus_60", "Citra Amarelo", "Ganhe o Citra Amarelo ao completar uma sessão de 60 minutos", "🍋", "Foco"),
             Achievement("focus_90", "Maratona Produtiva", "Supere 90 minutos de foco intenso", "🚀", "Foco"),
-            Achievement("focus_120", "Mestre do Hiperfoco", "Alcance a marca de 120 minutos de foco", "👑", "Foco"),
+            Achievement("focus_120", "Citra Dourado", "Ganhe o Citra Dourado ao completar uma sessão de 120 minutos", "🌟", "Foco"),
             Achievement("break_5", "Pausa Sagrada", "Realize uma pausa saudável de 5 minutos", "☕", "Foco"),
             Achievement("break_10", "Respiro Profundo", "Realize uma pausa relaxante de 10 minutos", "🧘", "Foco"),
             Achievement("break_15", "Descanso Revigorante", "Descanse por 15 minutos entre ciclos", "🌿", "Foco"),

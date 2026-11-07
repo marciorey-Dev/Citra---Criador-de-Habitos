@@ -75,7 +75,8 @@ fun VisualBlockItem(
     onMoveDown: (() -> Unit)? = null,
     onReplaceMedia: (() -> Unit)? = null,
     onUpdate: (VisualBlock) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    isReadOnly: Boolean = false
 ) {
     val context = LocalContext.current
     val textColor = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface
@@ -544,12 +545,14 @@ fun VisualBlockItem(
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = Color(0xFF1E293B),
-                            modifier = Modifier.clickable { showLangPicker = true }
+                            modifier = if (!isReadOnly) Modifier.clickable { showLangPicker = true } else Modifier
                         ) {
                             Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(block.language.uppercase(), color = Color(0xFF38BDF8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                                if (!isReadOnly) {
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                                }
                             }
                         }
 
@@ -580,39 +583,52 @@ fun VisualBlockItem(
                                     .size(19.dp)
                                     .clickable { onToggleFullscreen() }
                             )
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remover",
-                                tint = Color.LightGray,
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .clickable { onDelete() }
-                            )
+                            if (!isReadOnly) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remover",
+                                    tint = Color.LightGray,
+                                    modifier = Modifier
+                                        .size(15.dp)
+                                        .clickable { onDelete() }
+                                )
+                            }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    BasicTextField(
-                        value = block.code,
-                        onValueChange = { input ->
-                            if (input.isEmpty() && block.code.isEmpty()) {
-                                onBackspaceOnEmpty()
-                            } else {
-                                onUpdate(block.copy(code = input))
-                            }
-                        },
-                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                    if (isReadOnly) {
+                        Text(
+                            text = CodeHighlighter.highlight(block.code, block.language),
                             fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFF8FAFC)
-                        ),
-                        cursorBrush = SolidColor(Color(0xFF38BDF8)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-                    )
-
-
+                            fontSize = 13.sp,
+                            color = Color(0xFFF8FAFC),
+                            lineHeight = 18.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        )
+                    } else {
+                        BasicTextField(
+                            value = block.code,
+                            onValueChange = { input ->
+                                if (input.isEmpty() && block.code.isEmpty()) {
+                                    onBackspaceOnEmpty()
+                                } else {
+                                    onUpdate(block.copy(code = input))
+                                }
+                            },
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFF8FAFC)
+                            ),
+                            cursorBrush = SolidColor(Color(0xFF38BDF8)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                        )
+                    }
                 }
             }
         }
@@ -659,39 +675,20 @@ fun VisualBlockItem(
                                     .size(19.dp)
                                     .clickable { onToggleFullscreen() }
                             )
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remover",
-                                tint = Color.Gray,
-                                modifier = Modifier
-                                    .size(15.dp)
-                                    .clickable { onDelete() }
-                            )
+                            if (!isReadOnly) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remover",
+                                    tint = Color.Gray,
+                                    modifier = Modifier
+                                        .size(15.dp)
+                                        .clickable { onDelete() }
+                                )
+                            }
                         }
                     }
 
-                    OutlinedTextField(
-                        value = block.formula,
-                        onValueChange = { input ->
-                            if (input.isEmpty() && block.formula.isEmpty()) {
-                                onBackspaceOnEmpty()
-                            } else if (input.contains("\n")) {
-                                onUpdate(block.copy(formula = input.replace("\n", "")))
-                                onEnterPressed()
-                            } else {
-                                onUpdate(block.copy(formula = input))
-                            }
-                        },
-                        placeholder = { Text("Ex: E = mc^2 ou \\frac{a}{b} ou \\ce{H2O}") },
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Serif),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    if (block.formula.isNotBlank()) {
+                    if (isReadOnly) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -699,12 +696,50 @@ fun VisualBlockItem(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = LatexFormulaRenderer.formatAnnotatedBlock(block.formula, isDarkBg),
+                                text = LatexFormulaRenderer.formatAnnotatedBlock(block.formula.ifBlank { "E = mc^2" }, isDarkBg),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
                                 textAlign = TextAlign.Center
                             )
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = block.formula,
+                            onValueChange = { input ->
+                                if (input.isEmpty() && block.formula.isEmpty()) {
+                                    onBackspaceOnEmpty()
+                                } else if (input.contains("\n")) {
+                                    onUpdate(block.copy(formula = input.replace("\n", "")))
+                                    onEnterPressed()
+                                } else {
+                                    onUpdate(block.copy(formula = input))
+                                }
+                            },
+                            placeholder = { Text("Ex: E = mc^2 ou \\frac{a}{b} ou \\ce{H2O}") },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Serif),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        if (block.formula.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = LatexFormulaRenderer.formatAnnotatedBlock(block.formula, isDarkBg),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
                     }
                 }
