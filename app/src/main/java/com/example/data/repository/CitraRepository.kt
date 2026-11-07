@@ -443,6 +443,7 @@ class CitraRepository(
             Category(name = "Rascunhos", emoji = "📝", isCustom = false),
             Category(name = "Estudos", emoji = "📚", isCustom = false),
             Category(name = "Trabalho", emoji = "💼", isCustom = false),
+            Category(name = "Logística", emoji = "🚚", isCustom = false),
             Category(name = "Leitura", emoji = "📖", isCustom = false),
             Category(name = "Criatividade", emoji = "🎨", isCustom = false),
             Category(name = "Saúde", emoji = "🏃", isCustom = false),

@@ -229,6 +229,39 @@ object MediaStorageHelper {
         return saveNoteImage(context, sourceUri.toString())
     }
 
+    fun saveNoteImageBitmap(context: Context, bitmap: Bitmap): String? {
+        return try {
+            val dir = getCitraPicFolder(context)
+            val destFile = File(dir, "citra_pic_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg")
+            FileOutputStream(destFile).use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, output)
+            }
+            try {
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(destFile.absolutePath),
+                    arrayOf("image/jpeg"),
+                    null
+                )
+            } catch (_: Exception) {}
+            destFile.absolutePath
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save note image bitmap to Citra Pic", e)
+            null
+        }
+    }
+
+    fun loadBitmap(context: Context, source: String): Bitmap? {
+        return try {
+            openInputStream(context, source)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decode bitmap from $source", e)
+            null
+        }
+    }
+
     /**
      * Obtains the primary Citra Records directory (public Recordings/Music/Documents or app storage).
      */

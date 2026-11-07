@@ -7,6 +7,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -91,4 +92,15 @@ fun CitraTheme(
         typography = Typography,
         content = content
     )
+}
+
+/**
+ * Returns true if the currently active Citra theme is dark, based on the luminance
+ * of MaterialTheme.colorScheme.surface. This accurately reflects the user-chosen
+ * app theme, avoiding false positives from system OS dark mode settings.
+ */
+@Composable
+@androidx.compose.runtime.ReadOnlyComposable
+fun isAppDarkTheme(): Boolean {
+    return androidx.compose.material3.MaterialTheme.colorScheme.surface.luminance() < 0.5f
 }

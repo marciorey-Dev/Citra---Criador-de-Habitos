@@ -817,10 +817,10 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    // HorizontalPager: instant tab navigation on button clicks while preserving smooth user manual swiping
+                    // HorizontalPager: tab navigation via bottom bar with horizontal swipe disabled
                     HorizontalPager(
                         state = pagerState,
-                        userScrollEnabled = !isNoteEditorOpen,
+                        userScrollEnabled = false,
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (screens[page]) {

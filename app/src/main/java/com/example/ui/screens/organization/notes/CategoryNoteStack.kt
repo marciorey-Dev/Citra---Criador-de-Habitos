@@ -59,7 +59,7 @@ fun CategoryNoteStack(
     onDeleteNote: (Note) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
     val categoryIcon = categoryIconFor(categoryName)
     val displayPileNotes = remember(notes) { notes.take(5) }
     val pileCount = displayPileNotes.size

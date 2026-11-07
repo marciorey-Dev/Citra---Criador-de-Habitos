@@ -122,19 +122,22 @@ object FinanceNoteMarkdownEngine {
         return elapsedMillis >= minIntervalMillis
     }
 
+    fun stripFinanceMarkers(content: String): String {
+        return content.replace(Regex("<!--\\s*citra:fin:[^>]*-->\\s*\\n?"), "").trim()
+    }
+
     fun hasManagedBlock(content: String, blockId: String): Boolean {
         val startRegex = Regex("<!--\\s*citra:fin:inicio\\s+id=${Regex.escape(blockId)}[^>]*-->")
         val endRegex = Regex("<!--\\s*citra:fin:fim\\s+id=${Regex.escape(blockId)}\\s*-->")
-        return startRegex.containsMatchIn(content) && endRegex.containsMatchIn(content)
+        return (startRegex.containsMatchIn(content) && endRegex.containsMatchIn(content)) || content.isNotBlank()
     }
 
     fun buildStartMarker(link: FinanceNoteLink, periodKey: String? = null): String {
-        val periodAttr = if (periodKey != null) " periodo_key=$periodKey" else ""
-        return "<!-- citra:fin:inicio id=${link.blockId} tipo=${link.sourceType.lowercase()} periodo=${link.frequency.lowercase()}$periodAttr -->"
+        return ""
     }
 
     fun buildEndMarker(blockId: String): String {
-        return "<!-- citra:fin:fim id=$blockId -->"
+        return ""
     }
 
     fun replaceOrInsertManagedBlock(
@@ -144,24 +147,11 @@ object FinanceNoteMarkdownEngine {
         periodWindow: FinancePeriodWindow
     ): String {
         val mode = FinanceLinkWriteMode.fromId(link.writeMode)
-        val endMarker = buildEndMarker(link.blockId)
 
         if (mode == FinanceLinkWriteMode.APPEND_SECTION) {
-            val periodStartRegex = Regex(
-                "<!--\\s*citra:fin:inicio\\s+id=${Regex.escape(link.blockId)}[^>]*periodo_key=${Regex.escape(periodWindow.periodKey)}[^>]*-->"
-            )
-            val startMatch = periodStartRegex.find(originalContent)
-            if (startMatch != null) {
-                val endRegex = Regex("<!--\\s*citra:fin:fim\\s+id=${Regex.escape(link.blockId)}\\s*-->")
-                val endMatch = endRegex.find(originalContent, startMatch.range.last + 1)
-                if (endMatch != null) {
-                    val replacement = "${startMatch.value}\n$innerMarkdown\n$endMarker"
-                    return originalContent.replaceRange(startMatch.range.first..endMatch.range.last, replacement)
-                }
-            }
-            val startMarker = buildStartMarker(link, periodWindow.periodKey)
-            val section = "\n\n### ${periodWindow.label}\n$startMarker\n$innerMarkdown\n$endMarker"
-            return (originalContent.trimEnd() + section).trimStart()
+            val clean = stripFinanceMarkers(originalContent)
+            val section = "\n\n### ${periodWindow.label}\n$innerMarkdown"
+            return (clean + section).trimStart()
         }
 
         // REPLACE_BLOCK or NEW_NOTE_PER_PERIOD
@@ -171,12 +161,11 @@ object FinanceNoteMarkdownEngine {
         val endMatch = if (startMatch != null) endRegex.find(originalContent, startMatch.range.last + 1) else null
 
         return if (startMatch != null && endMatch != null) {
-            val replacement = "${startMatch.value}\n$innerMarkdown\n$endMarker"
-            originalContent.replaceRange(startMatch.range.first..endMatch.range.last, replacement)
+            val replaced = originalContent.replaceRange(startMatch.range.first..endMatch.range.last, innerMarkdown)
+            stripFinanceMarkers(replaced)
         } else {
-            val startMarker = buildStartMarker(link)
-            val block = "$startMarker\n$innerMarkdown\n$endMarker"
-            if (originalContent.isBlank()) block else "${originalContent.trimEnd()}\n\n$block"
+            val clean = stripFinanceMarkers(originalContent)
+            if (clean.isBlank()) innerMarkdown else "$clean\n\n$innerMarkdown"
         }
     }
 
@@ -432,13 +421,11 @@ object FinanceNoteMarkdownEngine {
         link: FinanceNoteLink,
         innerMarkdown: String
     ): String {
-        val startMarker = buildStartMarker(link)
-        val endMarker = buildEndMarker(link.blockId)
         val headerNote = when (template) {
             FinanceNoteTemplate.SHOPPING_LIST -> "\n\n## Notas de Compras\n- [ ] Rever preços antes de fechar a lista\n"
             FinanceNoteTemplate.MONTHLY_EXPENSES -> "\n\n## Resumo\nEscreva aqui as suas observações pessoais sobre o mês...\n"
             else -> ""
         }
-        return "# $noteTitle\n\n$startMarker\n$innerMarkdown\n$endMarker$headerNote"
+        return "# $noteTitle\n\n$innerMarkdown$headerNote"
     }
 }

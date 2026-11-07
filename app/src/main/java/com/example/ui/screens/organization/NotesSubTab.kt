@@ -943,17 +943,7 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = {
-                                val draftCat = viewModel.ensureCategoryForDraft()
-                                activeNoteToEdit = Note(
-                                    id = 0L,
-                                    title = "",
-                                    content = "",
-                                    category = draftCat,
-                                    iconEmoji = "📝"
-                                )
-                                isCreatingNew = true
-                            }
+                            onClick = { showTemplatesMenu = true }
                         )
                     }
                 }
@@ -1021,17 +1011,7 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = {
-                                val draftCat = viewModel.ensureCategoryForDraft()
-                                activeNoteToEdit = Note(
-                                    id = 0L,
-                                    title = "",
-                                    content = "",
-                                    category = draftCat,
-                                    iconEmoji = "📝"
-                                )
-                                isCreatingNew = true
-                            }
+                            onClick = { showTemplatesMenu = true }
                         )
                     }
                 }
@@ -1095,17 +1075,7 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = {
-                                val draftCat = viewModel.ensureCategoryForDraft()
-                                activeNoteToEdit = Note(
-                                    id = 0L,
-                                    title = "",
-                                    content = "",
-                                    category = draftCat,
-                                    iconEmoji = "📝"
-                                )
-                                isCreatingNew = true
-                            }
+                            onClick = { showTemplatesMenu = true }
                         )
                     }
                 }
@@ -1169,17 +1139,7 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = {
-                                val draftCat = viewModel.ensureCategoryForDraft()
-                                activeNoteToEdit = Note(
-                                    id = 0L,
-                                    title = "",
-                                    content = "",
-                                    category = draftCat,
-                                    iconEmoji = "📝"
-                                )
-                                isCreatingNew = true
-                            }
+                            onClick = { showTemplatesMenu = true }
                         )
                     }
                 }
@@ -1234,17 +1194,7 @@ fun NotesSubTab(
                     }
                     item {
                         QuickDraftTile(
-                            onClick = {
-                                val draftCat = viewModel.ensureCategoryForDraft()
-                                activeNoteToEdit = Note(
-                                    id = 0L,
-                                    title = "",
-                                    content = "",
-                                    category = draftCat,
-                                    iconEmoji = "📝"
-                                )
-                                isCreatingNew = true
-                            }
+                            onClick = { showTemplatesMenu = true }
                         )
                     }
                 }
@@ -1503,7 +1453,7 @@ fun SquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
     val paperColors = remember(note.noteColor, isDark, note.isPinned) {
         PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }
@@ -1729,7 +1679,7 @@ fun SmallSquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
     val paperColors = remember(note.noteColor, isDark, note.isPinned) {
         PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }
@@ -1815,7 +1765,7 @@ fun DetailNoteCard(
     onDelete: () -> Unit
 ) {
     val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 180)
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
     val paperColors = remember(note.noteColor, isDark, note.isPinned) {
         PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }
@@ -1930,7 +1880,7 @@ fun ListNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
     val paperColors = remember(note.noteColor, isDark, note.isPinned) {
         PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }

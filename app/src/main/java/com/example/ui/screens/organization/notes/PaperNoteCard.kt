@@ -55,109 +55,109 @@ object PaperNotePalette {
             key = "DEFAULT",
             displayName = "Padrão",
             primaryColor = OrangePrimary,
-            lightBg = Color(0xFFFCFBF8),
-            lightFlap = Color(0xFFE8E2D8),
-            darkBg = Color(0xFF201D1A),
-            darkFlap = Color(0xFF332F2A)
+            lightBg = Color(0xFFFBF7F0),
+            lightFlap = Color(0xFFE8DFCE),
+            darkBg = Color(0xFF383E4C),
+            darkFlap = Color(0xFF4F586B)
         ),
         NoteColorOption(
             key = "TANGERINA",
             displayName = "Laranja Cítrico",
             primaryColor = Color(0xFFFF6F00),
-            lightBg = Color(0xFFFFF7ED),
-            lightFlap = Color(0xFFFFE0B2),
-            darkBg = Color(0xFF2C1C12),
-            darkFlap = Color(0xFF482D1D)
+            lightBg = Color(0xFFFFF6EB),
+            lightFlap = Color(0xFFFFDFC0),
+            darkBg = Color(0xFF4C3322),
+            darkFlap = Color(0xFF6B4831)
         ),
         NoteColorOption(
             key = "AZUL_OCEANO",
             displayName = "Azul Oceano",
             primaryColor = Color(0xFF1E88E5),
-            lightBg = Color(0xFFF0F7FF),
-            lightFlap = Color(0xFFBBDEFB),
-            darkBg = Color(0xFF132233),
-            darkFlap = Color(0xFF1F3752)
+            lightBg = Color(0xFFEEF5FF),
+            lightFlap = Color(0xFFD3E5FD),
+            darkBg = Color(0xFF2C4360),
+            darkFlap = Color(0xFF3E5F88)
         ),
         NoteColorOption(
             key = "VERDE_ESMERALDA",
             displayName = "Verde Esmeralda",
             primaryColor = Color(0xFF2E7D32),
-            lightBg = Color(0xFFF1FDF3),
-            lightFlap = Color(0xFFC8E6C9),
-            darkBg = Color(0xFF142718),
-            darkFlap = Color(0xFF223E28)
+            lightBg = Color(0xFFEFF8F0),
+            lightFlap = Color(0xFFD4EED7),
+            darkBg = Color(0xFF2A4D33),
+            darkFlap = Color(0xFF3C6D48)
         ),
         NoteColorOption(
             key = "ROXO_COSMICO",
             displayName = "Roxo Cósmico",
             primaryColor = Color(0xFF7E57C2),
-            lightBg = Color(0xFFFBF7FF),
-            lightFlap = Color(0xFFE1BEE7),
-            darkBg = Color(0xFF251833),
-            darkFlap = Color(0xFF3B2750)
+            lightBg = Color(0xFFF6F0FD),
+            lightFlap = Color(0xFFE5D5F9),
+            darkBg = Color(0xFF45335E),
+            darkFlap = Color(0xFF634986)
         ),
         NoteColorOption(
             key = "ROSA_CORAL",
             displayName = "Rosa Coral",
             primaryColor = Color(0xFFE91E63),
-            lightBg = Color(0xFFFFF1F4),
-            lightFlap = Color(0xFFF8BBD0),
-            darkBg = Color(0xFF301621),
-            darkFlap = Color(0xFF4C2435)
+            lightBg = Color(0xFFFFF0F4),
+            lightFlap = Color(0xFFFFD4E1),
+            darkBg = Color(0xFF552D40),
+            darkFlap = Color(0xFF79405C)
         ),
         NoteColorOption(
             key = "AMBAR_DOURADO",
             displayName = "Âmbar Dourado",
             primaryColor = Color(0xFFD97706),
-            lightBg = Color(0xFFFFFBEB),
-            lightFlap = Color(0xFFFFECB3),
-            darkBg = Color(0xFF2B2110),
-            darkFlap = Color(0xFF433418)
+            lightBg = Color(0xFFFFF8E6),
+            lightFlap = Color(0xFFFFE8B0),
+            darkBg = Color(0xFF4F3E22),
+            darkFlap = Color(0xFF715931)
         ),
         NoteColorOption(
             key = "VERDE_MENTA",
             displayName = "Verde Menta",
             primaryColor = Color(0xFF00897B),
-            lightBg = Color(0xFFF0FDF9),
-            lightFlap = Color(0xFFB2DFDB),
-            darkBg = Color(0xFF102623),
-            darkFlap = Color(0xFF1C3F3A)
+            lightBg = Color(0xFFEDFAF6),
+            lightFlap = Color(0xFFC7F1E7),
+            darkBg = Color(0xFF2A4E47),
+            darkFlap = Color(0xFF3D6E64)
         ),
         NoteColorOption(
             key = "CARAMELO_AVELA",
             displayName = "Kraft Avelã",
             primaryColor = Color(0xFF8D6E63),
-            lightBg = Color(0xFFFBF8F5),
-            lightFlap = Color(0xFFD7CCC8),
-            darkBg = Color(0xFF251F1C),
-            darkFlap = Color(0xFF3A312D)
+            lightBg = Color(0xFFF5EDE5),
+            lightFlap = Color(0xFFE2D3C6),
+            darkBg = Color(0xFF4A3E37),
+            darkFlap = Color(0xFF6A594F)
         ),
         NoteColorOption(
             key = "AZUL_CELESTE",
             displayName = "Azul Celeste",
             primaryColor = Color(0xFF0288D1),
-            lightBg = Color(0xFFF0F9FF),
-            lightFlap = Color(0xFFB3E5FC),
-            darkBg = Color(0xFF112330),
-            darkFlap = Color(0xFF1B374C)
+            lightBg = Color(0xFFEEF8FE),
+            lightFlap = Color(0xFFCDECFB),
+            darkBg = Color(0xFF29465D),
+            darkFlap = Color(0xFF3B6485)
         ),
         NoteColorOption(
             key = "VERDE_LIMA",
             displayName = "Verde Lima",
             primaryColor = Color(0xFF689F38),
-            lightBg = Color(0xFFF7FEE7),
-            lightFlap = Color(0xFFDCEDC8),
-            darkBg = Color(0xFF1D2610),
-            darkFlap = Color(0xFF2D3C19)
+            lightBg = Color(0xFFF5FBE6),
+            lightFlap = Color(0xFFE0F4B8),
+            darkBg = Color(0xFF3D4D29),
+            darkFlap = Color(0xFF576E3A)
         ),
         NoteColorOption(
             key = "FRAMBOESA_DOCE",
             displayName = "Framboesa Doce",
             primaryColor = Color(0xFFAD1457),
-            lightBg = Color(0xFFFDF2F8),
-            lightFlap = Color(0xFFF48FB1),
-            darkBg = Color(0xFF2B1321),
-            darkFlap = Color(0xFF441F35)
+            lightBg = Color(0xFFFEECF4),
+            lightFlap = Color(0xFFFAC9DF),
+            darkBg = Color(0xFF542C43),
+            darkFlap = Color(0xFF783E60)
         )
     )
 
@@ -174,12 +174,12 @@ object PaperNotePalette {
         val flap = if (isDark) opt.darkFlap else opt.lightFlap
         val crease = opt.primaryColor.copy(alpha = if (isDark) 0.45f else 0.35f)
         val border = if (isPinned) {
-            opt.primaryColor.copy(alpha = 0.6f)
+            opt.primaryColor.copy(alpha = 0.65f)
         } else {
-            if (isDark) opt.primaryColor.copy(alpha = 0.22f) else opt.primaryColor.copy(alpha = 0.28f)
+            if (isDark) opt.primaryColor.copy(alpha = 0.25f) else Color(0x18000000).compositeOver(opt.primaryColor.copy(alpha = 0.22f))
         }
         val onBg = if (isDark) DarkTextPrimary else Slate900
-        val badgeBg = opt.primaryColor.copy(alpha = if (isDark) 0.22f else 0.15f)
+        val badgeBg = opt.primaryColor.copy(alpha = if (isDark) 0.25f else 0.15f)
         val badgeFg = if (isDark) opt.primaryColor.copy(alpha = 0.95f) else opt.primaryColor
 
         return PaperNoteColors(
@@ -192,6 +192,12 @@ object PaperNotePalette {
             badgeBg = badgeBg,
             badgeFg = badgeFg
         )
+    }
+
+    @Composable
+    @ReadOnlyComposable
+    fun resolvePaperColors(noteColor: String?, isPinned: Boolean): PaperNoteColors {
+        return resolvePaperColors(noteColor, isAppDarkTheme(), isPinned)
     }
 }
 
@@ -329,7 +335,7 @@ fun NoteColorPickerDialog(
     onDismiss: () -> Unit,
     onSelectColor: (String?) -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppDarkTheme()
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -383,13 +389,17 @@ fun NoteColorPickerDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // Color Swatches Grid (3 columns)
-                val chunkedOptions = remember { PaperNotePalette.options.chunked(3) }
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Color Swatches Grid (Pure colored circles, no text names)
+                val chunkedOptions = remember { PaperNotePalette.options.chunked(4) }
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.padding(vertical = 4.dp)
+                ) {
                     chunkedOptions.forEach { rowOptions ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             rowOptions.forEach { opt ->
                                 val isSelected = if (opt.key == "DEFAULT") {
@@ -399,54 +409,37 @@ fun NoteColorPickerDialog(
                                 }
                                 val optBg = if (isDark) opt.darkBg else opt.lightBg
 
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = optBg,
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) opt.primaryColor else opt.primaryColor.copy(alpha = 0.3f)
-                                    ),
+                                Box(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .height(72.dp)
+                                        .size(52.dp)
+                                        .clip(CircleShape)
+                                        .background(optBg)
+                                        .border(
+                                            width = if (isSelected) 2.5.dp else 1.dp,
+                                            color = if (isSelected) opt.primaryColor else opt.primaryColor.copy(alpha = 0.35f),
+                                            shape = CircleShape
+                                        )
                                         .clickable {
                                             onSelectColor(if (opt.key == "DEFAULT") null else opt.key)
                                             onDismiss()
-                                        }
+                                        },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Column(
+                                    Box(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(6.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
+                                            .size(34.dp)
+                                            .background(opt.primaryColor, CircleShape)
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.9f), CircleShape),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .background(opt.primaryColor, CircleShape)
-                                                .border(1.5.dp, Color.White, CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isSelected) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = opt.displayName,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isDark) DarkTextPrimary else Slate900,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            textAlign = TextAlign.Center
-                                        )
                                     }
                                 }
                             }

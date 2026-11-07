@@ -166,31 +166,44 @@ object CitraDocsFileManager {
     }
 
     /**
-     * Deletes a .md file from Documents/Citra Docs/
+     * Returns all existing Citra Docs directories across public, external, and internal app storage.
+     */
+    fun getAllDocsFolders(context: Context): List<File> {
+        val list = mutableListOf<File>()
+        try {
+            val pub = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), FOLDER_NAME)
+            list.add(pub)
+        } catch (_: Exception) {}
+        try {
+            context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)?.let { ext ->
+                list.add(File(ext, FOLDER_NAME))
+            }
+        } catch (_: Exception) {}
+        try {
+            list.add(File(context.filesDir, FOLDER_NAME))
+        } catch (_: Exception) {}
+        return list.distinctBy { it.absolutePath }
+    }
+
+    /**
+     * Deletes a .md file from Documents/Citra Docs/ across all storage targets and MediaStore.
      */
     fun deleteNoteMarkdown(context: Context, title: String, uuid: String? = null): Boolean {
-        return try {
-            val folder = getDocsFolder(context)
-            var deletedAny = false
-            val fileByName = File(folder, "${sanitizeFilename(title)}.md")
-            if (fileByName.exists()) {
-                val ok = fileByName.delete()
-                if (ok) {
-                    deletedAny = true
-                    try {
-                        MediaScannerConnection.scanFile(
-                            context,
-                            arrayOf(fileByName.absolutePath),
-                            null,
-                            null
-                        )
-                    } catch (_: Exception) {}
-                }
-            }
+        var deletedAny = false
+        val targetFilenames = setOf(
+            "${sanitizeFilename(title)}.md".lowercase(),
+            "$title.md".lowercase(),
+            "${title.trim()}.md".lowercase()
+        )
 
-            if (uuid != null && uuid.isNotBlank()) {
-                val allFiles = folder.listFiles { f -> f.isFile && f.name.endsWith(".md", ignoreCase = true) }
-                allFiles?.forEach { f ->
+        // 1. Direct File Deletion across all candidate directories
+        val folders = getAllDocsFolders(context)
+        for (folder in folders) {
+            if (!folder.exists()) continue
+            val allFiles = folder.listFiles { f -> f.isFile && f.name.endsWith(".md", ignoreCase = true) } ?: continue
+            for (f in allFiles) {
+                var shouldDelete = targetFilenames.contains(f.name.lowercase())
+                if (!shouldDelete && uuid != null && uuid.isNotBlank()) {
                     try {
                         val header = f.bufferedReader().use { reader ->
                             val sb = StringBuilder()
@@ -204,27 +217,79 @@ object CitraDocsFileManager {
                             sb.toString()
                         }
                         if (header.contains(uuid)) {
-                            val ok = f.delete()
-                            if (ok) {
-                                deletedAny = true
-                                try {
-                                    MediaScannerConnection.scanFile(
-                                        context,
-                                        arrayOf(f.absolutePath),
-                                        null,
-                                        null
-                                    )
-                                } catch (_: Exception) {}
-                            }
+                            shouldDelete = true
                         }
                     } catch (_: Exception) {}
                 }
+
+                if (shouldDelete) {
+                    val filePath = f.absolutePath
+                    val ok = f.delete()
+                    if (ok || !f.exists()) {
+                        deletedAny = true
+                        try {
+                            MediaScannerConnection.scanFile(
+                                context,
+                                arrayOf(filePath),
+                                null,
+                                null
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
             }
-            deletedAny
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to delete markdown file for: $title", e)
-            false
         }
+
+        // 2. Android MediaStore ContentResolver Deletion (Scoped Storage on API 29+)
+        try {
+            val externalUri = android.provider.MediaStore.Files.getContentUri("external")
+            val selection = "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${android.provider.MediaStore.MediaColumns.DATA} LIKE ?"
+            val args = arrayOf("%.md", "%Citra Docs%")
+            val projection = arrayOf(
+                android.provider.MediaStore.MediaColumns._ID,
+                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
+                android.provider.MediaStore.MediaColumns.DATA
+            )
+            context.contentResolver.query(externalUri, projection, selection, args, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
+                val dataCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
+                while (cursor.moveToNext()) {
+                    val id = if (idCol >= 0) cursor.getLong(idCol) else -1L
+                    val name = if (nameCol >= 0) cursor.getString(nameCol) else null
+                    val data = if (dataCol >= 0) cursor.getString(dataCol) else null
+
+                    var match = false
+                    if (name != null && targetFilenames.contains(name.lowercase())) {
+                        match = true
+                    }
+                    if (!match && data != null && uuid != null && uuid.isNotBlank()) {
+                        try {
+                            val f = File(data)
+                            if (f.exists() && f.canRead()) {
+                                val firstLine = f.bufferedReader().use { it.readLine() ?: "" }
+                                if (firstLine.contains(uuid)) match = true
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    if (match && id != -1L) {
+                        try {
+                            val deleteUri = android.content.ContentUris.withAppendedId(externalUri, id)
+                            context.contentResolver.delete(deleteUri, null, null)
+                            deletedAny = true
+                            if (data != null) {
+                                File(data).delete()
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore deletion error (non-fatal)", e)
+        }
+
+        return deletedAny
     }
 
     /**

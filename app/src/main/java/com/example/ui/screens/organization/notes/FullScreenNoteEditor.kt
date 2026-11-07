@@ -19,7 +19,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import com.example.ui.theme.isAppDarkTheme
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -177,17 +179,22 @@ fun FullScreenNoteEditor(
 
     // Unified continuous Markdown document (Obsidian style)
     var editorValue by remember {
-        mutableStateOf(TextFieldValue(initialNote?.content ?: ""))
+        val initialContent = (initialNote?.content ?: "")
+            .replace(Regex("<!--\\s*citra:fin:[^>]*-->\\s*\\n?"), "")
+        mutableStateOf(TextFieldValue(initialContent))
     }
     var editorMode by remember {
         mutableStateOf(initialMode)
     }
 
-
     val bodyFocusRequester = remember { FocusRequester() }
-    val isDarkBg = bgUri != null
-    val textColor = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface
-    val primaryColor = MaterialTheme.colorScheme.primary
+    val isDark = isAppDarkTheme()
+    val paperColors = remember(noteColor, isDark, isPinned) {
+        PaperNotePalette.resolvePaperColors(noteColor, isDark, isPinned)
+    }
+    val isDarkBg = bgUri != null || isDark
+    val textColor = if (bgUri != null) Color.White else paperColors.onBackgroundColor
+    val primaryColor = paperColors.accentColor
 
     // Auto-scroll on typing removed: screen remains stationary while user types.
 
@@ -391,6 +398,7 @@ fun FullScreenNoteEditor(
         }
         val finalTitle = title.trim().ifBlank { "Sem título" }
         val finalContent = editorValue.text
+            .replace(Regex("<!--\\s*citra:fin:[^>]*-->\\s*\\n?"), "")
 
         // Sync directly to physical .md file in Documents/Citra Docs/ with UUID and old title cleanup
         CitraDocsFileManager.saveNoteMarkdown(
@@ -778,9 +786,16 @@ fun FullScreenNoteEditor(
     }
 
     Scaffold(
+        containerColor = if (bgUri != null) Color.Black else paperColors.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = if (bgUri != null) Color.Transparent else paperColors.background,
+                    titleContentColor = textColor,
+                    navigationIconContentColor = textColor,
+                    actionIconContentColor = textColor
+                ),
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1071,10 +1086,7 @@ fun FullScreenNoteEditor(
                             }
                         }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (processedBackgroundBitmap == null) MaterialTheme.colorScheme.surface else Color.Transparent
-                )
+                }
             )
         }
     ) { paddingValues ->
@@ -2192,32 +2204,6 @@ fun FullScreenNoteEditor(
                                             pushHistory()
                                             editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "==", "==")
                                         }
-                                        ToolbarToolButton(label = "Bloco Código", icon = Icons.Default.Code) {
-                                            if (editorMode == NoteEditorMode.READING) {
-                                                appendToEndOfNote("```kotlin\n// código\n```")
-                                            } else {
-                                                pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
-                                                    editorValue,
-                                                    "```kotlin\n",
-                                                    "\n```",
-                                                    "```kotlin\n// código\n```"
-                                                )
-                                            }
-                                        }
-                                        ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
-                                            if (editorMode == NoteEditorMode.READING) {
-                                                appendToEndOfNote("$$\nE = mc^2\n$$")
-                                            } else {
-                                                pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
-                                                    editorValue,
-                                                    "$$\n",
-                                                    "\n$$",
-                                                    "$$ E = mc^2 $$"
-                                                )
-                                            }
-                                        }
 
                                         VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -2379,36 +2365,27 @@ fun FullScreenNoteEditor(
         }
     }
 
-    // Full screen image preview dialog
+    // Full screen image preview, rotate & crop dialog
     if (fullscreenImageUrl != null) {
-        Dialog(
-            onDismissRequest = { fullscreenImageUrl = null },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                AsyncImage(
-                    model = fullscreenImageUrl,
-                    contentDescription = "Visualização da Imagem",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable { fullscreenImageUrl = null },
-                    contentScale = ContentScale.Fit
-                )
-                IconButton(
-                    onClick = { fullscreenImageUrl = null },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.White)
+        val currentImg = fullscreenImageUrl!!
+        ImageFullScreenCropRotateDialog(
+            imageUrl = currentImg,
+            onDismiss = { fullscreenImageUrl = null },
+            onSaveImage = { newSavedPath ->
+                pushHistory()
+                val oldText = editorValue.text
+                val updatedText = if (oldText.contains(currentImg)) {
+                    oldText.replace(currentImg, newSavedPath)
+                } else {
+                    oldText
+                }
+                editorValue = editorValue.copy(text = updatedText)
+                fullscreenImageUrl = null
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Imagem cortada/rotacionada e guardada com sucesso!")
                 }
             }
-        }
+        )
     }
 
     // Modal para criar tabela no estilo Excel (escolher linhas e colunas)

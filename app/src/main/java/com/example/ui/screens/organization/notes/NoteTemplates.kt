@@ -806,25 +806,19 @@ Energia: /10 · Sono: h · Água: copos
 - [ ] 
 
 ## Rendas
-<!-- citra:fin:inicio id=fin_novo1 tipo=rendas periodo=mensal -->
-(o Citra preenche aqui)
-<!-- citra:fin:fim id=fin_novo1 -->
+- [ ] 
 
 ## Despesas Obrigatórias
-<!-- citra:fin:inicio id=fin_novo2 tipo=despesas prioridade=obrigatoria periodo=mensal -->
-(o Citra preenche aqui)
-<!-- citra:fin:fim id=fin_novo2 -->
+- [ ] 
 
 ## Despesas Opcionais
-<!-- citra:fin:inicio id=fin_novo3 tipo=despesas prioridade=opcional periodo=mensal -->
-(o Citra preenche aqui)
-<!-- citra:fin:fim id=fin_novo3 -->
+- [ ] 
 
 ## Lista de compras do mês
 - [ ] 
 
-## Resumo (escreva à vontade)
-Texto livre. O Citra não altera nada fora dos blocos.
+## Resumo
+Anotações livres e observações financeiras do mês.
             """.trimIndent()
         ),
 
@@ -978,6 +972,81 @@ Texto livre. O Citra não altera nada fora dos blocos.
 ## Fonte
 - 
             """.trimIndent()
+        ),
+
+        // 🚚 Logística
+        NoteTemplate(
+            id = "logistica_rota",
+            title = "Planeamento Logístico & Rota",
+            category = "Logística",
+            categoryEmoji = "🚚",
+            summary = "Controlo de itinerários, pontos de paragem, prazos de entrega e contactos.",
+            defaultNoteTitle = "Logística {{data}}",
+            rawMarkdown = """
+# 🚚 Logística & Roteiro
+📅 {{data}} · #logistica
+
+## 📍 Rota & Destinos
+| Ponto | Destino | Horário Previsto | Status |
+|---|---|---|---|
+| 01 |  |  | ⏳ Pendente |
+| 02 |  |  | ⏳ Pendente |
+
+## 📦 Lista de Carga / Entregas
+- [ ] Item 1 - Destinatário: 
+- [ ] Item 2 - Destinatário: 
+
+## 📞 Contactos Importantes
+- Responsável: 
+- Suporte / Operações: 
+
+## 📝 Observações de Campo
+- Condições de transporte e ocorrências.
+            """.trimIndent()
+        ),
+        NoteTemplate(
+            id = "logistica_estoque",
+            title = "Inventário & Suprimentos",
+            category = "Logística",
+            categoryEmoji = "📦",
+            summary = "Contagem física, entradas, saídas, itens em falta e reposições urgentes.",
+            defaultNoteTitle = "Inventário {{data}}",
+            rawMarkdown = """
+# 📦 Inventário & Controlo de Stock
+📅 {{data}} · #logistica #estoque
+
+## 📋 Tabela de Suprimentos
+| Código | Produto / Item | Qtd Atual | Mínimo | Repor? |
+|---|---|---|---|---|
+| 001 |  | 0 | 5 | ⚠️ Sim |
+
+## 🚨 Reposições Prioritárias
+- [ ] Solicitar cotação para: 
+
+## 🔍 Registo de Entradas & Saídas
+- Entrada: 
+- Saída: 
+            """.trimIndent()
+        ),
+
+        // 📝 Rascunhos
+        NoteTemplate(
+            id = "rascunho_rapido",
+            title = "Rascunho Rápido",
+            category = "Rascunhos",
+            categoryEmoji = "📝",
+            summary = "Anotação livre para registar pensamentos imediatos, listas de ideias e pontos soltos.",
+            defaultNoteTitle = "Rascunho {{data}}",
+            rawMarkdown = """
+# 📝 Rascunho
+📅 {{data}} · ⏰ {{hora}} · #rascunho
+
+## Ideias & Pensamentos
+- 
+
+## Ações Rápidas
+- [ ] 
+            """.trimIndent()
         )
     )
 
@@ -995,11 +1064,18 @@ Texto livre. O Citra não altera nada fora dos blocos.
             .replace("{{hora}}", timeStr)
             .replace("{{titulo}}", resolvedTitle)
 
+        val mappedCategory = when (template.category) {
+            "Estudo" -> "Estudos"
+            "Trabalhos" -> "Trabalho"
+            else -> template.category
+        }
+
         return Note(
             id = 0L,
             title = resolvedTitle,
             content = resolvedContent,
-            category = template.category
+            category = mappedCategory,
+            iconEmoji = template.categoryEmoji
         )
     }
 }

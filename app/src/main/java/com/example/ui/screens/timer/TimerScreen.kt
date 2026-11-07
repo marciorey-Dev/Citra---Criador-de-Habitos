@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -1228,13 +1230,37 @@ fun FluidMinutesScrollPicker(
         }
     }
     val listState = rememberLazyListState()
+    val flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(lazyListState = listState)
 
-    // Smoothly center the selected minute
+    // Dynamically track and select whichever item is closest to the center while dragging/sliding
+    LaunchedEffect(listState, minuteList) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val center = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+            layoutInfo.visibleItemsInfo.minByOrNull { item ->
+                val itemCenter = item.offset + item.size / 2
+                kotlin.math.abs(itemCenter - center)
+            }?.index
+        }
+        .filterNotNull()
+        .distinctUntilChanged()
+        .collect { centerIndex: Int ->
+            if (listState.isScrollInProgress) {
+                val mins = minuteList.getOrNull(centerIndex)
+                if (mins != null && mins != selectedMinutes) {
+                    onMinuteSelected(mins)
+                }
+            }
+        }
+    }
+
+    // Smoothly scroll to center the selected minute when not actively dragging
     LaunchedEffect(selectedMinutes) {
-        val targetIdx = minuteList.indexOf(selectedMinutes)
-        if (targetIdx >= 0) {
-            val scrollIndex = (targetIdx - 2).coerceAtLeast(0)
-            listState.animateScrollToItem(scrollIndex)
+        if (!listState.isScrollInProgress) {
+            val targetIdx = minuteList.indexOf(selectedMinutes)
+            if (targetIdx >= 0) {
+                listState.animateScrollToItem(targetIdx)
+            }
         }
     }
 
@@ -1251,63 +1277,72 @@ fun FluidMinutesScrollPicker(
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
         )
         Spacer(modifier = Modifier.height(6.dp))
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(horizontal = 48.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-        ) {
-            items(minuteList, key = { it }) { mins ->
-                val isSelected = mins == selectedMinutes
-                val distance = kotlin.math.abs(mins - selectedMinutes)
-                val targetAlpha = when {
-                    isSelected -> 1f
-                    distance <= 5 -> 0.45f
-                    distance <= 10 -> 0.30f
-                    distance <= 20 -> 0.18f
-                    else -> 0.10f
-                }
-                val alpha by animateFloatAsState(targetValue = targetAlpha, label = "alpha_$mins")
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.15f else 0.92f,
-                    label = "scale_$mins"
-                )
 
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSelected) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                    },
-                    modifier = Modifier
-                        .scale(scale)
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(
-                            width = if (isSelected) 1.5.dp else 0.dp,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                            shape = RoundedCornerShape(16.dp)
-                        )
-                        .clickable { onMinuteSelected(mins) }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "${mins}m",
-                            fontSize = if (isSelected) 15.sp else 13.sp,
-                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (isSelected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val horizontalPadding = (maxWidth / 2) - 34.dp
+
+            LazyRow(
+                state = listState,
+                flingBehavior = flingBehavior,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                contentPadding = PaddingValues(horizontal = horizontalPadding),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                items(minuteList, key = { it }) { mins ->
+                    val isSelected = mins == selectedMinutes
+                    val distance = kotlin.math.abs(mins - selectedMinutes)
+                    val targetAlpha = when {
+                        isSelected -> 1f
+                        distance <= 5 -> 0.65f
+                        distance <= 10 -> 0.40f
+                        distance <= 20 -> 0.25f
+                        else -> 0.15f
+                    }
+                    val alpha by animateFloatAsState(targetValue = targetAlpha, label = "alpha_$mins")
+                    val scale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.18f else 0.90f,
+                        label = "scale_$mins"
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        },
+                        shadowElevation = if (isSelected) 4.dp else 0.dp,
+                        modifier = Modifier
+                            .scale(scale)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                width = if (isSelected) 2.dp else 0.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .clickable {
+                                onMinuteSelected(mins)
                             }
-                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "${mins}m",
+                                fontSize = if (isSelected) 16.sp else 13.sp,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
+                                }
+                            )
+                        }
                     }
                 }
             }
