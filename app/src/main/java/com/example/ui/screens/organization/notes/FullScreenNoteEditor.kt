@@ -21,7 +21,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import com.example.ui.theme.isAppDarkTheme
+import com.example.ui.theme.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Toc
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
@@ -98,6 +99,7 @@ import com.example.util.MediaStorageHelper
 import com.example.util.InlineMarkdownHelper
 import com.example.util.NoteAudioPlaybackManager
 import com.example.util.NoteExportHelper
+import com.example.util.NotePaginationType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -193,8 +195,8 @@ fun FullScreenNoteEditor(
         PaperNotePalette.resolvePaperColors(noteColor, isDark, isPinned)
     }
     val isDarkBg = bgUri != null || isDark
-    val textColor = if (bgUri != null) Color.White else paperColors.onBackgroundColor
-    val primaryColor = paperColors.accentColor
+    val textColor = if (bgUri != null) Color.White else if (isDark) DarkTextPrimary else Slate900
+    val primaryColor = MaterialTheme.colorScheme.primary
 
     // Auto-scroll on typing removed: screen remains stationary while user types.
 
@@ -735,6 +737,16 @@ fun FullScreenNoteEditor(
     var showCreateTableDialog by remember { mutableStateOf(false) }
     var showAudioExportWarningDialog by remember { mutableStateOf(false) }
     var showVersionHistoryDialog by remember { mutableStateOf(false) }
+    var showPaginationMenu by remember { mutableStateOf(false) }
+    var notePaginationType by remember(initialNote?.id) {
+        mutableStateOf(
+            when {
+                initialNote?.content?.contains("<!-- citra:pagination:roman -->") == true -> NotePaginationType.ROMAN
+                initialNote?.content?.contains("<!-- citra:pagination:arabic -->") == true -> NotePaginationType.ARABIC
+                else -> NotePaginationType.NONE
+            }
+        )
+    }
 
     // Parse active media tokens for interactive widgets in Live Preview
     val parsedMediaTokens = remember(editorValue.text) {
@@ -786,12 +798,12 @@ fun FullScreenNoteEditor(
     }
 
     Scaffold(
-        containerColor = if (bgUri != null) Color.Black else paperColors.background,
+        containerColor = if (bgUri != null) Color.Black else MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = if (bgUri != null) Color.Transparent else paperColors.background,
+                    containerColor = if (bgUri != null) Color.Transparent else MaterialTheme.colorScheme.background,
                     titleContentColor = textColor,
                     navigationIconContentColor = textColor,
                     actionIconContentColor = textColor
@@ -887,7 +899,7 @@ fun FullScreenNoteEditor(
                             Icon(
                                 imageVector = Icons.Default.Palette,
                                 contentDescription = "Cor da Nota",
-                                tint = if (noteColor != null) activeColorOpt.primaryColor else textColor
+                                tint = textColor
                             )
                             if (noteColor != null) {
                                 Box(
@@ -969,7 +981,7 @@ fun FullScreenNoteEditor(
                                 onClick = {
                                     showMenu = false
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                                    val uri = NoteExportHelper.exportToDocx(context, title, category, blocks, primaryColor.toArgb())
+                                    val uri = NoteExportHelper.exportToDocx(context, title, category, blocks, primaryColor.toArgb(), notePaginationType)
                                     NoteExportHelper.shareUri(context, uri, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Exportar Nota em Word (.docx)")
                                 }
                             )
@@ -980,7 +992,7 @@ fun FullScreenNoteEditor(
                                 onClick = {
                                     showMenu = false
                                     val blocks = SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
-                                    val uri = NoteExportHelper.exportToPdf(context, title, category, blocks, primaryColor.toArgb())
+                                    val uri = NoteExportHelper.exportToPdf(context, title, category, blocks, primaryColor.toArgb(), notePaginationType)
                                     NoteExportHelper.shareUri(context, uri, "application/pdf", "Exportar Nota em PDF")
                                 }
                             )
@@ -1766,7 +1778,7 @@ fun FullScreenNoteEditor(
                                         ) {
                                             HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                             Text(
-                                                text = "QUEBRA DE PÁGINA",
+                                                text = "Quebra de Página",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                             )
@@ -2205,6 +2217,12 @@ fun FullScreenNoteEditor(
                                             editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "==", "==")
                                         }
 
+                                        ToolbarToolButton(label = "Quebra de página", icon = Icons.Default.HorizontalSplit) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.insertTextAtCursor(editorValue, "\n\n<!-- pagebreak -->\n\n")
+                                            Toast.makeText(context, "Quebra de página inserida", Toast.LENGTH_SHORT).show()
+                                        }
+
                                         VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
                                         // Callout dropdown
@@ -2236,6 +2254,78 @@ fun FullScreenNoteEditor(
 
                                         ToolbarToolButton(label = "Vincular", icon = Icons.Default.Share) {
                                             showLinkToEntityDialog = true
+                                        }
+
+                                        VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                                        // Paginação dropdown (Nenhuma, 1., I.)
+                                        Box {
+                                            ToolbarToolButton(
+                                                label = when (notePaginationType) {
+                                                    NotePaginationType.NONE -> "Paginação"
+                                                    NotePaginationType.ARABIC -> "Pág: 1."
+                                                    NotePaginationType.ROMAN -> "Pág: I."
+                                                },
+                                                icon = Icons.Default.FormatListNumbered
+                                            ) {
+                                                showPaginationMenu = true
+                                            }
+                                            DropdownMenu(
+                                                expanded = showPaginationMenu,
+                                                onDismissRequest = { showPaginationMenu = false }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Nenhuma (Sem numeração)") },
+                                                    leadingIcon = {
+                                                        if (notePaginationType == NotePaginationType.NONE) {
+                                                            Icon(Icons.Default.Check, contentDescription = null, tint = primaryColor)
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        notePaginationType = NotePaginationType.NONE
+                                                        showPaginationMenu = false
+                                                        Toast.makeText(context, "Paginação desativada", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Numeração Arábica (1., 2., 3...)") },
+                                                    leadingIcon = {
+                                                        if (notePaginationType == NotePaginationType.ARABIC) {
+                                                            Icon(Icons.Default.Check, contentDescription = null, tint = primaryColor)
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        notePaginationType = NotePaginationType.ARABIC
+                                                        showPaginationMenu = false
+                                                        Toast.makeText(context, "Paginação Arábica (1.) ativada para exportações", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("Numeração Romana (I., II., III...)") },
+                                                    leadingIcon = {
+                                                        if (notePaginationType == NotePaginationType.ROMAN) {
+                                                            Icon(Icons.Default.Check, contentDescription = null, tint = primaryColor)
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        notePaginationType = NotePaginationType.ROMAN
+                                                        showPaginationMenu = false
+                                                        Toast.makeText(context, "Paginação Romana (I.) ativada para exportações", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        // Índice automático
+                                        ToolbarToolButton(label = "Índice", icon = Icons.AutoMirrored.Filled.Toc) {
+                                            pushHistory()
+                                            val generated = NoteExportHelper.generateTableOfContents(editorValue.text)
+                                            if (generated == editorValue.text) {
+                                                Toast.makeText(context, "Nenhum título (#) encontrado para gerar o índice.", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                editorValue = TextFieldValue(text = generated, selection = TextRange(0))
+                                                Toast.makeText(context, "Índice gerado no início com quebra de página!", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
 
                                         VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)

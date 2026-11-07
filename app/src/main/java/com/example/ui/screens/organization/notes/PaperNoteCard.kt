@@ -57,8 +57,8 @@ object PaperNotePalette {
             primaryColor = OrangePrimary,
             lightBg = Color(0xFFFBF7F0),
             lightFlap = Color(0xFFE8DFCE),
-            darkBg = Color(0xFF383E4C),
-            darkFlap = Color(0xFF4F586B)
+            darkBg = Color(0xFF38342D),
+            darkFlap = Color(0xFF4C453C)
         ),
         NoteColorOption(
             key = "TANGERINA",
@@ -172,11 +172,13 @@ object PaperNotePalette {
         val opt = findColorOption(noteColor)
         val bg = if (isDark) opt.darkBg else opt.lightBg
         val flap = if (isDark) opt.darkFlap else opt.lightFlap
-        val crease = opt.primaryColor.copy(alpha = if (isDark) 0.45f else 0.35f)
+        val crease = if (isDark && opt.key == "DEFAULT") Color(0xFF564E43) else opt.primaryColor.copy(alpha = if (isDark) 0.45f else 0.35f)
         val border = if (isPinned) {
             opt.primaryColor.copy(alpha = 0.65f)
         } else {
-            if (isDark) opt.primaryColor.copy(alpha = 0.25f) else Color(0x18000000).compositeOver(opt.primaryColor.copy(alpha = 0.22f))
+            if (isDark) {
+                if (opt.key == "DEFAULT") Color(0xFF4E453A) else opt.primaryColor.copy(alpha = 0.25f)
+            } else Color(0x18000000).compositeOver(opt.primaryColor.copy(alpha = 0.22f))
         }
         val onBg = if (isDark) DarkTextPrimary else Slate900
         val badgeBg = opt.primaryColor.copy(alpha = if (isDark) 0.25f else 0.15f)

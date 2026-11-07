@@ -29,71 +29,87 @@ enum class FinancePriority(val id: String, val label: String) {
     }
 }
 
-enum class FinanceCurrency(val code: String, val symbol: String, val displayName: String) {
+enum class FinanceCurrency(
+    val code: String,
+    val symbol: String,
+    val displayName: String,
+    val countryOrOrigin: String = ""
+) {
     // Principais e PALOP
-    AOA("AOA", "Kz", "Kwanza Angolano (Kz)"),
-    MZN("MZN", "MT", "Metical Moçambicano (MT)"),
-    BRL("BRL", "R$", "Real Brasileiro (R$)"),
-    EUR("EUR", "€", "Euro (€)"),
-    USD("USD", "$", "Dólar Americano ($)"),
-    GBP("GBP", "£", "Libra Esterlina (£)"),
-    CVE("CVE", "Esc", "Escudo Cabo-verdiano (Esc)"),
-    STN("STN", "Db", "Dobra São-tomense (Db)"),
+    AOA("AOA", "Kz", "Kwanza Angolano (Kz)", "Angola"),
+    MZN("MZN", "MT", "Metical Moçambicano (MT)", "Moçambique, Mozambique"),
+    BRL("BRL", "R$", "Real Brasileiro (R$)", "Brasil, Brazil"),
+    EUR("EUR", "€", "Euro (€)", "União Europeia, Portugal, Espanha, França, Alemanha, Itália"),
+    USD("USD", "$", "Dólar Americano ($)", "Estados Unidos, EUA, USA"),
+    GBP("GBP", "£", "Libra Esterlina (£)", "Reino Unido, Inglaterra, Great Britain, UK"),
+    CVE("CVE", "Esc", "Escudo Cabo-verdiano (Esc)", "Cabo Verde"),
+    STN("STN", "Db", "Dobra São-tomense (Db)", "São Tomé e Príncipe"),
 
     // América
-    CAD("CAD", "C$", "Dólar Canadense (C$)"),
-    MXN("MXN", "Mex$", "Peso Mexicano (Mex$)"),
-    ARS("ARS", "ARS$", "Peso Argentino (ARS$)"),
-    CLP("CLP", "CLP$", "Peso Chileno (CLP$)"),
-    COP("COP", "COL$", "Peso Colombiano (COL$)"),
-    PEN("PEN", "S/", "Sol Peruano (S/)"),
-    UYU("UYU", "\$U", "Peso Uruguaio (\$U)"),
+    CAD("CAD", "C$", "Dólar Canadense (C$)", "Canadá, Canada"),
+    MXN("MXN", "Mex$", "Peso Mexicano (Mex$)", "México, Mexico"),
+    ARS("ARS", "ARS$", "Peso Argentino (ARS$)", "Argentina"),
+    CLP("CLP", "CLP$", "Peso Chileno (CLP$)", "Chile"),
+    COP("COP", "COL$", "Peso Colombiano (COL$)", "Colômbia, Colombia"),
+    PEN("PEN", "S/", "Sol Peruano (S/)", "Peru"),
+    UYU("UYU", "\$U", "Peso Uruguaio (\$U)", "Uruguai, Uruguay"),
 
     // Europa
-    CHF("CHF", "CHF", "Franco Suíço (CHF)"),
-    SEK("SEK", "kr", "Coroa Sueca (kr)"),
-    NOK("NOK", "kr", "Coroa Norueguesa (kr)"),
-    DKK("DKK", "kr", "Coroa Dinamarquesa (kr)"),
-    PLN("PLN", "zł", "Złoty Polonês (zł)"),
-    RUB("RUB", "₽", "Rublo Russo (₽)"),
-    TRY("TRY", "₺", "Lira Turca (₺)"),
+    CHF("CHF", "CHF", "Franco Suíço (CHF)", "Suíça, Switzerland"),
+    SEK("SEK", "kr", "Coroa Sueca (kr)", "Suécia, Sweden"),
+    NOK("NOK", "kr", "Coroa Norueguesa (kr)", "Noruega, Norway"),
+    DKK("DKK", "kr", "Coroa Dinamarquesa (kr)", "Dinamarca, Denmark"),
+    PLN("PLN", "zł", "Złoty Polonês (zł)", "Polônia, Poland"),
+    RUB("RUB", "₽", "Rublo Russo (₽)", "Rússia, Russia"),
+    TRY("TRY", "₺", "Lira Turca (₺)", "Turquia, Turkey"),
 
     // África
-    ZAR("ZAR", "R", "Rand Sul-Africano (R)"),
-    NGN("NGN", "₦", "Naira Nigeriana (₦)"),
-    GHS("GHS", "GH₵", "Cedi Ganês (GH₵)"),
-    KES("KES", "KSh", "Xelim Queniano (KSh)"),
-    EGP("EGP", "E£", "Libra Egípcia (E£)"),
-    MAD("MAD", "DH", "Dirham Marroquino (DH)"),
+    ZAR("ZAR", "R", "Rand Sul-Africano (R)", "África do Sul, South Africa"),
+    NGN("NGN", "₦", "Naira Nigeriana (₦)", "Nigéria, Nigeria"),
+    GHS("GHS", "GH₵", "Cedi Ganês (GH₵)", "Gana, Ghana"),
+    KES("KES", "KSh", "Xelim Queniano (KSh)", "Quênia, Kenya"),
+    EGP("EGP", "E£", "Libra Egípcia (E£)", "Egito, Egypt"),
+    MAD("MAD", "DH", "Dirham Marroquino (DH)", "Marrocos, Morocco"),
 
     // Ásia e Oceania
-    JPY("JPY", "¥", "Iene Japonês (¥)"),
-    CNY("CNY", "¥", "Yuan Chinês (¥)"),
-    INR("INR", "₹", "Rúpia Indiana (₹)"),
-    KRW("KRW", "₩", "Won Sul-Coreano (₩)"),
-    SGD("SGD", "S$", "Dólar de Singapura (S$)"),
-    HKD("HKD", "HK$", "Dólar de Hong Kong (HK$)"),
-    AUD("AUD", "A$", "Dólar Australiano (A$)"),
-    NZD("NZD", "NZ$", "Dólar Neozelandês (NZ$)"),
-    AED("AED", "AED", "Dirham dos EAU (AED)"),
-    SAR("SAR", "SAR", "Rial Saudita (SAR)"),
-    QAR("QAR", "QAR", "Rial Catari (QAR)"),
-    ILS("ILS", "₪", "Novo Shekel Israelense (₪)"),
-    THB("THB", "฿", "Baht Tailandês (฿)"),
-    IDR("IDR", "Rp", "Rupia Indonésia (Rp)"),
-    MYR("MYR", "RM", "Ringgit Malaio (RM)"),
-    PHP("PHP", "₱", "Peso Filipino (₱)"),
-    VND("VND", "₫", "Dong Vietnamita (₫)"),
-    TWD("TWD", "NT$", "Novo Dólar Taiwanês (NT$)"),
+    JPY("JPY", "¥", "Iene Japonês (¥)", "Japão, Japan"),
+    CNY("CNY", "¥", "Yuan Chinês (¥)", "China"),
+    INR("INR", "₹", "Rúpia Indiana (₹)", "Índia, India"),
+    KRW("KRW", "₩", "Won Sul-Coreano (₩)", "Coreia do Sul, South Korea"),
+    SGD("SGD", "S$", "Dólar de Singapura (S$)", "Singapura, Singapore"),
+    HKD("HKD", "HK$", "Dólar de Hong Kong (HK$)", "Hong Kong"),
+    AUD("AUD", "A$", "Dólar Australiano (A$)", "Austrália, Australia"),
+    NZD("NZD", "NZ$", "Dólar Neozelandês (NZ$)", "Nova Zelândia, New Zealand"),
+    AED("AED", "AED", "Dirham dos EAU (AED)", "Emirados Árabes Unidos, UAE, Dubai"),
+    SAR("SAR", "SAR", "Rial Saudita (SAR)", "Arábia Saudita, Saudi Arabia"),
+    QAR("QAR", "QAR", "Rial Catari (QAR)", "Catar, Qatar"),
+    ILS("ILS", "₪", "Novo Shekel Israelense (₪)", "Israel"),
+    THB("THB", "฿", "Baht Tailandês (฿)", "Tailândia, Thailand"),
+    IDR("IDR", "Rp", "Rupia Indonésia (Rp)", "Indonésia, Indonesia"),
+    MYR("MYR", "RM", "Ringgit Malaio (RM)", "Malásia, Malaysia"),
+    PHP("PHP", "₱", "Peso Filipino (₱)", "Filipinas, Philippines"),
+    VND("VND", "₫", "Dong Vietnamita (₫)", "Vietnã, Vietnam"),
+    TWD("TWD", "NT$", "Novo Dólar Taiwanês (NT$)", "Taiwan"),
 
     // Criptomoedas
-    BTC("BTC", "₿", "Bitcoin (BTC)"),
-    ETH("ETH", "Ξ", "Ethereum (ETH)"),
-    USDT("USDT", "₮", "Tether USD (USDT)"),
-    SOL("SOL", "SOL", "Solana (SOL)"),
-    BNB("BNB", "BNB", "BNB (BNB)"),
-    XRP("XRP", "XRP", "XRP (XRP)"),
-    ADA("ADA", "ADA", "Cardano (ADA)");
+    BTC("BTC", "₿", "Bitcoin (BTC)", "Criptomoeda, Global, Decentralized"),
+    ETH("ETH", "Ξ", "Ethereum (ETH)", "Criptomoeda, Global, Smart Contracts"),
+    USDT("USDT", "₮", "Tether USD (USDT)", "Criptomoeda, Stablecoin, Global"),
+    SOL("SOL", "SOL", "Solana (SOL)", "Criptomoeda, Global"),
+    BNB("BNB", "BNB", "BNB (BNB)", "Criptomoeda, Binance, Global"),
+    XRP("XRP", "XRP", "XRP (XRP)", "Criptomoeda, Ripple, Global"),
+    ADA("ADA", "ADA", "Cardano (ADA)", "Criptomoeda, Global");
+
+    fun matchesSearch(query: String): Boolean {
+        if (query.isBlank()) return true
+        fun normalize(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+        val q = normalize(query.trim())
+        return normalize(code).contains(q) ||
+                normalize(symbol).contains(q) ||
+                normalize(displayName).contains(q) ||
+                normalize(countryOrOrigin).contains(q)
+    }
 
     companion object {
         fun fromCode(code: String): FinanceCurrency =

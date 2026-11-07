@@ -967,7 +967,7 @@ private fun HabitFrequencySelector(
                     val fallback = if (selectedDays.isEmpty()) "7" else selectedDays.joinToString(",")
                     onFrequencyChanged(fallback)
                 },
-                label = { Text("Dias da semana", fontSize = 11.sp) }
+                label = { Text("Dias", fontSize = 11.sp) }
             )
         }
 
@@ -979,11 +979,11 @@ private fun HabitFrequencySelector(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 daysOfWeek.forEach { (dayInt, dayLabel) ->
                     val isDaySelected = selectedDays.contains(dayInt)
-                    FilterChip(
+                    Surface(
                         selected = isDaySelected,
                         onClick = {
                             val newSet = if (isDaySelected) {
@@ -993,8 +993,24 @@ private fun HabitFrequencySelector(
                             }
                             onFrequencyChanged(newSet.sorted().joinToString(","))
                         },
-                        label = { Text(dayLabel, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
-                    )
+                        shape = CircleShape,
+                        color = if (isDaySelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (isDaySelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Text(
+                                text = dayLabel,
+                                fontSize = 11.sp,
+                                fontWeight = if (isDaySelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -309,57 +309,6 @@ class MainActivity : ComponentActivity() {
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
                 var showAuthDialog by remember { mutableStateOf(false) }
 
-                val appBgUri by viewModel.appBgUri.collectAsState()
-                val appBgBlur by viewModel.appBgBlur.collectAsState()
-                val appBgBrightness by viewModel.appBgBrightness.collectAsState()
-
-                var processedAppBgBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-
-                LaunchedEffect(appBgUri, appBgBlur) {
-                    val uriStr = appBgUri
-                    if (!uriStr.isNullOrBlank()) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            try {
-                                val boundsOpts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                val localFile = java.io.File(uriStr)
-                                if (localFile.exists()) {
-                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, boundsOpts)
-                                } else {
-                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
-                                        android.graphics.BitmapFactory.decodeStream(it, null, boundsOpts)
-                                    }
-                                }
-                                var sampleSize = 1
-                                val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
-                                while (maxDim / sampleSize > 1080) {
-                                    sampleSize *= 2
-                                }
-                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                                    inSampleSize = sampleSize
-                                    inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-                                }
-                                val original = if (localFile.exists()) {
-                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, decodeOpts)
-                                } else {
-                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
-                                        android.graphics.BitmapFactory.decodeStream(it, null, decodeOpts)
-                                    }
-                                }
-                                if (original != null) {
-                                    val radius = (appBgBlur * 20).toInt().coerceAtLeast(0)
-                                    processedAppBgBitmap = if (radius > 0) com.example.util.FastBlur.blur(original, radius) else original
-                                } else {
-                                    processedAppBgBitmap = null
-                                }
-                            } catch (_: Throwable) {
-                                processedAppBgBitmap = null
-                            }
-                        }
-                    } else {
-                        processedAppBgBitmap = null
-                    }
-                }
-
                 val achievements by viewModel.achievements.collectAsState()
 
                 // Request notification permission on Android 13+
@@ -472,25 +421,9 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    if (processedAppBgBitmap != null) {
-                        Image(
-                            bitmap = processedAppBgBitmap!!.asImageBitmap(),
-                            contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Color.Black.copy(alpha = (1f - appBgBrightness).coerceIn(0.15f, 0.85f))
-                                )
-                        )
-                    }
-
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
-                        containerColor = Color.Transparent,
+                        containerColor = MaterialTheme.colorScheme.background,
                         topBar = {
                             val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
                                     screens[pagerState.currentPage] == Screen.Timer

@@ -54,10 +54,22 @@ object NoteExportHelper {
      * formatted with title, dotted lines, and (Página X), followed by an automatic page break.
      */
     fun generateTableOfContents(rawMarkdown: String): String {
-        val blocks = SmoothMarkdownConverter.markdownToBlocks(rawMarkdown)
+        // Strip existing TOC if already present before calculating pages
+        val cleanInitial = if (rawMarkdown.trimStart().startsWith("# 📑 Índice") || rawMarkdown.trimStart().startsWith("# Índice")) {
+            val idxEnd = rawMarkdown.indexOf("<!-- pagebreak -->")
+            if (idxEnd != -1) {
+                rawMarkdown.substring(idxEnd + "<!-- pagebreak -->".length).trimStart()
+            } else {
+                rawMarkdown
+            }
+        } else {
+            rawMarkdown
+        }
+
+        val blocks = SmoothMarkdownConverter.markdownToBlocks(cleanInitial)
         val pageLimit = 762f
         var curY = 40f
-        var curPage = 1
+        var curPage = 2 // Since TOC itself occupies Page 1
         val headingsWithPages = mutableListOf<Pair<HeadingBlock, Int>>()
 
         for (block in blocks) {
@@ -120,11 +132,12 @@ object NoteExportHelper {
         }
 
         if (headingsWithPages.isEmpty()) {
-            return rawMarkdown
+            return cleanInitial
         }
 
         val tocSb = StringBuilder()
-        tocSb.append("# Índice\n\n")
+        tocSb.append("# 📑 Índice\n\n")
+        val targetWidth = 52
         for ((heading, page) in headingsWithPages) {
             val indent = when (heading.level) {
                 1 -> ""
@@ -133,23 +146,17 @@ object NoteExportHelper {
                 else -> "      - "
             }
             val cleanTitle = heading.text.replace(Regex("(?s)<[^>]*>|\\*\\*|\\*|~~|==|`|\\$"), "").trim()
-            tocSb.append("$indent$cleanTitle -------------------- (Página $page)\n\n")
+            if (cleanTitle.equals("Índice", ignoreCase = true) || cleanTitle.contains("Índice")) continue
+
+            val prefix = "$indent$cleanTitle "
+            val suffix = " (Página $page)"
+            val dashesCount = (targetWidth - prefix.length - suffix.length).coerceAtLeast(6)
+            val dashes = "-".repeat(dashesCount)
+            tocSb.append("$prefix$dashes$suffix\n\n")
         }
         tocSb.append("<!-- pagebreak -->\n\n")
 
-        // Clean out existing index at top if already present
-        val cleanMarkdown = if (rawMarkdown.trimStart().startsWith("# Índice")) {
-            val idxEnd = rawMarkdown.indexOf("<!-- pagebreak -->")
-            if (idxEnd != -1) {
-                rawMarkdown.substring(idxEnd + "<!-- pagebreak -->".length).trimStart()
-            } else {
-                rawMarkdown
-            }
-        } else {
-            rawMarkdown
-        }
-
-        return tocSb.toString() + cleanMarkdown
+        return tocSb.toString() + cleanInitial
     }
 
 
@@ -840,9 +847,9 @@ object NoteExportHelper {
             zos.closeEntry()
 
             // 4.1 word/footer1.xml (if pagination is active)
-            if (paginationType != NotePaginationType.NONE) {
-                zos.putNextEntry(ZipEntry("word/footer1.xml"))
-                val footerXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        if (paginationType != NotePaginationType.NONE) {
+            zos.putNextEntry(ZipEntry("word/footer1.xml"))
+            val footerXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:p>
     <w:pPr>
@@ -854,23 +861,24 @@ object NoteExportHelper {
         <w:color w:val="94A3B8"/>
       </w:rPr>
       <w:fldSimple w:instr="PAGE"/>
+      <w:t>.</w:t>
     </w:r>
   </w:p>
 </w:ftr>"""
-                zos.write(footerXml.toByteArray())
-                zos.closeEntry()
-            }
-
-            // 5. word/media/image_X.jpeg
-            for ((idx, item) in imageEntries.withIndex()) {
-                zos.putNextEntry(ZipEntry("word/media/image_${idx + 1}.jpeg"))
-                zos.write(item.second)
-                zos.closeEntry()
-            }
+            zos.write(footerXml.toByteArray())
+            zos.closeEntry()
         }
 
-        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        // 5. word/media/image_X.jpeg
+        for ((idx, item) in imageEntries.withIndex()) {
+            zos.putNextEntry(ZipEntry("word/media/image_${idx + 1}.jpeg"))
+            zos.write(item.second)
+            zos.closeEntry()
+        }
     }
+
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
 
     /**
      * Exports Note as a standard styled PDF document using Android's native PdfDocument.
@@ -881,7 +889,8 @@ object NoteExportHelper {
         noteTitle: String,
         noteCategory: String,
         blocks: List<VisualBlock>,
-        themeColor: Int = Color.parseColor("#FF6F00")
+        themeColor: Int = Color.parseColor("#FF6F00"),
+        paginationType: NotePaginationType = NotePaginationType.NONE
     ): Uri {
         val document = PdfDocument()
         val pageWidth = 595
@@ -895,8 +904,27 @@ object NoteExportHelper {
         var canvas = page.canvas
         var y = margin
 
+        val pageNumPaint = TextPaint().apply {
+            color = Color.parseColor("#94A3B8")
+            textSize = 10f
+            isAntiAlias = true
+            textAlign = Paint.Align.RIGHT
+        }
+
+        fun drawFooter() {
+            if (paginationType != NotePaginationType.NONE) {
+                val label = if (paginationType == NotePaginationType.ROMAN) {
+                    "${toRoman(pageNumber)}."
+                } else {
+                    "$pageNumber."
+                }
+                canvas.drawText(label, margin + contentWidth, pageHeight - 16f, pageNumPaint)
+            }
+        }
+
         fun checkNewPage(neededHeight: Float) {
-            if (y + neededHeight > pageHeight - margin) {
+            if (y + neededHeight > pageHeight - margin - 20f) {
+                drawFooter()
                 document.finishPage(page)
                 pageNumber++
                 pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
@@ -1295,6 +1323,7 @@ object NoteExportHelper {
                 }
 
                 is PageBreakBlock -> {
+                    drawFooter()
                     document.finishPage(page)
                     pageNumber++
                     pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
@@ -1371,6 +1400,7 @@ object NoteExportHelper {
             }
         }
 
+        drawFooter()
         document.finishPage(page)
 
         val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.pdf")

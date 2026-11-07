@@ -1,5 +1,6 @@
 package com.example.ui.screens.finances
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -39,7 +41,7 @@ fun FinanceFirstTimeWizardDialog(
     ) -> Unit
 ) {
     var selectedCurrency by remember { mutableStateOf(FinanceCurrency.AOA) }
-    var currencyMenuExpanded by remember { mutableStateOf(false) }
+    var showCurrencyPicker by remember { mutableStateOf(false) }
     var initialBalanceText by remember { mutableStateOf("") }
     var enableLock by remember { mutableStateOf(false) }
     var pinText by remember { mutableStateOf("") }
@@ -99,35 +101,60 @@ fun FinanceFirstTimeWizardDialog(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp
                     )
-                    ExposedDropdownMenuBox(
-                        expanded = currencyMenuExpanded,
-                        onExpandedChange = { currencyMenuExpanded = !currencyMenuExpanded }
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { showCurrencyPicker = true }
                     ) {
-                        OutlinedTextField(
-                            value = selectedCurrency.displayName,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyMenuExpanded)
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = currencyMenuExpanded,
-                            onDismissRequest = { currencyMenuExpanded = false }
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            FinanceCurrency.entries.forEach { currency ->
-                                DropdownMenuItem(
-                                    text = { Text(currency.displayName) },
-                                    onClick = {
-                                        selectedCurrency = currency
-                                        currencyMenuExpanded = false
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            selectedCurrency.symbol,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
                                     }
-                                )
+                                }
+                                Column {
+                                    Text(
+                                        selectedCurrency.displayName,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.5.sp
+                                    )
+                                    if (selectedCurrency.countryOrOrigin.isNotBlank()) {
+                                        Text(
+                                            selectedCurrency.countryOrOrigin,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = "Pesquisar moeda",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
@@ -269,6 +296,17 @@ fun FinanceFirstTimeWizardDialog(
                 }
             }
         }
+    }
+
+    if (showCurrencyPicker) {
+        SearchableCurrencyPickerDialog(
+            selectedCurrency = selectedCurrency,
+            onDismiss = { showCurrencyPicker = false },
+            onSelectCurrency = {
+                selectedCurrency = it
+                showCurrencyPicker = false
+            }
+        )
     }
 }
 

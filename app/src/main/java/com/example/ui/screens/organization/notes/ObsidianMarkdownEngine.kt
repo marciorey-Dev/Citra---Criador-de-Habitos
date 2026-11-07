@@ -179,6 +179,19 @@ object ObsidianMarkdownEngine {
                         lineEnd
                     )
                 }
+
+                // Page Break
+                trimmed.equals("<!-- pagebreak -->", ignoreCase = true) || trimmed.equals("---pagebreak---", ignoreCase = true) -> {
+                    builder.addStyle(
+                        SpanStyle(
+                            color = primaryColor,
+                            fontWeight = FontWeight.Bold,
+                            background = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                        ),
+                        lineStart,
+                        lineEnd
+                    )
+                }
             }
 
             // Apply inline formatting across this line
@@ -536,6 +549,17 @@ object ObsidianMarkdownEngine {
         val insertion = sb.toString()
         val newText = text.substring(0, selStart) + insertion + text.substring(selEnd)
         val newPos = selStart + insertion.length
+        return value.copy(text = newText, selection = TextRange(newPos, newPos))
+    }
+
+    /**
+     * Inserts text at the current cursor position.
+     */
+    fun insertTextAtCursor(value: TextFieldValue, textToInsert: String): TextFieldValue {
+        val text = value.text
+        val pos = value.selection.start.coerceIn(0, text.length)
+        val newText = text.substring(0, pos) + textToInsert + text.substring(pos)
+        val newPos = pos + textToInsert.length
         return value.copy(text = newText, selection = TextRange(newPos, newPos))
     }
 

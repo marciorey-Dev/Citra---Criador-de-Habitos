@@ -526,46 +526,23 @@ fun NotesSubTab(
                     }
                 }
 
-                // Archived Notes Circular Button with Badge
-                Box(modifier = Modifier.size(48.dp)) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (archivedNotes.isNotEmpty()) {
-                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
-                        } else {
-                            surfaceContainerLow
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .clickable { showArchivedNotesDialog = true }
-                            .testTag("notes_archived_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Archive,
-                                contentDescription = "Notas Arquivadas",
-                                tint = if (archivedNotes.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(21.dp)
-                            )
-                        }
-                    }
-                    if (archivedNotes.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = (-2).dp, y = 2.dp)
-                                .size(18.dp)
-                                .background(MaterialTheme.colorScheme.tertiary, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "${archivedNotes.size}",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiary
-                            )
-                        }
+                // Archived Notes Discrete Circular Button
+                Surface(
+                    shape = CircleShape,
+                    color = surfaceContainerLow,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable { showArchivedNotesDialog = true }
+                        .testTag("notes_archived_btn")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Archive,
+                            contentDescription = "Notas Arquivadas",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(21.dp)
+                        )
                     }
                 }
 

@@ -47,9 +47,6 @@ fun SettingsDialog(
     val notificationSettings by viewModel.notificationSettings.collectAsState()
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val dailyRandomColor by viewModel.dailyRandomColor.collectAsState()
-    val appBgUri by viewModel.appBgUri.collectAsState()
-    val appBgBlur by viewModel.appBgBlur.collectAsState()
-    val appBgBrightness by viewModel.appBgBrightness.collectAsState()
     val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
     val disabledWelcomeCategories by viewModel.disabledWelcomeCategories.collectAsState()
     val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
@@ -66,26 +63,6 @@ fun SettingsDialog(
     var showFinanceLockDialog by remember { mutableStateOf(false) }
     var showEraseFinanceDialog by remember { mutableStateOf(false) }
     var financeCurrencyExpanded by remember { mutableStateOf(false) }
-
-    val appBgPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val bgFile = java.io.File(context.filesDir, "app_background.jpg")
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    bgFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                if (bgFile.exists() && bgFile.length() > 0L) {
-                    viewModel.setAppBackground(bgFile.absolutePath, appBgBlur, appBgBrightness)
-                }
-            } catch (_: Exception) {
-                android.widget.Toast.makeText(context, "Não foi possível carregar a imagem.", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
 
     var tempNotificationSettings by remember(notificationSettings) {
         mutableStateOf(notificationSettings)
@@ -347,117 +324,7 @@ fun SettingsDialog(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
 
-                        // App Background Image Card (matching note background logic with blur & darkening)
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(34.dp)
-                                                .background(selectedAccent.container, CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Wallpaper,
-                                                contentDescription = null,
-                                                tint = selectedAccent.primary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column {
-                                            Text(
-                                                text = "Imagem de Fundo do App",
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = if (appBgUri != null) "Personalizada ativa" else "Nenhuma imagem selecionada",
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    FilledTonalButton(
-                                        onClick = {
-                                            appBgPickerLauncher.launch(
-                                                androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                            )
-                                        },
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(if (appBgUri != null) "Trocar" else "Importar", fontSize = 12.sp)
-                                    }
-                                }
-
-                                if (appBgUri != null) {
-                                    Spacer(modifier = Modifier.height(12.dp))
-
-                                    // Desfoque slider
-                                    Column {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text("Desfoque", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                            Text("${(appBgBlur * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Slider(
-                                            value = appBgBlur,
-                                            onValueChange = { viewModel.setAppBackground(appBgUri, it, appBgBrightness) },
-                                            valueRange = 0f..1f,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-
-                                    // Escurecer slider
-                                    Column {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text("Escurecer", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                            Text("${((1f - appBgBrightness) * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        Slider(
-                                            value = appBgBrightness,
-                                            onValueChange = { viewModel.setAppBackground(appBgUri, appBgBlur, it) },
-                                            valueRange = 0.1f..1f,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-
-                                    TextButton(
-                                        onClick = { viewModel.clearAppBackground() },
-                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                        modifier = Modifier.align(Alignment.End)
-                                    ) {
-                                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Remover Imagem de Fundo", fontSize = 11.sp)
-                                    }
-                                }
-                            }
-                        }
 
                         Spacer(modifier = Modifier.height(10.dp))
 
