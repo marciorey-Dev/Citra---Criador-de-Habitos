@@ -208,7 +208,7 @@ fun CalendarScreen(
                     isCreatingNoteForCalendar = false
                     activeNoteForEditor = null
                 },
-                onSaveAndClose = { title, content, cat, isPinned, bgUri, blur, brightness ->
+                onSaveAndClose = { title, content, cat, isPinned, bgUri, blur, brightness, nColor ->
                     viewModel.saveNote(
                         id = activeNoteForEditor?.id ?: 0L,
                         title = title,
@@ -221,7 +221,8 @@ fun CalendarScreen(
                         backgroundBlur = blur,
                         backgroundBrightness = brightness,
                         uuid = activeNoteForEditor?.uuid,
-                        oldTitle = activeNoteForEditor?.title
+                        oldTitle = activeNoteForEditor?.title,
+                        noteColor = nColor
                     )
                     isCreatingNoteForCalendar = false
                     activeNoteForEditor = null

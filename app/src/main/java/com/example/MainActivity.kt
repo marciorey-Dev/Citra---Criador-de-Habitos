@@ -473,84 +473,40 @@ class MainActivity : ComponentActivity() {
                         val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
                                 screens[pagerState.currentPage] == Screen.Timer
                         if (!isNoteEditorOpen && !isTimerImmersive) {
-                            TopAppBar(
-                                navigationIcon = {
+                            val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 14.dp, vertical = 2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(38.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    // Left / Center area
                                     if (screens[pagerState.currentPage] == Screen.Home) {
-                                        Spacer(modifier = Modifier.width(48.dp))
-                                    }
-                                },
-                                title = {
-                                    val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
-                                    if (screens[pagerState.currentPage] == Screen.Home) {
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.Center
-                                            ) {
-                                                Text(
-                                                    text = "🍊 Citra",
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    fontSize = 20.sp,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    textAlign = TextAlign.Center
-                                                )
-                                                if (isTimerActive) {
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
-                                                    val mins = displaySec / 60
-                                                    val secs = displaySec % 60
-                                                    val formatted = String.format("%02d:%02d", mins, secs)
-
-                                                    Surface(
-                                                        shape = RoundedCornerShape(16.dp),
-                                                        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                                        modifier = Modifier
-                                                            .clickable {
-                                                                coroutineScope.launch { pagerState.scrollToPage(1) }
-                                                            }
-                                                            .testTag("top_floating_timer_pill")
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Text(text = "🍊", fontSize = 12.sp)
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Text(
-                                                                text = formatted,
-                                                                fontSize = 12.sp,
-                                                                fontWeight = FontWeight.ExtraBold,
-                                                                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Icon(
-                                                                imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                                contentDescription = null,
-                                                                modifier = Modifier.size(14.dp),
-                                                                tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } else {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            // Floating Top Mini-timer counter when timer is active outside the Timer tab
-                                            if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
+                                            Text(
+                                                text = "🍊 Citra",
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 18.sp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            if (isTimerActive) {
                                                 val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
                                                 val mins = displaySec / 60
                                                 val secs = displaySec % 60
                                                 val formatted = String.format("%02d:%02d", mins, secs)
 
                                                 Surface(
-                                                    shape = RoundedCornerShape(16.dp),
+                                                    shape = RoundedCornerShape(14.dp),
                                                     color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                                     modifier = Modifier
                                                         .clickable {
@@ -559,132 +515,160 @@ class MainActivity : ComponentActivity() {
                                                         .testTag("top_floating_timer_pill")
                                                 ) {
                                                     Row(
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        Text(text = "🍊", fontSize = 12.sp)
-                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Text(text = "🍊", fontSize = 11.sp)
+                                                        Spacer(modifier = Modifier.width(3.dp))
                                                         Text(
                                                             text = formatted,
-                                                            fontSize = 12.sp,
+                                                            fontSize = 11.sp,
                                                             fontWeight = FontWeight.ExtraBold,
                                                             color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Icon(
-                                                            imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                            contentDescription = null,
-                                                            modifier = Modifier.size(14.dp),
-                                                            tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                },
-                            actions = {
-                                // Settings button on "Eu" screen (page 4) per request
-                                if (pagerState.currentPage == 4) {
-                                    IconButton(
-                                        onClick = { showSettingsDialog = true },
-                                        modifier = Modifier.testTag("top_settings_gear_btn")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Settings,
-                                            contentDescription = "Configurações",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                                    } else {
+                                        // Floating timer pill on non-home screens
+                                        if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
+                                            val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
+                                            val mins = displaySec / 60
+                                            val secs = displaySec % 60
+                                            val formatted = String.format("%02d:%02d", mins, secs)
 
-                                // 3-Dots Menu Button
-                                Box {
-                                    IconButton(
-                                        onClick = {
-                                            showMenu = true
-                                            viewModel.startTutorial(CitraTutorialArea.MENU)
-                                        },
-                                        modifier = Modifier
-                                            .tutorialTarget("top_menu_button")
-                                            .testTag("top_menu_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.MoreVert,
-                                            contentDescription = "Mais Opções",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                            Surface(
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        coroutineScope.launch { pagerState.scrollToPage(1) }
+                                                    }
+                                                    .testTag("top_floating_timer_pill")
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(text = "🍊", fontSize = 11.sp)
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text(
+                                                        text = formatted,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.width(1.dp))
+                                        }
                                     }
 
-                                    DropdownMenu(
-                                        expanded = showMenu || (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU),
-                                        onDismissRequest = {
-                                            showMenu = false
-                                            if (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU) {
-                                                viewModel.skipCurrentTutorialArea()
+                                    // Right Action area: Settings & 3-Dots
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        if (pagerState.currentPage == 4) {
+                                            IconButton(
+                                                onClick = { showSettingsDialog = true },
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .testTag("top_settings_gear_btn")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Settings,
+                                                    contentDescription = "Configurações",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
                                             }
                                         }
-                                    ) {
-                                        // Configurações
-                                        DropdownMenuItem(
-                                            text = { Text("Configurações") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            },
-                                            modifier = Modifier.tutorialTarget("top_menu_settings"),
-                                            onClick = {
-                                                showMenu = false
-                                                showSettingsDialog = true
-                                            }
-                                        )
 
-                                        // Conquistas (Renamed per user request)
-                                        DropdownMenuItem(
-                                            text = { Text("Conquistas") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Stars, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            },
-                                            modifier = Modifier.tutorialTarget("top_menu_achievements"),
-                                            onClick = {
-                                                showMenu = false
-                                                showAchievementsDialog = true
+                                        Box {
+                                            IconButton(
+                                                onClick = {
+                                                    showMenu = true
+                                                    viewModel.startTutorial(CitraTutorialArea.MENU)
+                                                },
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .tutorialTarget("top_menu_button")
+                                                    .testTag("top_menu_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.MoreVert,
+                                                    contentDescription = "Mais Opções",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
                                             }
-                                        )
 
-                                        // Backup & Restauração
-                                        DropdownMenuItem(
-                                            text = { Text("Backup & Restauração") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Backup, contentDescription = null)
-                                            },
-                                            modifier = Modifier.tutorialTarget("top_menu_backup"),
-                                            onClick = {
-                                                showMenu = false
-                                                showBackupDialog = true
+                                            DropdownMenu(
+                                                expanded = showMenu || (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU),
+                                                onDismissRequest = {
+                                                    showMenu = false
+                                                    if (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU) {
+                                                        viewModel.skipCurrentTutorialArea()
+                                                    }
+                                                }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Configurações") },
+                                                    leadingIcon = {
+                                                        Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                    },
+                                                    modifier = Modifier.tutorialTarget("top_menu_settings"),
+                                                    onClick = {
+                                                        showMenu = false
+                                                        showSettingsDialog = true
+                                                    }
+                                                )
+
+                                                DropdownMenuItem(
+                                                    text = { Text("Conquistas") },
+                                                    leadingIcon = {
+                                                        Icon(Icons.Default.Stars, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                                    },
+                                                    modifier = Modifier.tutorialTarget("top_menu_achievements"),
+                                                    onClick = {
+                                                        showMenu = false
+                                                        showAchievementsDialog = true
+                                                    }
+                                                )
+
+                                                DropdownMenuItem(
+                                                    text = { Text("Backup & Restauração") },
+                                                    leadingIcon = {
+                                                        Icon(Icons.Default.Backup, contentDescription = null)
+                                                    },
+                                                    modifier = Modifier.tutorialTarget("top_menu_backup"),
+                                                    onClick = {
+                                                        showMenu = false
+                                                        showBackupDialog = true
+                                                    }
+                                                )
+
+                                                Divider()
+
+                                                DropdownMenuItem(
+                                                    text = { Text("Sobre") },
+                                                    leadingIcon = {
+                                                        Icon(Icons.Default.Info, contentDescription = null)
+                                                    },
+                                                    onClick = {
+                                                        showMenu = false
+                                                        showCreditsDialog = true
+                                                    }
+                                                )
                                             }
-                                        )
-
-                                        Divider()
-
-                                        // Sobre (Renamed from Créditos e Copyright)
-                                        DropdownMenuItem(
-                                            text = { Text("Sobre") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Info, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showMenu = false
-                                                showCreditsDialog = true
-                                            }
-                                        )
+                                        }
                                     }
                                 }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    }
+                            }
+                        }
                 },
                 snackbarHost = {
                     SnackbarHost(

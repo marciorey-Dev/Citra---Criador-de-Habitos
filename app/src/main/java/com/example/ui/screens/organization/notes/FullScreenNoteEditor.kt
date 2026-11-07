@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -123,8 +124,8 @@ fun FullScreenNoteEditor(
     habits: List<Habit> = emptyList(),
     pomodoroState: FlexiblePomodoroState? = null,
     onNavigateToTimer: (() -> Unit)? = null,
-    onSaveAndClose: (title: String, content: String, category: String, isPinned: Boolean, bgUri: String?, blur: Float, brightness: Float) -> Unit,
-    onSaveOnly: ((title: String, content: String, category: String, isPinned: Boolean, bgUri: String?, blur: Float, brightness: Float) -> Unit)? = null,
+    onSaveAndClose: (title: String, content: String, category: String, isPinned: Boolean, bgUri: String?, blur: Float, brightness: Float, noteColor: String?) -> Unit,
+    onSaveOnly: ((title: String, content: String, category: String, isPinned: Boolean, bgUri: String?, blur: Float, brightness: Float, noteColor: String?) -> Unit)? = null,
     onClose: () -> Unit = {},
     onDelete: (() -> Unit)? = null,
     onOpenLinkedNote: ((Note) -> Unit)? = null,
@@ -158,6 +159,8 @@ fun FullScreenNoteEditor(
     var bgUri by remember { mutableStateOf(initialNote?.backgroundImageUri) }
     var bgBlur by remember { mutableStateOf(initialNote?.backgroundBlur ?: 0.5f) }
     var bgBrightness by remember { mutableStateOf(initialNote?.backgroundBrightness ?: 0.6f) }
+    var noteColor by remember { mutableStateOf(initialNote?.noteColor) }
+    var showColorPickerDialog by remember { mutableStateOf(false) }
 
     // Unified continuous Markdown document (Obsidian style)
     var editorValue by remember {
@@ -240,6 +243,7 @@ fun FullScreenNoteEditor(
     var lastSavedBgUri by remember { mutableStateOf(initialNote?.backgroundImageUri) }
     var lastSavedBgBlur by remember { mutableStateOf(initialNote?.backgroundBlur ?: 0.5f) }
     var lastSavedBgBrightness by remember { mutableStateOf(initialNote?.backgroundBrightness ?: 0.6f) }
+    var lastSavedNoteColor by remember { mutableStateOf(initialNote?.noteColor) }
 
     val isDirty = title != lastSavedTitle ||
             editorValue.text != lastSavedContent ||
@@ -247,7 +251,8 @@ fun FullScreenNoteEditor(
             isPinned != lastSavedIsPinned ||
             bgUri != lastSavedBgUri ||
             bgBlur != lastSavedBgBlur ||
-            bgBrightness != lastSavedBgBrightness
+            bgBrightness != lastSavedBgBrightness ||
+            noteColor != lastSavedNoteColor
 
     var saveFeedbackTimestamp by remember { mutableStateOf(0L) }
     val showSaveFeedback = saveFeedbackTimestamp > 0L
@@ -290,6 +295,21 @@ fun FullScreenNoteEditor(
         }
     }
 
+    fun appendToEndOfNote(snippet: String) {
+        pushHistory()
+        val currentText = editorValue.text
+        val newText = if (currentText.isBlank()) {
+            snippet
+        } else {
+            currentText.trimEnd() + "\n\n" + snippet
+        }
+        editorValue = TextFieldValue(text = newText, selection = TextRange(newText.length))
+        coroutineScope.launch {
+            kotlinx.coroutines.delay(100)
+            noteScrollState.animateScrollTo(noteScrollState.maxValue)
+        }
+    }
+
     LaunchedEffect(initialNote?.id) {
         if (initialNote != null) {
             title = initialNote.title
@@ -298,6 +318,8 @@ fun FullScreenNoteEditor(
             bgUri = initialNote.backgroundImageUri
             bgBlur = initialNote.backgroundBlur
             bgBrightness = initialNote.backgroundBrightness
+            noteColor = initialNote.noteColor
+            lastSavedNoteColor = initialNote.noteColor
             val initialTfv = TextFieldValue(initialNote.content)
             editorValue = initialTfv
             lastSnapshotValue = initialTfv
@@ -378,6 +400,7 @@ fun FullScreenNoteEditor(
         lastSavedBgUri = bgUri
         lastSavedBgBlur = bgBlur
         lastSavedBgBrightness = bgBrightness
+        lastSavedNoteColor = noteColor
 
         if (close) {
             onSaveAndClose(
@@ -387,7 +410,8 @@ fun FullScreenNoteEditor(
                 isPinned,
                 bgUri,
                 bgBlur,
-                bgBrightness
+                bgBrightness,
+                noteColor
             )
         } else {
             saveFeedbackTimestamp = System.currentTimeMillis()
@@ -399,7 +423,8 @@ fun FullScreenNoteEditor(
                     isPinned,
                     bgUri,
                     bgBlur,
-                    bgBrightness
+                    bgBrightness,
+                    noteColor
                 )
             } else {
                 onSaveAndClose(
@@ -409,7 +434,8 @@ fun FullScreenNoteEditor(
                     isPinned,
                     bgUri,
                     bgBlur,
-                    bgBrightness
+                    bgBrightness,
+                    noteColor
                 )
             }
         }
@@ -743,30 +769,6 @@ fun FullScreenNoteEditor(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Save Status Pill
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isDirty) Icons.Default.Edit else Icons.Default.CloudDone,
-                                    contentDescription = null,
-                                    tint = if (isDirty) primaryColor else MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Text(
-                                    text = if (isDirty) "Editando" else "Salvo",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (isDirty) primaryColor else MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                        }
-
                         // Mode selector pill (Edição & Leitura)
                         Surface(
                             shape = CircleShape,
@@ -841,6 +843,30 @@ fun FullScreenNoteEditor(
                             contentDescription = "Refazer",
                             tint = if (redoStack.isNotEmpty()) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                         )
+                    }
+
+                    // Note Color Button
+                    IconButton(
+                        onClick = { showColorPickerDialog = true },
+                        modifier = Modifier.testTag("note_editor_color_btn")
+                    ) {
+                        val activeColorOpt = PaperNotePalette.findColorOption(noteColor)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = "Cor da Nota",
+                                tint = if (noteColor != null) activeColorOpt.primaryColor else textColor
+                            )
+                            if (noteColor != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .align(Alignment.BottomEnd)
+                                        .background(activeColorOpt.primaryColor, CircleShape)
+                                        .border(1.dp, Color.White, CircleShape)
+                                )
+                            }
+                        }
                     }
 
                     IconButton(
@@ -1433,12 +1459,13 @@ fun FullScreenNoteEditor(
                             }
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .defaultMinSize(minHeight = 400.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        SelectionContainer {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 400.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                             readingBlocks.forEachIndexed { idx, block ->
                                 when (block) {
                                     is HeadingBlock -> {
@@ -1700,6 +1727,24 @@ fun FullScreenNoteEditor(
                                         )
                                     }
 
+                                    is PageBreakBlock -> {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                            Text(
+                                                text = "QUEBRA DE PÁGINA",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                            )
+                                            HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                        }
+                                    }
+
                                     // OS 3 ELEMENTOS EDITÁVEIS/INTERATIVOS NO MODO LEITURA:
                                     // 1. Imagem: texto ao lado da imagem e controles de alinhamento/tamanho
                                     // 2. Áudio: player estilo WhatsApp com slider de volume e reprodução
@@ -1745,12 +1790,11 @@ fun FullScreenNoteEditor(
                     }
                 }
 
-                // Espaço vazio equivalente a 13 parágrafos para facilitar a rolagem até o final
-                // (Não editável, não tem conteúdo, não recebe cursor, não é salvo e não é exportado)
+                // Espaço vazio ajustado para rolagem (reduzido em 6 parágrafos)
                 Spacer(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(550.dp)
+                        .height(290.dp)
                 )
             }
 
@@ -1993,7 +2037,40 @@ fun FullScreenNoteEditor(
                                 }
 
                                 ToolbarToolButton(label = "Tabela", icon = Icons.Default.TableChart) {
-                                    showCreateTableDialog = true
+                                    if (editorMode == NoteEditorMode.READING) {
+                                        val defaultTable = "| Coluna 1 | Coluna 2 |\n| --- | --- |\n|  |  |"
+                                        appendToEndOfNote(defaultTable)
+                                    } else {
+                                        showCreateTableDialog = true
+                                    }
+                                }
+
+                                ToolbarToolButton(label = "Código", icon = Icons.Default.Code) {
+                                    if (editorMode == NoteEditorMode.READING) {
+                                        appendToEndOfNote("```kotlin\n// código\n```")
+                                    } else {
+                                        pushHistory()
+                                        editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                            editorValue,
+                                            "```kotlin\n",
+                                            "\n```",
+                                            "```kotlin\n// código\n```"
+                                        )
+                                    }
+                                }
+
+                                ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
+                                    if (editorMode == NoteEditorMode.READING) {
+                                        appendToEndOfNote("$$\nE = mc^2\n$$")
+                                    } else {
+                                        pushHistory()
+                                        editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                            editorValue,
+                                            "$$\n",
+                                            "\n$$",
+                                            "$$ E = mc^2 $$"
+                                        )
+                                    }
                                 }
 
                                 ToolbarToolButton(label = "Divisor", icon = Icons.Default.HorizontalRule) {
@@ -2074,22 +2151,30 @@ fun FullScreenNoteEditor(
                                             editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "==", "==")
                                         }
                                         ToolbarToolButton(label = "Bloco Código", icon = Icons.Default.Code) {
-                                            pushHistory()
-                                            editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
-                                                editorValue,
-                                                "```kotlin\n",
-                                                "\n```",
-                                                "```kotlin\n// código\n```"
-                                            )
+                                            if (editorMode == NoteEditorMode.READING) {
+                                                appendToEndOfNote("```kotlin\n// código\n```")
+                                            } else {
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                    editorValue,
+                                                    "```kotlin\n",
+                                                    "\n```",
+                                                    "```kotlin\n// código\n```"
+                                                )
+                                            }
                                         }
                                         ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
-                                            pushHistory()
-                                            editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
-                                                editorValue,
-                                                "$$\n",
-                                                "\n$$",
-                                                "$$ E = mc^2 $$"
-                                            )
+                                            if (editorMode == NoteEditorMode.READING) {
+                                                appendToEndOfNote("$$\nE = mc^2\n$$")
+                                            } else {
+                                                pushHistory()
+                                                editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                    editorValue,
+                                                    "$$\n",
+                                                    "\n$$",
+                                                    "$$ E = mc^2 $$"
+                                                )
+                                            }
                                         }
 
                                         VerticalDivider(modifier = Modifier.height(18.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -2296,8 +2381,11 @@ fun FullScreenNoteEditor(
                 val bodyLines = (1..safeRows).map { r ->
                     (1..safeCols).joinToString(" | ", prefix = "| ", postfix = " |") { "" }
                 }
-                val tableMarkdown = (listOf(header, separator) + bodyLines).joinToString("\n")
-                editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, tableMarkdown)
+                if (editorMode == NoteEditorMode.READING) {
+                    appendToEndOfNote(tableMarkdown)
+                } else {
+                    editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, tableMarkdown)
+                }
             }
         )
     }
@@ -2392,6 +2480,17 @@ fun FullScreenNoteEditor(
                 pushHistory()
                 val calloutToken = "> [!INFO] Vinculado a: $description"
                 editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, calloutToken)
+            }
+        )
+    }
+
+    // Note Color Picker Dialog
+    if (showColorPickerDialog) {
+        NoteColorPickerDialog(
+            currentColorKey = noteColor,
+            onDismiss = { showColorPickerDialog = false },
+            onSelectColor = { selected ->
+                noteColor = selected
             }
         )
     }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -48,9 +49,7 @@ import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
 import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
-import com.example.ui.screens.organization.notes.FullScreenNoteEditor
-import com.example.ui.screens.organization.notes.NoteEditorMode
-import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
+import com.example.ui.screens.organization.notes.*
 import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
 import com.example.util.NoteExportHelper
@@ -61,7 +60,8 @@ enum class NoteSortOption(val label: String) {
     LAST_UPDATED("Última Atualização"),
     CREATION_DATE("Data de Criação"),
     ALPHABETICAL("Ordem A-Z"),
-    CATEGORY("Categoria"),
+    CATEGORY("Empilhar por Categoria"),
+    COLOR("Por Cor"),
     SIZE("Tamanho")
 }
 
@@ -69,7 +69,8 @@ enum class NoteLayoutMode(val label: String) {
     GRID_2("Grade"),
     GRID_3("Grade Pequena"),
     DETAILS("Detalhes"),
-    LIST("Lista")
+    LIST("Lista"),
+    STACKS("Pilhas")
 }
 
 @Composable
@@ -145,6 +146,7 @@ fun NotesSubTab(
     var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
     var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var expandedCategories by remember { mutableStateOf(setOf<String>()) }
 
     val importMultipleNotesLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -198,6 +200,7 @@ fun NotesSubTab(
                     NoteSortOption.CREATION_DATE -> b.id.compareTo(a.id)
                     NoteSortOption.ALPHABETICAL -> a.title.compareTo(b.title, ignoreCase = true)
                     NoteSortOption.CATEGORY -> a.category.compareTo(b.category, ignoreCase = true)
+                    NoteSortOption.COLOR -> (a.noteColor ?: "ZZZ").compareTo(b.noteColor ?: "ZZZ")
                     NoteSortOption.SIZE -> b.content.length.compareTo(a.content.length)
                 }
             }
@@ -283,7 +286,7 @@ fun NotesSubTab(
                     activeNoteToEdit = null
                     viewModel.setNoteEditorOpen(false)
                 },
-                onSaveAndClose = { title, content, category, isPinned, bgUri, blur, brightness ->
+                onSaveAndClose = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
                     viewModel.saveNote(
                         id = activeNoteToEdit?.id ?: 0L,
                         title = title,
@@ -296,13 +299,14 @@ fun NotesSubTab(
                         backgroundBlur = blur,
                         backgroundBrightness = brightness,
                         uuid = activeNoteToEdit?.uuid,
-                        oldTitle = activeNoteToEdit?.title
+                        oldTitle = activeNoteToEdit?.title,
+                        noteColor = nColor
                     )
                     isCreatingNew = false
                     activeNoteToEdit = null
                     viewModel.setNoteEditorOpen(false)
                 },
-                onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness ->
+                onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
                     val currentUuid = activeNoteToEdit?.uuid ?: UUID.randomUUID().toString()
                     viewModel.saveNote(
                         id = activeNoteToEdit?.id ?: 0L,
@@ -317,6 +321,7 @@ fun NotesSubTab(
                         backgroundBrightness = brightness,
                         uuid = currentUuid,
                         oldTitle = activeNoteToEdit?.title,
+                        noteColor = nColor,
                         onSaved = { savedId ->
                             activeNoteToEdit = Note(
                                 id = savedId,
@@ -328,7 +333,8 @@ fun NotesSubTab(
                                 isPinned = isPinned,
                                 backgroundImageUri = bgUri,
                                 backgroundBlur = blur,
-                                backgroundBrightness = brightness
+                                backgroundBrightness = brightness,
+                                noteColor = nColor
                             )
                         }
                     )
@@ -721,7 +727,8 @@ fun NotesSubTab(
                                             NoteSortOption.LAST_UPDATED -> Icons.Default.Update
                                             NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
                                             NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
-                                            NoteSortOption.CATEGORY -> Icons.Default.Label
+                                            NoteSortOption.CATEGORY -> Icons.Default.Layers
+                                            NoteSortOption.COLOR -> Icons.Default.Palette
                                             NoteSortOption.SIZE -> Icons.Default.FormatSize
                                         },
                                         contentDescription = null,
@@ -731,6 +738,9 @@ fun NotesSubTab(
                                 },
                                 onClick = {
                                     currentSort = opt
+                                    if (opt == NoteSortOption.CATEGORY) {
+                                        currentLayout = NoteLayoutMode.STACKS
+                                    }
                                     showSortMenu = false
                                 }
                             )
@@ -767,6 +777,7 @@ fun NotesSubTab(
                                         NoteLayoutMode.GRID_3 -> Icons.Default.ViewComfy
                                         NoteLayoutMode.DETAILS -> Icons.Default.ViewAgenda
                                         NoteLayoutMode.LIST -> Icons.Default.ViewList
+                                        NoteLayoutMode.STACKS -> Icons.Default.Layers
                                     },
                                     contentDescription = mode.label,
                                     modifier = Modifier.size(17.dp),
@@ -816,9 +827,9 @@ fun NotesSubTab(
             NoteLayoutMode.GRID_2 -> {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_grid")
@@ -852,9 +863,9 @@ fun NotesSubTab(
             NoteLayoutMode.GRID_3 -> {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_grid_small")
@@ -886,8 +897,8 @@ fun NotesSubTab(
             }
             NoteLayoutMode.DETAILS -> {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_details_list")
@@ -919,8 +930,8 @@ fun NotesSubTab(
             }
             NoteLayoutMode.LIST -> {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_simple_list")
@@ -940,6 +951,52 @@ fun NotesSubTab(
                                 onLongClick = { noteForSubmenu = note },
                                 onTogglePin = { viewModel.togglePinNote(note) },
                                 onDelete = { noteToDelete = note }
+                            )
+                        }
+                    }
+                    item {
+                        QuickDraftTile(
+                            onClick = { showTemplatesMenu = true }
+                        )
+                    }
+                }
+            }
+            NoteLayoutMode.STACKS -> {
+                val categoriesWithNotes = remember(sortedNotes) {
+                    sortedNotes.groupBy { it.category }
+                }
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("notes_stacks_list")
+                ) {
+                    item {
+                        topBarHeaderItem()
+                    }
+                    if (sortedNotes.isEmpty()) {
+                        item {
+                            emptyNotesItem()
+                        }
+                    } else {
+                        items(categoriesWithNotes.keys.toList(), key = { it }) { catName ->
+                            val catNotes = categoriesWithNotes[catName] ?: emptyList()
+                            CategoryNoteStack(
+                                categoryName = catName,
+                                notes = catNotes,
+                                isExpanded = expandedCategories.contains(catName),
+                                onToggleExpand = {
+                                    expandedCategories = if (expandedCategories.contains(catName)) {
+                                        expandedCategories - catName
+                                    } else {
+                                        expandedCategories + catName
+                                    }
+                                },
+                                onNoteClick = { activeNoteToEdit = it },
+                                onNoteLongClick = { noteForSubmenu = it },
+                                onTogglePin = { viewModel.togglePinNote(it) },
+                                onDeleteNote = { noteToDelete = it }
                             )
                         }
                     }
@@ -1176,6 +1233,11 @@ fun SquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
+        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
+    }
+
     val dateText = remember(note.updatedAt) {
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt))
     }
@@ -1186,43 +1248,31 @@ fun SquareNoteCard(
     val hasImage = previewImageUri != null
     val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 120)
 
-    val cardContainerColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
-    val cardBorderColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-    }
-
-    val badgeBg = when (note.category.lowercase().trim()) {
+    val badgeBg = if (note.noteColor != null) {
+        paperColors.badgeBg
+    } else when (note.category.lowercase().trim()) {
         "criatividade", "ideias" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
         "estudos", "study" -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f)
         "logística", "finanças", "trabalho", "work" -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
-    val badgeFg = when (note.category.lowercase().trim()) {
+    val badgeFg = if (note.noteColor != null) {
+        paperColors.badgeFg
+    } else when (note.category.lowercase().trim()) {
         "criatividade", "ideias" -> MaterialTheme.colorScheme.onPrimaryContainer
         "estudos", "study" -> MaterialTheme.colorScheme.onSecondaryContainer
         "logística", "finanças", "trabalho", "work" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onSurface
     }
 
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 3.dp else 1.5.dp),
+    PaperNoteSurface(
+        cornerRadius = 16.dp,
+        foldSize = 22.dp,
+        paperColors = paperColors,
+        isPinned = note.isPinned,
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 175.dp)
-            .border(
-                width = 1.dp,
-                color = cardBorderColor,
-                shape = RoundedCornerShape(20.dp)
-            )
-            .clip(RoundedCornerShape(20.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
@@ -1232,7 +1282,7 @@ fun SquareNoteCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp),
+                .padding(top = 10.dp, start = 12.dp, end = 24.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1280,7 +1330,7 @@ fun SquareNoteCard(
                             Icon(
                                 imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                 contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
+                                tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -1319,7 +1369,7 @@ fun SquareNoteCard(
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = paperColors.onBackgroundColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1331,7 +1381,7 @@ fun SquareNoteCard(
                         style = MaterialTheme.typography.bodySmall,
                         fontSize = 11.sp,
                         lineHeight = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = paperColors.onBackgroundColor.copy(alpha = 0.75f),
                         maxLines = if (previewImageUri != null) 2 else 3,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1353,14 +1403,14 @@ fun SquareNoteCard(
                     Icon(
                         imageVector = Icons.Default.Schedule,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.outline,
+                        tint = paperColors.onBackgroundColor.copy(alpha = 0.55f),
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = dateText,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.outline
+                        color = paperColors.onBackgroundColor.copy(alpha = 0.65f)
                     )
                 }
 
@@ -1388,7 +1438,7 @@ fun SquareNoteCard(
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .background(paperColors.accentColor, CircleShape)
                         )
                     }
                 }
@@ -1409,34 +1459,29 @@ fun SmallSquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val cardContainerColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-    } else {
-        MaterialTheme.colorScheme.surface
+    val isDark = isSystemInDarkTheme()
+    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
+        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }
 
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 2.5.dp else 1.dp),
+    PaperNoteSurface(
+        cornerRadius = 14.dp,
+        foldSize = 18.dp,
+        paperColors = paperColors,
+        isPinned = note.isPinned,
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(0.9f)
-            .border(
-                width = 1.dp,
-                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(16.dp)
-            )
-            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
+            .testTag("note_small_card_${note.id}")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(10.dp),
+                .padding(top = 8.dp, start = 8.dp, end = 20.dp, bottom = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -1446,13 +1491,13 @@ fun SmallSquareNoteCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    color = paperColors.badgeBg
                 ) {
                     Text(
                         text = note.category.take(6),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = paperColors.badgeFg,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -1461,7 +1506,7 @@ fun SmallSquareNoteCard(
                     Icon(
                         imageVector = Icons.Filled.PushPin,
                         contentDescription = "Fixada",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = paperColors.accentColor,
                         modifier = Modifier.size(13.dp)
                     )
                 }
@@ -1471,7 +1516,7 @@ fun SmallSquareNoteCard(
                 text = note.title,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = paperColors.onBackgroundColor,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 14.sp
@@ -1481,7 +1526,7 @@ fun SmallSquareNoteCard(
                 text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.outline
+                color = paperColors.onBackgroundColor.copy(alpha = 0.6f)
             )
         }
     }
@@ -1500,30 +1545,25 @@ fun DetailNoteCard(
     onDelete: () -> Unit
 ) {
     val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 180)
-    val cardContainerColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-    } else {
-        MaterialTheme.colorScheme.surface
+    val isDark = isSystemInDarkTheme()
+    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
+        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }
 
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 2.5.dp else 1.5.dp),
+    PaperNoteSurface(
+        cornerRadius = 16.dp,
+        foldSize = 22.dp,
+        paperColors = paperColors,
+        isPinned = note.isPinned,
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(20.dp)
-            )
-            .clip(RoundedCornerShape(20.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
+            .testTag("note_detail_card_${note.id}")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(top = 10.dp, start = 14.dp, end = 24.dp, bottom = 14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1531,7 +1571,7 @@ fun DetailNoteCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
+                    color = paperColors.badgeBg
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -1541,14 +1581,14 @@ fun DetailNoteCard(
                         Icon(
                             imageVector = categoryIconFor(note.category),
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            tint = paperColors.badgeFg,
                             modifier = Modifier.size(12.dp)
                         )
                         Text(
                             text = note.category,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            color = paperColors.badgeFg
                         )
                     }
                 }
@@ -1557,14 +1597,14 @@ fun DetailNoteCard(
                     Text(
                         text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.outline
+                        color = paperColors.onBackgroundColor.copy(alpha = 0.6f)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
                         Icon(
                             imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                             contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                            tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1588,7 +1628,7 @@ fun DetailNoteCard(
                 text = note.title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = paperColors.onBackgroundColor
             )
 
             if (cleanExcerpt.isNotBlank()) {
@@ -1597,7 +1637,7 @@ fun DetailNoteCard(
                     text = cleanExcerpt,
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = paperColors.onBackgroundColor.copy(alpha = 0.75f),
                     lineHeight = 17.sp,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis
@@ -1619,32 +1659,28 @@ fun ListNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val cardContainerColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-    } else {
-        MaterialTheme.colorScheme.surface
+    val isDark = isSystemInDarkTheme()
+    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
+        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
     }
 
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = cardContainerColor,
+    PaperNoteSurface(
+        cornerRadius = 14.dp,
+        foldSize = 16.dp,
+        paperColors = paperColors,
+        isPinned = note.isPinned,
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(16.dp)
-            )
-            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
+            .testTag("note_list_card_${note.id}")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 11.dp),
+                .padding(start = 12.dp, end = 20.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -1654,13 +1690,13 @@ fun ListNoteCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    color = paperColors.badgeBg
                 ) {
                     Text(
                         text = note.category.take(8),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = paperColors.badgeFg,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
@@ -1671,7 +1707,7 @@ fun ListNoteCard(
                     text = note.title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = paperColors.onBackgroundColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -1683,7 +1719,7 @@ fun ListNoteCard(
                     Icon(
                         imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                         contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                        tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                        tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline,
                         modifier = Modifier.size(16.dp)
                     )
                 }
