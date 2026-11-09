@@ -22,6 +22,33 @@ data class Habit(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+fun Habit.calculateWeeklyStreak(todayCal: java.util.Calendar = java.util.Calendar.getInstance()): Int {
+    val completedSet = completedDatesCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    val mondayCal = (todayCal.clone() as java.util.Calendar).apply {
+        firstDayOfWeek = java.util.Calendar.MONDAY
+        set(java.util.Calendar.DAY_OF_WEEK, java.util.Calendar.MONDAY)
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+    val checkCal = (mondayCal.clone() as java.util.Calendar)
+    val todayStr = sdf.format(todayCal.time)
+
+    var streak = 0
+    while (true) {
+        val dateStr = sdf.format(checkCal.time)
+        if (dateStr > todayStr) break
+        if (completedSet.contains(dateStr)) {
+            streak++
+        }
+        checkCal.add(java.util.Calendar.DAY_OF_MONTH, 1)
+        if (checkCal.get(java.util.Calendar.DAY_OF_WEEK) == java.util.Calendar.MONDAY) break
+    }
+    return streak
+}
+
 fun Habit.isScheduledForDate(dateStr: String, dateCal: java.util.Calendar): Boolean {
     // If completed on this date, always include it
     if (completedDatesCsv.split(",").any { it.trim() == dateStr }) return true

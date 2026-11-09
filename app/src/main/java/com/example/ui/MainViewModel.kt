@@ -211,14 +211,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun spawnTimerCitraBall(durationMinutes: Int) {
-        try {
-            val arr = org.json.JSONArray(preferencesManager.citraTimerBallsJson.value)
-            arr.put(durationMinutes.coerceIn(1, 180))
-            preferencesManager.saveCitraTimerBallsJson(arr.toString())
-        } catch (_: Exception) {
-            val arr = org.json.JSONArray().apply { put(durationMinutes.coerceIn(1, 180)) }
-            preferencesManager.saveCitraTimerBallsJson(arr.toString())
-        }
+        preferencesManager.addCitraTimerBall(durationMinutes)
     }
 
     // Database Flows
@@ -351,6 +344,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateLastSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
         preferencesManager.setLastSyncTimestamp(timestamp)
         _lastSyncTimestamp.value = timestamp
+    }
+
+    // Modo Sem Perturbações (Distraction-Free Focus Mode)
+    val focusDistractionFreeEnabled: StateFlow<Boolean> = preferencesManager.focusDistractionFreeEnabled
+    val focusAllowedPackages: StateFlow<Set<String>> = preferencesManager.focusAllowedPackages
+
+    fun setFocusDistractionFreeEnabled(enabled: Boolean) {
+        preferencesManager.setFocusDistractionFreeEnabled(enabled)
+        if (!enabled) {
+            try {
+                com.example.service.FocusDistractionService.stop(getApplication())
+            } catch (_: Exception) {}
+        } else if (_pomodoroState.value.isRunning && _pomodoroState.value.currentPhase == PomodoroPhase.FOCUS) {
+            try {
+                com.example.service.FocusDistractionService.start(getApplication())
+            } catch (_: Exception) {}
+        }
     }
 
     // Flag indicating whether note full screen editor is currently visible
@@ -506,6 +516,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     phaseLabel = phase.label,
                     isPaused = true
                 )
+            } else if (phase == PomodoroPhase.BREAK && snapshot.remainingSeconds > 0) {
+                _pomodoroState.update {
+                    it.copy(
+                        focusMinutes = snapshot.focusMinutes,
+                        breakMinutes = snapshot.breakMinutes,
+                        totalCycles = snapshot.totalCycles,
+                        currentCycle = snapshot.currentCycle,
+                        currentPhase = PomodoroPhase.BREAK,
+                        remainingSeconds = snapshot.remainingSeconds,
+                        totalPhaseSeconds = snapshot.breakMinutes * 60,
+                        isRunning = false,
+                        isPaused = false,
+                        selectedCategory = snapshot.selectedCategory
+                    )
+                }
             } else {
                 NotificationHelper.cancelTimerNotification(getApplication())
             }
@@ -685,6 +710,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vibrate(40)
         _pomodoroState.update { it.copy(isRunning = true, isPaused = false) }
 
+        if (preferencesManager.focusDistractionFreeEnabled.value && _pomodoroState.value.currentPhase == PomodoroPhase.FOCUS) {
+            try {
+                com.example.service.FocusDistractionService.start(getApplication())
+            } catch (_: Exception) {}
+        }
+
         if (_pomodoroState.value.isStopwatchMode) {
             stopwatchStartTimeMillis = System.currentTimeMillis() - (_pomodoroState.value.stopwatchSeconds * 1000L)
             persistTimerState()
@@ -748,6 +779,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         timerJob = null
         NotificationHelper.cancelTimerEndAlarm(getApplication())
+        try {
+            com.example.service.FocusDistractionService.stop(getApplication())
+        } catch (_: Exception) {}
 
         val now = System.currentTimeMillis()
         if (_pomodoroState.value.isStopwatchMode) {
@@ -773,6 +807,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         timerJob = null
         NotificationHelper.cancelTimerEndAlarm(getApplication())
+        try {
+            com.example.service.FocusDistractionService.stop(getApplication())
+        } catch (_: Exception) {}
         timerTargetEndTimeMillis = 0L
         stopwatchStartTimeMillis = 0L
         val state = _pomodoroState.value
@@ -813,6 +850,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         vibrate(250)
         NotificationHelper.cancelTimerNotification(getApplication())
         NotificationHelper.cancelTimerEndAlarm(getApplication())
+        try {
+            com.example.service.FocusDistractionService.stop(getApplication())
+        } catch (_: Exception) {}
         timerTargetEndTimeMillis = 0L
         stopwatchStartTimeMillis = 0L
         val state = _pomodoroState.value

@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -61,9 +62,11 @@ fun TimerScreen(
     val pomodoroState by viewModel.pomodoroState.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val citraTimerBallsJson by viewModel.citraTimerBallsJson.collectAsState()
+    val isDistractionFreeEnabled by viewModel.focusDistractionFreeEnabled.collectAsState()
     val scrollState = rememberScrollState()
 
     var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var showFocusDistractionDialog by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var showSelectCategoryBeforeStartDialog by remember { mutableStateOf(false) }
@@ -173,28 +176,81 @@ fun TimerScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Surface(
+                            onClick = { showFocusDistractionDialog = true },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isDistractionFreeEnabled) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+                            } else {
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                            },
+                            border = BorderStroke(
+                                width = 1.dp,
+                                color = if (isDistractionFreeEnabled) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                }
+                            ),
+                            modifier = Modifier
+                                .testTag("btn_focus_distraction_mode")
+                                .clip(RoundedCornerShape(16.dp))
                         ) {
-                            Text(
-                                text = when {
-                                    pomodoroState.isStopwatchMode -> "⏱️"
-                                    pomodoroState.currentPhase == PomodoroPhase.BREAK -> "☕"
-                                    else -> "🎯"
-                                },
-                                fontSize = 18.sp
-                            )
-                            Text(
-                                text = when {
-                                    pomodoroState.isStopwatchMode -> "Modo Cronômetro"
-                                    pomodoroState.currentPhase == PomodoroPhase.BREAK -> "Pausa Opcional"
-                                    else -> "Modo Foco"
-                                },
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.5.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = when {
+                                        pomodoroState.isStopwatchMode -> "⏱️"
+                                        pomodoroState.currentPhase == PomodoroPhase.BREAK -> "☕"
+                                        isDistractionFreeEnabled -> "🛡️"
+                                        else -> "🎯"
+                                    },
+                                    fontSize = 16.sp
+                                )
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                pomodoroState.isStopwatchMode -> "Cronômetro"
+                                                pomodoroState.currentPhase == PomodoroPhase.BREAK -> "Pausa"
+                                                isDistractionFreeEnabled -> "Sem Perturbações"
+                                                else -> "Modo Foco"
+                                            },
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp,
+                                            color = if (isDistractionFreeEnabled) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.Tune,
+                                            contentDescription = "Configurar Modo Sem Perturbações",
+                                            modifier = Modifier.size(13.dp),
+                                            tint = if (isDistractionFreeEnabled) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                            }
+                                        )
+                                    }
+                                    if (isDistractionFreeEnabled && !pomodoroState.isStopwatchMode && pomodoroState.currentPhase != PomodoroPhase.BREAK) {
+                                        Text(
+                                            text = "Bloqueio de apps ativo",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         Row(
@@ -516,16 +572,14 @@ fun TimerScreen(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = if (pomodoroState.isStopwatchMode) {
-                            "⏱️ Cronômetro livre • Sobe até pausar"
-                        } else {
-                            "🍊 Dial cítrico • $visibleSeeds/$seedCount sementes ativas"
-                        },
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    if (pomodoroState.isStopwatchMode) {
+                        Text(
+                            text = "⏱️ Cronômetro livre • Sobe até pausar",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
 
                     if (!pomodoroState.isStopwatchMode && pomodoroState.currentPhase != PomodoroPhase.BREAK) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1058,6 +1112,13 @@ fun TimerScreen(
                 viewModel.addCustomCategory(name, emoji)
                 showAddCategoryDialog = false
             }
+        )
+    }
+
+    if (showFocusDistractionDialog) {
+        FocusDistractionDialog(
+            preferencesManager = viewModel.preferencesManager,
+            onDismiss = { showFocusDistractionDialog = false }
         )
     }
 

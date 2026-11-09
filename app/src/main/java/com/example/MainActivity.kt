@@ -80,12 +80,24 @@ class MainActivity : ComponentActivity() {
     private val authRepository by lazy { AuthRepository.getInstance(this) }
     private var pendingWidgetAction by mutableStateOf<String?>(null)
     private var pendingWidgetNoteId by mutableStateOf<Long?>(null)
+    private var pendingFocusOverlayAction by mutableStateOf<String?>(null)
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         checkAlarmIntent(intent)
         handleWidgetIntent(intent)
+        handleFocusOverlayIntent(intent)
+    }
+
+    private fun handleFocusOverlayIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+        val action = intent.action ?: return
+        if (action == com.example.service.FocusDistractionService.ACTION_OPEN_FROM_FOCUS_OVERLAY ||
+            action == com.example.service.FocusDistractionService.ACTION_PAUSE_FROM_FOCUS_OVERLAY
+        ) {
+            pendingFocusOverlayAction = action
+        }
     }
 
     private fun handleWidgetIntent(intent: android.content.Intent?) {
@@ -127,6 +139,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         checkAlarmIntent(intent)
         handleWidgetIntent(intent)
+        handleFocusOverlayIntent(intent)
 
         setContent {
             val isDarkThemeSetting by viewModel.isDarkTheme.collectAsState()
@@ -299,6 +312,16 @@ class MainActivity : ComponentActivity() {
                     }
                     pendingWidgetAction = null
                     pendingWidgetNoteId = null
+                }
+
+                // Handle Focus Distraction Overlay actions
+                LaunchedEffect(pendingFocusOverlayAction) {
+                    val action = pendingFocusOverlayAction ?: return@LaunchedEffect
+                    if (action == com.example.service.FocusDistractionService.ACTION_PAUSE_FROM_FOCUS_OVERLAY) {
+                        viewModel.pausePomodoro()
+                    }
+                    pagerState.scrollToPage(1)
+                    pendingFocusOverlayAction = null
                 }
 
                 var showMenu by remember { mutableStateOf(false) }

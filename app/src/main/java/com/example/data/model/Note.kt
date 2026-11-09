@@ -23,3 +23,16 @@ data class Note(
     val noteColor: String? = null,
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+fun Note.isReadyForMainList(now: Long = System.currentTimeMillis()): Boolean {
+    val dateStr = associatedDate ?: return true
+    if (dateStr.isBlank()) return true
+
+    val maxLeadTimeMs = 72L * 60L * 60L * 1000L
+    val targetTs = try {
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).parse(dateStr)?.time
+    } catch (_: Exception) { null } ?: return true
+
+    val diff = targetTs - now
+    return diff <= maxLeadTimeMs
+}

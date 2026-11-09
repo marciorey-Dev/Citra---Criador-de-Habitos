@@ -63,9 +63,36 @@ object SoundEffectsManager {
 
     fun getSoundName(id: String): String {
         if (id.startsWith("content://") || id.startsWith("file://")) {
-            return "Música Personalizada do Aparelho"
+            val clean = id.substringAfterLast('/').substringAfterLast('%').takeIf { it.isNotBlank() }
+            return clean ?: "Áudio Personalizado"
         }
         return getSoundById(id).name
+    }
+
+    fun getAudioDisplayName(context: Context?, soundIdOrUri: String): String {
+        if (soundIdOrUri.isBlank()) return "Padrão"
+        if (soundIdOrUri.startsWith("content://") || soundIdOrUri.startsWith("file://")) {
+            if (context != null) {
+                try {
+                    val uri = Uri.parse(soundIdOrUri)
+                    var name: String? = null
+                    if (uri.scheme == "content") {
+                        context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                if (idx != -1) name = cursor.getString(idx)
+                            }
+                        }
+                    }
+                    val fileName = name ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+                    if (!fileName.isNullOrBlank()) {
+                        return fileName
+                    }
+                } catch (_: Exception) {}
+            }
+            return "Áudio Personalizado"
+        }
+        return getSoundById(soundIdOrUri).name
     }
 
     fun getSoundResId(id: String): Int {

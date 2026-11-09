@@ -25,13 +25,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.model.Category
 import com.example.data.model.Habit
+import com.example.data.model.calculateWeeklyStreak
 import com.example.data.model.getFrequencyLabel
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.theme.OrangeContainer
 import com.example.ui.tutorial.tutorialTarget
+import com.example.util.SoundEffectsManager
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -518,7 +522,7 @@ fun HabitItemCard(
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
-                            text = "Sequência: ${habit.currentStreak} dias",
+                            text = "Sequência: ${habit.calculateWeeklyStreak()} dias",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -605,15 +609,18 @@ fun HabitItemCard(
                 weekDays.forEach { (label, dateStr) ->
                     val isCompleted = completedSet.contains(dateStr)
                     val isToday = dateStr == todaySdf
+                    val isPast = dateStr < todaySdf
 
                     val pillBg = when {
                         isCompleted -> MaterialTheme.colorScheme.secondary
                         isToday -> MaterialTheme.colorScheme.primary
+                        isPast -> MaterialTheme.colorScheme.error // Vermelho para dia pulado sem apagar histórico
                         else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                     }
                     val pillFg = when {
                         isCompleted -> MaterialTheme.colorScheme.onSecondary
                         isToday -> MaterialTheme.colorScheme.onPrimary
+                        isPast -> MaterialTheme.colorScheme.onError
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
 
@@ -727,6 +734,12 @@ fun AddHabitDialog(
                 HabitFrequencySelector(
                     frequencyDays = frequencyDays,
                     onFrequencyChanged = { frequencyDays = it }
+                )
+
+                HabitAudioSelectionRow(
+                    customSoundUri = customSoundUri,
+                    onSoundSelected = { customSoundUri = it },
+                    onClear = { customSoundUri = "" }
                 )
 
                 Row(
@@ -855,6 +868,12 @@ fun EditHabitDialog(
                 HabitFrequencySelector(
                     frequencyDays = frequencyDays,
                     onFrequencyChanged = { frequencyDays = it }
+                )
+
+                HabitAudioSelectionRow(
+                    customSoundUri = customSoundUri,
+                    onSoundSelected = { customSoundUri = it },
+                    onClear = { customSoundUri = "" }
                 )
 
                 Row(
@@ -1077,6 +1096,98 @@ private fun HabitEmojiSection(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(text = emoji, fontSize = 18.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HabitAudioSelectionRow(
+    customSoundUri: String,
+    onSoundSelected: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    val context = LocalContext.current
+    val audioPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            onSoundSelected(uri.toString())
+        }
+    }
+
+    val displayName = remember(customSoundUri) {
+        SoundEffectsManager.getAudioDisplayName(context, customSoundUri)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Toque do Hábito:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { audioPicker.launch("audio/*") }
+                ) {
+                    Icon(
+                        imageVector = if (customSoundUri.isNotBlank()) Icons.Default.MusicNote else Icons.Default.NotificationsNone,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = displayName,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (customSoundUri.isNotBlank()) {
+                        IconButton(
+                            onClick = { SoundEffectsManager.playPreview(context, customSoundUri) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.VolumeUp, contentDescription = "Testar som", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                SoundEffectsManager.stopPreview()
+                                onClear()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Remover som", modifier = Modifier.size(16.dp))
+                        }
+                    } else {
+                        TextButton(
+                            onClick = { audioPicker.launch("audio/*") },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Escolher", fontSize = 11.sp)
+                        }
                     }
                 }
             }

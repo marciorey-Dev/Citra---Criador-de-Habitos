@@ -121,6 +121,35 @@ class PreferencesManager(private val context: Context) {
     private val _financeBiometricEnabled = MutableStateFlow(prefs.getBoolean("finance_biometric_enabled", false))
     val financeBiometricEnabled: StateFlow<Boolean> = _financeBiometricEnabled.asStateFlow()
 
+    // Distraction-Free Focus Mode (Modo Sem Perturbações)
+    private val _focusDistractionFreeEnabled = MutableStateFlow(prefs.getBoolean("focus_distraction_free_enabled", false))
+    val focusDistractionFreeEnabled: StateFlow<Boolean> = _focusDistractionFreeEnabled.asStateFlow()
+
+    private val _focusAllowedPackages = MutableStateFlow(
+        prefs.getStringSet("focus_allowed_packages", emptySet()) ?: emptySet()
+    )
+    val focusAllowedPackages: StateFlow<Set<String>> = _focusAllowedPackages.asStateFlow()
+
+    fun setFocusDistractionFreeEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("focus_distraction_free_enabled", enabled).apply()
+        _focusDistractionFreeEnabled.value = enabled
+    }
+
+    fun setFocusAllowedPackages(packages: Set<String>) {
+        prefs.edit().putStringSet("focus_allowed_packages", packages).apply()
+        _focusAllowedPackages.value = packages
+    }
+
+    fun toggleFocusAllowedPackage(packageName: String) {
+        val current = _focusAllowedPackages.value.toMutableSet()
+        if (current.contains(packageName)) {
+            current.remove(packageName)
+        } else {
+            current.add(packageName)
+        }
+        setFocusAllowedPackages(current)
+    }
+
     private fun resolveDailyWelcomePhrase(forceNew: Boolean = false): String {
         val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
         val lastDate = prefs.getString("last_welcome_date", null)
@@ -201,6 +230,23 @@ class PreferencesManager(private val context: Context) {
     fun saveCitraTimerBallsJson(json: String) {
         prefs.edit().putString("citra_timer_balls_json", json).apply()
         _citraTimerBallsJson.value = json
+    }
+
+    fun addCitraTimerBall(durationMinutes: Int) {
+        val safeMins = durationMinutes.coerceIn(1, 180)
+        try {
+            val current = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
+            val arr = org.json.JSONArray(current)
+            arr.put(safeMins)
+            val updated = arr.toString()
+            prefs.edit().putString("citra_timer_balls_json", updated).commit()
+            _citraTimerBallsJson.value = updated
+        } catch (_: Exception) {
+            val arr = org.json.JSONArray().apply { put(safeMins) }
+            val updated = arr.toString()
+            prefs.edit().putString("citra_timer_balls_json", updated).commit()
+            _citraTimerBallsJson.value = updated
+        }
     }
 
     fun clearCitraTimerBalls() {

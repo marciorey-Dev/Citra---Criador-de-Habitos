@@ -310,7 +310,7 @@ fun AchievementsDialog(
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
-                                            text = "Continue no seu ritmo solar! Cada pausa consciente e tarefa focada nutre seu pomar pessoal.",
+                                            text = "Continue com foco e consistência! Cada pausa consciente e tarefa focada nutre seu pomar pessoal.",
                                             fontSize = 12.sp,
                                             lineHeight = 16.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant

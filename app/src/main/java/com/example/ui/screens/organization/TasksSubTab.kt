@@ -28,12 +28,16 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.model.Category
 import com.example.data.model.Task
 import com.example.data.model.TaskPriority
+import com.example.data.model.isReadyForMainList
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.tutorial.tutorialTarget
+import com.example.util.SoundEffectsManager
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -62,17 +66,18 @@ fun TasksSubTab(
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
 
-    val pendingCount = remember(tasks) { tasks.count { !it.isCompleted } }
+    val pendingCount = remember(tasks) { tasks.count { !it.isCompleted && it.isReadyForMainList() } }
     val completedCount = remember(tasks) { tasks.count { it.isCompleted } }
     val completionPercent = remember(tasks, completedCount) {
-        if (tasks.isEmpty()) 0 else (completedCount * 100) / tasks.size
+        val totalVisible = tasks.count { it.isReadyForMainList() || it.isCompleted }
+        if (totalVisible == 0) 0 else (completedCount * 100) / totalVisible
     }
 
     val filteredTasks = remember(tasks, filterMode) {
         when (filterMode) {
-            "PENDING" -> tasks.filter { !it.isCompleted }
+            "PENDING" -> tasks.filter { !it.isCompleted && it.isReadyForMainList() }
             "COMPLETED" -> tasks.filter { it.isCompleted }
-            else -> tasks
+            else -> tasks.filter { it.isCompleted || it.isReadyForMainList() }
         }
     }
 
@@ -635,12 +640,16 @@ fun TaskItemCard(
 fun QuickAddTaskDialog(
     categories: List<Category>,
     initialTitle: String = "",
+    initialDateStr: String? = null,
+    onlyAskTime: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int) -> Unit
 ) {
     QuickAddTaskDialog(
         categories = categories,
         initialTitle = initialTitle,
+        initialDateStr = initialDateStr,
+        onlyAskTime = onlyAskTime,
         onDismiss = onDismiss,
         onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, _, _ ->
             onConfirm(title, category, priority, dueText, dueTimestamp, minutesBefore)
@@ -652,6 +661,8 @@ fun QuickAddTaskDialog(
 fun QuickAddTaskDialog(
     categories: List<Category>,
     initialTitle: String = "",
+    initialDateStr: String? = null,
+    onlyAskTime: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int, customSoundUri: String, loopAlarm: Boolean) -> Unit
 ) {
@@ -660,9 +671,22 @@ fun QuickAddTaskDialog(
     var category by remember { mutableStateOf(categories.firstOrNull()?.name ?: "Geral") }
     var priority by remember { mutableStateOf(TaskPriority.MEDIA) }
 
-    val cal = remember { Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, 2) } }
-    var selectedTimestamp by remember { mutableStateOf<Long?>(cal.timeInMillis) }
-    var dueDateText by remember {
+    val cal = remember(initialDateStr) {
+        val c = Calendar.getInstance()
+        if (!initialDateStr.isNullOrBlank()) {
+            try {
+                val parts = initialDateStr.split("-")
+                if (parts.size == 3) {
+                    c.set(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt(), 12, 0, 0)
+                }
+            } catch (_: Exception) {}
+        } else {
+            c.add(Calendar.HOUR_OF_DAY, 2)
+        }
+        c
+    }
+    var selectedTimestamp by remember(cal) { mutableStateOf<Long?>(cal.timeInMillis) }
+    var dueDateText by remember(cal) {
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(cal.time))
     }
     var reminderMinutesBefore by remember { mutableStateOf(15) }
@@ -671,29 +695,49 @@ fun QuickAddTaskDialog(
     var showMoreOptions by remember { mutableStateOf(false) }
 
     fun openDateTimePicker() {
-        val currentCal = Calendar.getInstance()
-        DatePickerDialog(
-            context,
-            { _, year, month, dayOfMonth ->
-                val timeCal = Calendar.getInstance()
-                TimePickerDialog(
-                    context,
-                    { _, hourOfDay, minute ->
-                        val picked = Calendar.getInstance().apply {
-                            set(year, month, dayOfMonth, hourOfDay, minute, 0)
-                        }
-                        selectedTimestamp = picked.timeInMillis
-                        dueDateText = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(picked.time)
-                    },
-                    timeCal.get(Calendar.HOUR_OF_DAY),
-                    timeCal.get(Calendar.MINUTE),
-                    true
-                ).show()
-            },
-            currentCal.get(Calendar.YEAR),
-            currentCal.get(Calendar.MONTH),
-            currentCal.get(Calendar.DAY_OF_MONTH)
-        ).show()
+        val currentCal = Calendar.getInstance().apply {
+            selectedTimestamp?.let { timeInMillis = it }
+        }
+        if (onlyAskTime) {
+            TimePickerDialog(
+                context,
+                { _, hourOfDay, minute ->
+                    val picked = (currentCal.clone() as Calendar).apply {
+                        set(Calendar.HOUR_OF_DAY, hourOfDay)
+                        set(Calendar.MINUTE, minute)
+                        set(Calendar.SECOND, 0)
+                    }
+                    selectedTimestamp = picked.timeInMillis
+                    dueDateText = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(picked.time)
+                },
+                currentCal.get(Calendar.HOUR_OF_DAY),
+                currentCal.get(Calendar.MINUTE),
+                true
+            ).show()
+        } else {
+            DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val timeCal = Calendar.getInstance()
+                    TimePickerDialog(
+                        context,
+                        { _, hourOfDay, minute ->
+                            val picked = Calendar.getInstance().apply {
+                                set(year, month, dayOfMonth, hourOfDay, minute, 0)
+                            }
+                            selectedTimestamp = picked.timeInMillis
+                            dueDateText = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(picked.time)
+                        },
+                        timeCal.get(Calendar.HOUR_OF_DAY),
+                        timeCal.get(Calendar.MINUTE),
+                        true
+                    ).show()
+                },
+                currentCal.get(Calendar.YEAR),
+                currentCal.get(Calendar.MONTH),
+                currentCal.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        }
     }
 
     AlertDialog(
@@ -740,7 +784,16 @@ fun QuickAddTaskDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Event, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = "Prazo: $dueDateText", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text(
+                                text = if (onlyAskTime) {
+                                    val timeOnly = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(selectedTimestamp ?: cal.timeInMillis))
+                                    "Horário: $timeOnly • Dia $dueDateText"
+                                } else {
+                                    "Prazo: $dueDateText"
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
                         Icon(Icons.Default.EditCalendar, contentDescription = null, modifier = Modifier.size(18.dp))
                     }
@@ -805,6 +858,12 @@ fun QuickAddTaskDialog(
                                 )
                             }
                         }
+
+                        TaskAudioSelectionRow(
+                            customSoundUri = customSoundUri,
+                            onSoundSelected = { customSoundUri = it },
+                            onClear = { customSoundUri = "" }
+                        )
 
                         // Opção de Toque em Loop
                         Row(
@@ -952,6 +1011,12 @@ fun EditTaskDialog(
                     }
                 }
 
+                TaskAudioSelectionRow(
+                    customSoundUri = customSoundUri,
+                    onSoundSelected = { customSoundUri = it },
+                    onClear = { customSoundUri = "" }
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -999,4 +1064,96 @@ fun EditTaskDialog(
         },
         shape = RoundedCornerShape(20.dp)
     )
+}
+
+@Composable
+fun TaskAudioSelectionRow(
+    customSoundUri: String,
+    onSoundSelected: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    val context = LocalContext.current
+    val audioPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            onSoundSelected(uri.toString())
+        }
+    }
+
+    val displayName = remember(customSoundUri) {
+        SoundEffectsManager.getAudioDisplayName(context, customSoundUri)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Toque da Tarefa:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { audioPicker.launch("audio/*") }
+                ) {
+                    Icon(
+                        imageVector = if (customSoundUri.isNotBlank()) Icons.Default.MusicNote else Icons.Default.NotificationsNone,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = displayName,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (customSoundUri.isNotBlank()) {
+                        IconButton(
+                            onClick = { SoundEffectsManager.playPreview(context, customSoundUri) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.VolumeUp, contentDescription = "Testar som", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                SoundEffectsManager.stopPreview()
+                                onClear()
+                            },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Remover som", modifier = Modifier.size(16.dp))
+                        }
+                    } else {
+                        TextButton(
+                            onClick = { audioPicker.launch("audio/*") },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Escolher", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -68,15 +68,29 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                                     timestamp = System.currentTimeMillis()
                                 )
                                 db.focusSessionDao().insertSession(session)
-                            }
-                            prefs.saveTimerSnapshot(
-                                snapshot.copy(
-                                    isRunning = false,
-                                    isPaused = false,
-                                    remainingSeconds = 0,
-                                    targetEndTimeMillis = 0L
+                                prefs.addCitraTimerBall(snapshot.focusMinutes)
+
+                                val breakSec = snapshot.breakMinutes * 60
+                                prefs.saveTimerSnapshot(
+                                    snapshot.copy(
+                                        phaseName = "BREAK",
+                                        remainingSeconds = breakSec,
+                                        totalPhaseSeconds = breakSec,
+                                        isRunning = false,
+                                        isPaused = false,
+                                        targetEndTimeMillis = 0L
+                                    )
                                 )
-                            )
+                            } else {
+                                prefs.saveTimerSnapshot(
+                                    snapshot.copy(
+                                        isRunning = false,
+                                        isPaused = false,
+                                        remainingSeconds = 0,
+                                        targetEndTimeMillis = 0L
+                                    )
+                                )
+                            }
                         }
                     } catch (_: Exception) {}
                 }

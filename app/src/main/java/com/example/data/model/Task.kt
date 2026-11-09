@@ -26,3 +26,26 @@ data class Task(
     val loopAlarm: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+fun Task.isReadyForMainList(now: Long = System.currentTimeMillis()): Boolean {
+    // 72 hours window in milliseconds (72 * 60 * 60 * 1000L)
+    val maxLeadTimeMs = 72L * 60L * 60L * 1000L
+
+    val targetTs = dueDateTimestamp ?: run {
+        try {
+            if (dueDateText.isNotBlank()) {
+                val clean = dueDateText.trim()
+                val sdf = if (clean.contains("-")) {
+                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                } else if (clean.contains("/")) {
+                    java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
+                } else null
+                sdf?.parse(clean.take(10))?.time
+            } else null
+        } catch (_: Exception) { null }
+    } ?: return true // No due date set: immediately visible
+
+    val diff = targetTs - now
+    // If due date is more than 72 hours in future, stay hidden from main lists until 72h window
+    return diff <= maxLeadTimeMs
+}
