@@ -23,11 +23,20 @@ import com.example.data.model.Task
 import com.example.ui.MainViewModel
 import com.example.ui.screens.calendar.CalendarScreen
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import com.example.util.squashBounceClickable
+import com.example.util.staggeredEntrance
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizationScreen(
     viewModel: MainViewModel,
-    onNavigateToTimerWithTask: (Task) -> Unit
+    onNavigateToTimerWithTask: (Task) -> Unit,
+    isInitialLaunch: Boolean = false
 ) {
     val selectedTabIndex by viewModel.organizationSubTab.collectAsState()
     val isNoteEditorOpen by viewModel.isNoteEditorOpen.collectAsState()
@@ -39,56 +48,85 @@ fun OrganizationScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (!isNoteEditorOpen) {
-            // Top Segmented Pill Navigation
+            // Top Segmented Pill Navigation with Animated Sliding Indicator
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 2.dp)
+                    .staggeredEntrance(index = 0, enabled = isInitialLaunch)
             ) {
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(5.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        tabs.forEachIndexed { index, (title, icon, testTag) ->
-                            val isSelected = selectedTabIndex == index
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isSelected) MaterialTheme.colorScheme.surface else Color.Transparent,
-                                shadowElevation = if (isSelected) 2.dp else 0.dp,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(CircleShape)
-                                    .clickable { viewModel.setOrganizationSubTab(index) }
-                                    .testTag(testTag)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(vertical = 9.dp, horizontal = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(4.dp)) {
+                        val totalW = maxWidth
+                        val tabW = totalW / tabs.size
+                        val indicatorOffset by animateDpAsState(
+                            targetValue = tabW * selectedTabIndex,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            ),
+                            label = "tabIndicatorSlide"
+                        )
+
+                        // Smooth Sliding Background Pill
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 2.5.dp,
+                            modifier = Modifier
+                                .offset(x = indicatorOffset)
+                                .width(tabW)
+                                .height(38.dp)
+                        ) {}
+
+                        // Clickable Tab Labels
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            tabs.forEachIndexed { index, (title, icon, testTag) ->
+                                val isSelected = selectedTabIndex == index
+                                val contentColor by animateColorAsState(
+                                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    animationSpec = tween(220),
+                                    label = "tabContentColor"
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(CircleShape)
+                                        .squashBounceClickable { viewModel.setOrganizationSubTab(index) }
+                                        .testTag(testTag),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = null,
-                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = title,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            tint = contentColor,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = title,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = contentColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }

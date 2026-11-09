@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -271,6 +272,12 @@ class MainActivity : ComponentActivity() {
                     if (defaultStartTab == "CALENDAR") {
                         viewModel.setOrganizationSubTab(2)
                     }
+                }
+
+                var isColdStart by rememberSaveable { mutableStateOf(true) }
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(1200)
+                    isColdStart = false
                 }
 
                 // HorizontalPager state for fast swipe between menus
@@ -797,7 +804,8 @@ class MainActivity : ComponentActivity() {
                                     if (notesPageIndex >= 0) {
                                         coroutineScope.launch { pagerState.scrollToPage(notesPageIndex) }
                                     }
-                                }
+                                },
+                                isInitialLaunch = isColdStart && initialPageIndex == page
                             )
                             Screen.Timer -> TimerScreen(
                                 viewModel = viewModel,
@@ -809,7 +817,8 @@ class MainActivity : ComponentActivity() {
                                 viewModel = viewModel,
                                 onNavigateToTimerWithTask = {
                                     coroutineScope.launch { pagerState.scrollToPage(1) }
-                                }
+                                },
+                                isInitialLaunch = isColdStart && initialPageIndex == page
                             )
                             Screen.Notes -> NotesSubTab(
                                 viewModel = viewModel
@@ -835,7 +844,8 @@ class MainActivity : ComponentActivity() {
                             )
                             Screen.Finances -> com.example.ui.screens.finances.FinancesScreen(
                                 viewModel = viewModel,
-                                onOpenFinanceSettings = { showSettingsDialog = true }
+                                onOpenFinanceSettings = { showSettingsDialog = true },
+                                isInitialLaunch = isColdStart && initialPageIndex == page
                             )
                         }
                     }

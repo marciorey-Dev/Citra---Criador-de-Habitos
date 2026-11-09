@@ -1,6 +1,8 @@
 package com.example.ui.screens.finances
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +27,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -36,6 +39,9 @@ import com.example.data.model.*
 import com.example.ui.MainViewModel
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
+import com.example.util.squashBounce
+import com.example.util.squashBounceClickable
+import com.example.util.staggeredEntrance
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -53,7 +59,8 @@ enum class FinancePeriodMode(val label: String) {
 @Composable
 fun FinancesScreen(
     viewModel: MainViewModel,
-    onOpenFinanceSettings: () -> Unit
+    onOpenFinanceSettings: () -> Unit,
+    isInitialLaunch: Boolean = false
 ) {
     val defaultCurrencyCode by viewModel.financeDefaultCurrency.collectAsState()
     val baseBalanceMinor by viewModel.financeBaseBalanceMinor.collectAsState()
@@ -253,7 +260,9 @@ fun FinancesScreen(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isInitialLaunch) Modifier.staggeredEntrance(0) else Modifier)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -480,57 +489,90 @@ fun FinancesScreen(
             }
         }
 
-        // 2. Segmented Pill Toggle: [ ↘ DESPESAS ] [ ↗ RENDAS ]
+        // 2. Segmented Pill Toggle: [ ↘ DESPESAS ] [ ↗ RENDAS ] (Animated Sliding Pill)
         item {
+            val isExpense = selectedType == FinanceEntryType.EXPENSE
+            val animatedPillColor by animateColorAsState(
+                targetValue = if (isExpense) MaterialTheme.colorScheme.primary else GreenAccent,
+                animationSpec = tween(durationMillis = 300),
+                label = "financePillColor"
+            )
+
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isInitialLaunch) Modifier.staggeredEntrance(1) else Modifier)
             ) {
-                Row(
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .padding(4.dp)
                 ) {
-                    FinanceEntryType.entries.forEach { type ->
-                        val selected = selectedType == type
-                        val pillBg = when {
-                            selected && type == FinanceEntryType.EXPENSE -> MaterialTheme.colorScheme.primary
-                            selected && type == FinanceEntryType.INCOME -> GreenAccent
-                            else -> Color.Transparent
-                        }
-                        val pillContent = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                    val halfWidth = maxWidth / 2
+                    val indicatorOffset by animateDpAsState(
+                        targetValue = if (isExpense) 0.dp else halfWidth,
+                        animationSpec = spring(
+                            dampingRatio = 0.75f,
+                            stiffness = Spring.StiffnessMediumLow
+                        ),
+                        label = "financeIndicatorOffset"
+                    )
 
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = pillBg,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .clickable { selectedType = type }
-                                .testTag("finance_type_${type.id.lowercase()}")
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
+                    // Sliding Pill Indicator
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = animatedPillColor,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .offset(x = indicatorOffset)
+                            .width(halfWidth)
+                            .height(42.dp)
+                    ) {}
+
+                    // Clickable Labels Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                    ) {
+                        FinanceEntryType.entries.forEach { type ->
+                            val selected = selectedType == type
+                            val textColor by animateColorAsState(
+                                targetValue = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                animationSpec = tween(200),
+                                label = "financeTextColor_${type.name}"
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .squashBounceClickable { selectedType = type }
+                                    .testTag("finance_type_${type.id.lowercase()}"),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = if (type == FinanceEntryType.EXPENSE) Icons.Default.SouthEast else Icons.Default.NorthEast,
-                                    contentDescription = null,
-                                    tint = pillContent,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (type == FinanceEntryType.EXPENSE) "DESPESAS" else "RENDAS",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 13.sp,
-                                    color = pillContent
-                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (type == FinanceEntryType.EXPENSE) Icons.Default.SouthEast else Icons.Default.NorthEast,
+                                        contentDescription = null,
+                                        tint = textColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (type == FinanceEntryType.EXPENSE) "DESPESAS" else "RENDAS",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 13.sp,
+                                        color = textColor
+                                    )
+                                }
                             }
                         }
                     }
@@ -777,8 +819,21 @@ fun FinancesScreen(
                         if (pieSlices.isEmpty()) {
                             EmptyFinanceChartPlaceholder(isExpenseMode = true)
                         } else {
+                            val chartProgress = remember { Animatable(0f) }
+                            LaunchedEffect(pieSlices, selectedType, periodMode) {
+                                chartProgress.snapTo(0f)
+                                chartProgress.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
+                                )
+                            }
+
                             Box(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        alpha = chartProgress.value
+                                    },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Box(
@@ -793,21 +848,31 @@ fun FinancesScreen(
                                             (size.height - diameter) / 2f
                                         )
                                         var startAngle = -90f
+                                        val animatedTotalSweep = 360f * chartProgress.value
+                                        var accumulated = 0f
                                         pieSlices.forEach { slice ->
-                                            val sweep = (slice.fraction * 360f).coerceAtLeast(3f)
-                                            drawArc(
-                                                color = slice.color,
-                                                startAngle = startAngle,
-                                                sweepAngle = sweep,
-                                                useCenter = false,
-                                                topLeft = topLeft,
-                                                size = Size(diameter, diameter),
-                                                style = Stroke(width = strokeWidth)
-                                            )
-                                            startAngle += sweep
+                                            val sliceSweep = slice.fraction * 360f
+                                            val availableSweep = (animatedTotalSweep - accumulated).coerceAtLeast(0f)
+                                            val sweep = sliceSweep.coerceAtMost(availableSweep)
+                                            if (sweep > 0f) {
+                                                drawArc(
+                                                    color = slice.color,
+                                                    startAngle = startAngle,
+                                                    sweepAngle = sweep,
+                                                    useCenter = false,
+                                                    topLeft = topLeft,
+                                                    size = Size(diameter, diameter),
+                                                    style = Stroke(width = strokeWidth)
+                                                )
+                                                startAngle += sweep
+                                            }
+                                            accumulated += sliceSweep
                                         }
                                     }
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.graphicsLayer { alpha = chartProgress.value }
+                                    ) {
                                         Text(
                                             text = "TOTAL",
                                             fontSize = 10.5.sp,
@@ -1578,14 +1643,26 @@ private fun FinanceEntryRowCard(
         SimpleDateFormat("dd MMM", Locale("pt", "AO")).format(Date(entry.dateMillis))
     }
 
+    val enterAnim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        enterAnim.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+        )
+    }
+
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                alpha = enterAnim.value
+                translationY = (1f - enterAnim.value) * 36f
+            }
             .clip(RoundedCornerShape(20.dp))
-            .clickable { onEdit() }
+            .squashBounceClickable { onEdit() }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

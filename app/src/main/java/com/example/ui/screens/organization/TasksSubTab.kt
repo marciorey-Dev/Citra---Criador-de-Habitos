@@ -2,7 +2,14 @@ package com.example.ui.screens.organization
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.example.util.squashBounce
+import com.example.util.squashBounceClickable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -286,6 +293,7 @@ fun TasksSubTab(
                 .align(Alignment.BottomEnd)
                 .padding(16.dp)
                 .size(56.dp)
+                .squashBounce()
                 .tutorialTarget("tasks_add_button")
                 .testTag("add_task_fab")
         ) {
@@ -419,23 +427,81 @@ fun TaskItemCard(
         "criatividade", "ideias", "comunidade" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onPrimaryContainer
     }
+    val isDark = isAppDarkTheme()
+    var isCompleting by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+
+    val isMarked = task.isCompleted || isCompleting
+
+    val cardBg by animateColorAsState(
+        targetValue = if (isMarked) {
+            if (isDark) Color(0xFF1E3827) else Color(0xFFE8F7ED)
+        } else if (task.isCompleted) {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        animationSpec = tween(durationMillis = 250),
+        label = "taskCardBg"
+    )
+
+    val cardBorderColor by animateColorAsState(
+        targetValue = if (isMarked) {
+            Color(0xFF4ADE80)
+        } else {
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+        },
+        animationSpec = tween(durationMillis = 250),
+        label = "taskCardBorder"
+    )
+
+    val chkBg by animateColorAsState(
+        targetValue = if (isMarked) {
+            Color(0xFF16A34A)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "taskChkBg"
+    )
+
+    val animatedTitleColor by animateColorAsState(
+        targetValue = if (isMarked) {
+            if (isDark) Color(0xFF4ADE80) else Color(0xFF1B5E20)
+        } else if (task.isCompleted) {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "taskTitleColor"
+    )
+
+    fun triggerComplete() {
+        if (task.isCompleted) {
+            onToggle()
+        } else {
+            isCompleting = true
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            coroutineScope.launch {
+                delay(380)
+                onToggle()
+                isCompleting = false
+            }
+        }
+    }
 
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (task.isCompleted) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        ),
+        colors = CardDefaults.cardColors(containerColor = cardBg),
         elevation = CardDefaults.cardElevation(defaultElevation = if (task.isCompleted) 0.dp else 2.dp),
         modifier = Modifier
             .fillMaxWidth()
             .then(if (isFirst) Modifier.tutorialTarget("tasks_list_first_item") else Modifier)
             .border(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+                color = cardBorderColor,
                 shape = RoundedCornerShape(20.dp)
             )
             .clip(RoundedCornerShape(20.dp))
@@ -465,32 +531,30 @@ fun TaskItemCard(
                             .padding(top = 2.dp)
                             .size(24.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (task.isCompleted) {
-                                    MaterialTheme.colorScheme.secondary
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
-                                }
-                            )
+                            .background(chkBg)
                             .border(
                                 width = 1.dp,
-                                color = if (task.isCompleted) {
-                                    MaterialTheme.colorScheme.secondary
+                                color = if (isMarked) {
+                                    Color(0xFF16A34A)
                                 } else {
                                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                                 },
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .clickable { onToggle() }
+                            .squashBounceClickable { triggerComplete() }
                             .then(if (isFirst) Modifier.tutorialTarget("tasks_checkbox_area") else Modifier)
                             .testTag("task_checkbox_${task.id}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (task.isCompleted) {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = isMarked,
+                            enter = scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)) + fadeIn(),
+                            exit = scaleOut() + fadeOut()
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = "Concluída",
-                                tint = MaterialTheme.colorScheme.onSecondary,
+                                tint = Color.White,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -501,12 +565,8 @@ fun TaskItemCard(
                             text = task.title,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            textDecoration = if (task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
-                            color = if (task.isCompleted) {
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
+                            textDecoration = if (isMarked) TextDecoration.LineThrough else TextDecoration.None,
+                            color = animatedTitleColor,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -777,6 +837,11 @@ fun QuickAddTaskDialog(
         SimpleDateFormat("dd/MM/yyyy 'às' HH:mm", Locale.getDefault()).format(Date(target))
     }
 
+    var dialogVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        dialogVisible = true
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -787,14 +852,24 @@ fun QuickAddTaskDialog(
                 .padding(horizontal = 18.dp, vertical = 24.dp),
             contentAlignment = Alignment.Center
         ) {
-            Surface(
-                shape = RoundedCornerShape(32.dp),
-                color = warmBg,
-                shadowElevation = 10.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight()
+            AnimatedVisibility(
+                visible = dialogVisible,
+                enter = slideInVertically(
+                    initialOffsetY = { fullHeight -> fullHeight / 2 },
+                    animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                ) + fadeIn(animationSpec = tween(250)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it / 2 }
+                ) + fadeOut(animationSpec = tween(150))
             ) {
+                Surface(
+                    shape = RoundedCornerShape(32.dp),
+                    color = warmBg,
+                    shadowElevation = 10.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1276,6 +1351,7 @@ fun QuickAddTaskDialog(
                         }
                     }
                 }
+            }
             }
         }
     }

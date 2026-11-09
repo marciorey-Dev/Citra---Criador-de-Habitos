@@ -23,10 +23,21 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.model.Task
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.example.util.squashBounce
+import com.example.util.squashBounceClickable
+import com.example.util.staggeredEntrance
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.example.data.model.TaskPriority
 import com.example.data.model.isReadyForMainList
 import com.example.ui.MainViewModel
@@ -44,8 +55,26 @@ fun HomeScreen(
     onNavigateToTimer: () -> Unit,
     onNavigateToOrganization: () -> Unit,
     onQuickAddTask: () -> Unit,
-    onQuickAddNote: () -> Unit
+    onQuickAddNote: () -> Unit,
+    isInitialLaunch: Boolean = false
 ) {
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val completingTaskIds = remember { mutableStateListOf<Long>() }
+    val completingHabitIds = remember { mutableStateListOf<Long>() }
+
+    fun completeTaskAnimated(task: Task) {
+        if (task.id in completingTaskIds) return
+        completingTaskIds.add(task.id)
+        try {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        } catch (_: Throwable) {}
+        coroutineScope.launch {
+            delay(320)
+            viewModel.toggleTask(task)
+            completingTaskIds.remove(task.id)
+        }
+    }
     val tasks by viewModel.tasks.collectAsState()
     val habits by viewModel.habits.collectAsState()
     val pomodoroState by viewModel.pomodoroState.collectAsState()
@@ -71,7 +100,7 @@ fun HomeScreen(
     ) {
         // 1. Greeting & Date Header
         item {
-            Column {
+            Column(modifier = Modifier.staggeredEntrance(index = 0, enabled = isInitialLaunch)) {
                 Text(
                     text = dateDisplay,
                     fontSize = 13.sp,
@@ -100,167 +129,170 @@ fun HomeScreen(
             val primaryColor = MaterialTheme.colorScheme.primary
             val tertiaryColor = MaterialTheme.colorScheme.tertiary
 
-            if (pomodoroState.isRunning || pomodoroState.isPaused) {
-                val mins = pomodoroState.remainingSeconds / 60
-                val secs = pomodoroState.remainingSeconds % 60
-                val timeStr = String.format("%02d:%02d", mins, secs)
+            Box(modifier = Modifier.staggeredEntrance(index = 1, enabled = isInitialLaunch)) {
+                if (pomodoroState.isRunning || pomodoroState.isPaused) {
+                    val mins = pomodoroState.remainingSeconds / 60
+                    val secs = pomodoroState.remainingSeconds % 60
+                    val timeStr = String.format("%02d:%02d", mins, secs)
 
-                Card(
-                    shape = RoundedCornerShape(26.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tutorialTarget("home_pomodoro_card")
-                        .clickable { onNavigateToTimer() }
-                        .testTag("home_active_timer_card")
-                ) {
-                    Row(
+                    Card(
+                        shape = RoundedCornerShape(26.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .tutorialTarget("home_pomodoro_card")
+                            .squashBounceClickable { onNavigateToTimer() }
+                            .testTag("home_active_timer_card")
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(50.dp)
-                                .background(primaryColor, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CitraMascote(
-                                humor = MascotHumor.FELIZ,
-                                olharX = 0f,
-                                olharY = 0f,
-                                tamanho = 34.dp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (pomodoroState.isPaused) "Sessão Pausada" else "Sessão em Andamento",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                            Text(
-                                text = timeStr,
-                                fontSize = 26.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            if (pomodoroState.linkedTask != null) {
-                                Text(
-                                    text = "Foco em: ${pomodoroState.linkedTask!!.title}",
-                                    fontSize = 11.5.sp,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        Button(
-                            onClick = { onNavigateToTimer() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = primaryColor,
-                                contentColor = MaterialTheme.colorScheme.onPrimary
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                        ) {
-                            Text("Abrir", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                    }
-                }
-            } else {
-                Surface(
-                    shape = RoundedCornerShape(26.dp),
-                    shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tutorialTarget("home_pomodoro_card")
-                        .clip(RoundedCornerShape(26.dp))
-                        .clickable { onNavigateToTimer() }
-                        .testTag("home_start_focus_btn")
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        primaryColor,
-                                        primaryColor.copy(alpha = 0.92f),
-                                        tertiaryColor.copy(alpha = 0.9f)
-                                    )
-                                )
-                            )
-                    ) {
-                        // Subtle ambient decorative circles
-                        Box(
-                            modifier = Modifier
-                                .size(120.dp)
-                                .align(Alignment.TopEnd)
-                                .offset(x = 28.dp, y = (-28).dp)
-                                .background(Color.White.copy(alpha = 0.10f), CircleShape)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(90.dp)
-                                .align(Alignment.BottomStart)
-                                .offset(x = (-20).dp, y = 24.dp)
-                                .background(Color.White.copy(alpha = 0.08f), CircleShape)
-                        )
-
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 20.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CitraMascote(
-                                        humor = MascotHumor.FELIZ,
-                                        olharX = 0f,
-                                        olharY = 0f,
-                                        tamanho = 28.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Iniciar Sessão de Foco",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "${pomodoroState.focusMinutes} min de concentração  •  ${pomodoroState.totalCycles} ciclos",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .background(primaryColor, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CitraMascote(
+                                    humor = MascotHumor.FELIZ,
+                                    olharX = 0f,
+                                    olharY = 0f,
+                                    tamanho = 34.dp
                                 )
                             }
 
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (pomodoroState.isPaused) "Sessão Pausada" else "Sessão em Andamento",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                                Text(
+                                    text = timeStr,
+                                    fontSize = 26.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                if (pomodoroState.linkedTask != null) {
+                                    Text(
+                                        text = "Foco em: ${pomodoroState.linkedTask!!.title}",
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Button(
+                                onClick = { onNavigateToTimer() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = primaryColor,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                modifier = Modifier.squashBounce()
+                            ) {
+                                Text("Abrir", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(26.dp),
+                        shadowElevation = 8.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .tutorialTarget("home_pomodoro_card")
+                            .clip(RoundedCornerShape(26.dp))
+                            .squashBounceClickable { onNavigateToTimer() }
+                            .testTag("home_start_focus_btn")
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            primaryColor,
+                                            primaryColor.copy(alpha = 0.92f),
+                                            tertiaryColor.copy(alpha = 0.9f)
+                                        )
+                                    )
+                                )
+                        ) {
+                            // Subtle ambient decorative circles
                             Box(
                                 modifier = Modifier
-                                    .size(52.dp)
-                                    .background(Color.White.copy(alpha = 0.24f), CircleShape)
-                                    .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape),
-                                contentAlignment = Alignment.Center
+                                    .size(120.dp)
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 28.dp, y = (-28).dp)
+                                    .background(Color.White.copy(alpha = 0.10f), CircleShape)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(90.dp)
+                                    .align(Alignment.BottomStart)
+                                    .offset(x = (-20).dp, y = 24.dp)
+                                    .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Iniciar foco",
-                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(28.dp)
-                                )
+                                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CitraMascote(
+                                            humor = MascotHumor.FELIZ,
+                                            olharX = 0f,
+                                            olharY = 0f,
+                                            tamanho = 28.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Iniciar Sessão de Foco",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "${pomodoroState.focusMinutes} min de concentração  •  ${pomodoroState.totalCycles} ciclos",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .background(Color.White.copy(alpha = 0.24f), CircleShape)
+                                        .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Iniciar foco",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -273,6 +305,7 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .staggeredEntrance(index = 2, enabled = isInitialLaunch)
                     .tutorialTarget("home_tasks_shortcut"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -299,7 +332,7 @@ fun HomeScreen(
                                 MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
                                 RoundedCornerShape(16.dp)
                             )
-                            .clickable { onQuickAddNote() }
+                            .squashBounceClickable { onQuickAddNote() }
                             .testTag("home_quick_add_note_btn")
                     ) {
                         Row(
@@ -335,7 +368,7 @@ fun HomeScreen(
                                 MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
                                 RoundedCornerShape(16.dp)
                             )
-                            .clickable { onQuickAddTask() }
+                            .squashBounceClickable { onQuickAddTask() }
                             .testTag("home_quick_add_task_btn")
                     ) {
                         Row(
@@ -371,6 +404,7 @@ fun HomeScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .staggeredEntrance(index = 3, enabled = isInitialLaunch)
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
@@ -410,99 +444,127 @@ fun HomeScreen(
                         TaskPriority.MEDIA -> MaterialTheme.colorScheme.primary
                         TaskPriority.BAIXA -> GreenAccent
                     }
+                    val isCompleting = currentTask.id in completingTaskIds
+                    val cardBg by animateColorAsState(
+                        targetValue = if (isCompleting) Color(0xFFE8F7ED) else MaterialTheme.colorScheme.surface,
+                        animationSpec = tween(280),
+                        label = "currentTaskBg"
+                    )
+                    val cardBorder by animateColorAsState(
+                        targetValue = if (isCompleting) Color(0xFF4ADE80) else priorityColor.copy(alpha = 0.45f),
+                        animationSpec = tween(280),
+                        label = "currentTaskBorder"
+                    )
+                    val taskTitleColor by animateColorAsState(
+                        targetValue = if (isCompleting) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onSurface,
+                        animationSpec = tween(280),
+                        label = "currentTaskTitle"
+                    )
 
-                    Card(
-                        shape = RoundedCornerShape(22.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(
-                                1.5.dp,
-                                priorityColor.copy(alpha = 0.45f),
-                                RoundedCornerShape(22.dp)
-                            )
+                    AnimatedVisibility(
+                        visible = currentTask.id !in completingTaskIds,
+                        exit = shrinkVertically(tween(300)) + fadeOut(tween(250)),
+                        modifier = Modifier.staggeredEntrance(index = 3, enabled = isInitialLaunch)
                     ) {
-                        Column(
+                        Card(
+                            shape = RoundedCornerShape(22.dp),
+                            colors = CardDefaults.cardColors(containerColor = cardBg),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp)
+                                .border(1.5.dp, cardBorder, RoundedCornerShape(22.dp))
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = priorityColor.copy(alpha = 0.12f)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        text = "TAREFA ATUAL • ${currentTask.priority.label.uppercase()}",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = priorityColor,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-                                ) {
-                                    Text(
-                                        text = currentTask.category,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = currentTask.isCompleted,
-                                    onCheckedChange = { viewModel.toggleTask(currentTask) },
-                                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.secondary)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = currentTask.title,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (currentTask.dueDateText.isNotBlank()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isCompleting) Color(0xFF16A34A).copy(alpha = 0.15f) else priorityColor.copy(alpha = 0.12f)
+                                    ) {
                                         Text(
-                                            text = "📅 ${currentTask.dueDateText}",
-                                            fontSize = 11.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = if (isCompleting) "CONCLUINDO..." else "TAREFA ATUAL • ${currentTask.priority.label.uppercase()}",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (isCompleting) Color(0xFF16A34A) else priorityColor,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                    ) {
+                                        Text(
+                                            text = currentTask.category,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                         )
                                     }
                                 }
 
-                                IconButton(
-                                    onClick = {
-                                        viewModel.linkTaskToPomodoro(currentTask)
-                                        onNavigateToTimer()
-                                    },
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Focar nesta tarefa",
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(22.dp)
+                                    Checkbox(
+                                        checked = currentTask.isCompleted || isCompleting,
+                                        onCheckedChange = { completeTaskAnimated(currentTask) },
+                                        colors = CheckboxDefaults.colors(
+                                            checkedColor = Color(0xFF16A34A),
+                                            checkmarkColor = Color.White
+                                        ),
+                                        modifier = Modifier.squashBounce()
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { completeTaskAnimated(currentTask) }
+                                    ) {
+                                        Text(
+                                            text = currentTask.title,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            textDecoration = if (isCompleting || currentTask.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
+                                            color = taskTitleColor
+                                        )
+                                        if (currentTask.dueDateText.isNotBlank()) {
+                                            Text(
+                                                text = "📅 ${currentTask.dueDateText}",
+                                                fontSize = 11.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            viewModel.linkTaskToPomodoro(currentTask)
+                                            onNavigateToTimer()
+                                        },
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
+                                            .squashBounce()
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Focar nesta tarefa",
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -512,45 +574,73 @@ fun HomeScreen(
 
             if (nextTasks.isNotEmpty()) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.staggeredEntrance(index = 3, enabled = isInitialLaunch)
+                    ) {
                         nextTasks.forEach { task ->
-                            Card(
-                                shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(
-                                        1.dp,
-                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-                                        RoundedCornerShape(18.dp)
-                                    )
+                            val isTaskCompleting = task.id in completingTaskIds
+                            val nextBg by animateColorAsState(
+                                targetValue = if (isTaskCompleting) Color(0xFFE8F7ED) else MaterialTheme.colorScheme.surface,
+                                animationSpec = tween(280),
+                                label = "nextTaskBg"
+                            )
+                            val nextBorder by animateColorAsState(
+                                targetValue = if (isTaskCompleting) Color(0xFF4ADE80) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                                animationSpec = tween(280),
+                                label = "nextTaskBorder"
+                            )
+                            val nextTitleColor by animateColorAsState(
+                                targetValue = if (isTaskCompleting) Color(0xFF1B5E20) else MaterialTheme.colorScheme.onSurface,
+                                animationSpec = tween(280),
+                                label = "nextTaskTitleColor"
+                            )
+
+                            AnimatedVisibility(
+                                visible = task.id !in completingTaskIds,
+                                exit = shrinkVertically(tween(300)) + fadeOut(tween(250))
                             ) {
-                                Row(
+                                Card(
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = CardDefaults.cardColors(containerColor = nextBg),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .border(1.dp, nextBorder, RoundedCornerShape(18.dp))
                                 ) {
-                                    Checkbox(
-                                        checked = task.isCompleted,
-                                        onCheckedChange = { viewModel.toggleTask(task) }
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = task.title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = task.category,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { completeTaskAnimated(task) }
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked = task.isCompleted || isTaskCompleting,
+                                            onCheckedChange = { completeTaskAnimated(task) },
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = Color(0xFF16A34A),
+                                                checkmarkColor = Color.White
+                                            ),
+                                            modifier = Modifier.squashBounce()
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = task.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            textDecoration = if (isTaskCompleting || task.isCompleted) TextDecoration.LineThrough else TextDecoration.None,
+                                            color = nextTitleColor,
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = task.category,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -562,7 +652,9 @@ fun HomeScreen(
                 item {
                     TextButton(
                         onClick = { onNavigateToOrganization() },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .squashBounce()
                     ) {
                         Text(
                             "Ver todas as ${pendingTasks.size} tarefas pendentes →",
@@ -574,10 +666,12 @@ fun HomeScreen(
             }
         }
 
-        // 5. Daily Habits Section ("Hábitos de Hoje")
+        // 5. Habits Section ("Hábitos de Hoje")
         item {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .staggeredEntrance(index = 4, enabled = isInitialLaunch),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
@@ -595,7 +689,7 @@ fun HomeScreen(
                     )
 
                     val completedToday = habits.count { h ->
-                        h.completedDatesCsv.split(",").any { it.trim() == todayStr }
+                        h.completedDatesCsv.split(",").any { it.trim() == todayStr } || h.id in completingHabitIds
                     }
                     Text(
                         text = "$completedToday de ${habits.size} feitos",
@@ -617,31 +711,37 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         items(habits, key = { it.id }) { habit ->
-                            val isDone = habit.completedDatesCsv.split(",").any { it.trim() == todayStr }
+                            val isDone = habit.completedDatesCsv.split(",").any { it.trim() == todayStr } || habit.id in completingHabitIds
+                            val habitBg by animateColorAsState(
+                                targetValue = if (isDone) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f) else MaterialTheme.colorScheme.surface,
+                                animationSpec = tween(300),
+                                label = "habitBg"
+                            )
+                            val habitBorder by animateColorAsState(
+                                targetValue = if (isDone) MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                animationSpec = tween(300),
+                                label = "habitBorder"
+                            )
 
                             Card(
                                 shape = RoundedCornerShape(22.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isDone) {
-                                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
-                                    } else {
-                                        MaterialTheme.colorScheme.surface
-                                    }
-                                ),
+                                colors = CardDefaults.cardColors(containerColor = habitBg),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                                 modifier = Modifier
                                     .width(156.dp)
                                     .clip(RoundedCornerShape(22.dp))
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isDone) {
-                                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)
-                                        } else {
-                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                        },
-                                        shape = RoundedCornerShape(22.dp)
-                                    )
-                                    .clickable { viewModel.toggleHabitToday(habit) }
+                                    .border(width = 1.dp, color = habitBorder, shape = RoundedCornerShape(22.dp))
+                                    .squashBounceClickable {
+                                        completingHabitIds.add(habit.id)
+                                        try {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        } catch (_: Throwable) {}
+                                        coroutineScope.launch {
+                                            delay(250)
+                                            viewModel.toggleHabitToday(habit)
+                                            completingHabitIds.remove(habit.id)
+                                        }
+                                    }
                             ) {
                                 Column(
                                     modifier = Modifier
@@ -671,13 +771,28 @@ fun HomeScreen(
                                             )
                                         }
 
-                                        if (isDone) {
-                                            Icon(
-                                                imageVector = Icons.Default.CheckCircle,
-                                                contentDescription = "Concluído",
-                                                tint = MaterialTheme.colorScheme.secondary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                        AnimatedContent(
+                                            targetState = isDone,
+                                            transitionSpec = {
+                                                scaleIn(tween(250)) togetherWith scaleOut(tween(200))
+                                            },
+                                            label = "habitDoneIcon"
+                                        ) { done ->
+                                            if (done) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = "Concluído",
+                                                    tint = MaterialTheme.colorScheme.secondary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.RadioButtonUnchecked,
+                                                    contentDescription = "Pendente",
+                                                    tint = MaterialTheme.colorScheme.outlineVariant,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
                                     }
 
