@@ -190,14 +190,17 @@ class CitraMascotView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val scaleFactor = Math.min(w / 200f, h / 212f) * 0.95f
-        val offsetX = (w - 200f * scaleFactor) / 2f
-        val offsetY = (h - 212f * scaleFactor) / 2f
+        val mascotBaseW = 200f
+        val mascotBaseH = 200f
+        val baseScale = Math.min(w / mascotBaseW, h / mascotBaseH) * 0.88f
+        val currentScale = baseScale * pulseScale
 
         canvas.save()
-        canvas.translate(offsetX, offsetY)
-        canvas.scale(scaleFactor * pulseScale, scaleFactor * pulseScale, 100f * scaleFactor, 106f * scaleFactor)
-        canvas.translate(0f, 12f)
+        // Center exactly in the View
+        canvas.translate(w / 2f, h / 2f)
+        canvas.scale(currentScale, currentScale)
+        // Center of mascot (100f, 95f) mapped to (0, 0)
+        canvas.translate(-100f, -95f)
 
         // 1. Body
         canvas.drawCircle(100f, 100f, 80f, bodyPaint)

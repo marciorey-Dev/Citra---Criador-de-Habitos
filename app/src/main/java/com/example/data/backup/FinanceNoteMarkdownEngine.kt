@@ -123,12 +123,16 @@ object FinanceNoteMarkdownEngine {
     }
 
     fun stripFinanceMarkers(content: String): String {
-        return content.replace(Regex("<!--\\s*citra:fin:[^>]*-->\\s*\\n?"), "").trim()
+        return content
+            .replace(Regex("(?i)<!--\\s*citra:fin:[\\s\\S]*?-->\\s*\\n?"), "")
+            .replace(Regex("<!--\\s*citra:fin:inicio[\\s\\S]*?-->\\s*\\n?"), "")
+            .replace(Regex("<!--\\s*citra:fin:fim[\\s\\S]*?-->\\s*\\n?"), "")
+            .trim()
     }
 
     fun hasManagedBlock(content: String, blockId: String): Boolean {
-        val startRegex = Regex("<!--\\s*citra:fin:inicio\\s+id=${Regex.escape(blockId)}[^>]*-->")
-        val endRegex = Regex("<!--\\s*citra:fin:fim\\s+id=${Regex.escape(blockId)}\\s*-->")
+        val startRegex = Regex("(?i)<!--\\s*citra:fin:inicio\\s+id=${Regex.escape(blockId)}[^>]*-->")
+        val endRegex = Regex("(?i)<!--\\s*citra:fin:fim\\s+id=${Regex.escape(blockId)}\\s*-->")
         return (startRegex.containsMatchIn(content) && endRegex.containsMatchIn(content)) || content.isNotBlank()
     }
 
@@ -155,8 +159,8 @@ object FinanceNoteMarkdownEngine {
         }
 
         // REPLACE_BLOCK or NEW_NOTE_PER_PERIOD
-        val startRegex = Regex("<!--\\s*citra:fin:inicio\\s+id=${Regex.escape(link.blockId)}[^>]*-->")
-        val endRegex = Regex("<!--\\s*citra:fin:fim\\s+id=${Regex.escape(link.blockId)}\\s*-->")
+        val startRegex = Regex("(?i)<!--\\s*citra:fin:inicio\\s+id=${Regex.escape(link.blockId)}[^>]*-->")
+        val endRegex = Regex("(?i)<!--\\s*citra:fin:fim\\s+id=${Regex.escape(link.blockId)}\\s*-->")
         val startMatch = startRegex.find(originalContent)
         val endMatch = if (startMatch != null) endRegex.find(originalContent, startMatch.range.last + 1) else null
 

@@ -434,7 +434,7 @@ class FocusDistractionService : Service() {
 
         // Animated Citra Mascot View with double blinking eyes & subtle breathing pulse
         val mascot = CitraMascotView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dpToPx(190), dpToPx(200)).apply {
+            layoutParams = LinearLayout.LayoutParams(dpToPx(200), dpToPx(200)).apply {
                 gravity = Gravity.CENTER_HORIZONTAL
                 bottomMargin = dpToPx(20)
             }

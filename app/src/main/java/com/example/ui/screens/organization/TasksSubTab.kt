@@ -302,8 +302,8 @@ fun TasksSubTab(
         QuickAddTaskDialog(
             categories = categories,
             onDismiss = { showAddDialog = false },
-            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loop ->
-                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loop)
+            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loop, disruptive ->
+                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loop, disruptive)
                 showAddDialog = false
             }
         )

@@ -55,109 +55,109 @@ object PaperNotePalette {
             key = "DEFAULT",
             displayName = "Padrão",
             primaryColor = OrangePrimary,
-            lightBg = Color(0xFFFBF7F0),
-            lightFlap = Color(0xFFE8DFCE),
-            darkBg = Color(0xFF24211D),
-            darkFlap = Color(0xFF35302A)
+            lightBg = Color(0xFFF4ECE0),
+            lightFlap = Color(0xFFDFD2BF),
+            darkBg = Color(0xFF38332C),
+            darkFlap = Color(0xFF4E473E)
         ),
         NoteColorOption(
             key = "TANGERINA",
             displayName = "Laranja Cítrico",
             primaryColor = Color(0xFFFF6F00),
-            lightBg = Color(0xFFFFF6EB),
-            lightFlap = Color(0xFFFFDFC0),
-            darkBg = Color(0xFF4C3322),
-            darkFlap = Color(0xFF6B4831)
+            lightBg = Color(0xFFFEE8D3),
+            lightFlap = Color(0xFFFCD3AF),
+            darkBg = Color(0xFF5D3921),
+            darkFlap = Color(0xFF7E4E2E)
         ),
         NoteColorOption(
             key = "AZUL_OCEANO",
             displayName = "Azul Oceano",
             primaryColor = Color(0xFF1E88E5),
-            lightBg = Color(0xFFEEF5FF),
-            lightFlap = Color(0xFFD3E5FD),
-            darkBg = Color(0xFF2C4360),
-            darkFlap = Color(0xFF3E5F88)
+            lightBg = Color(0xFFDEEDFD),
+            lightFlap = Color(0xFFC0DCFB),
+            darkBg = Color(0xFF2C4A73),
+            darkFlap = Color(0xFF3D659B)
         ),
         NoteColorOption(
             key = "VERDE_ESMERALDA",
             displayName = "Verde Esmeralda",
             primaryColor = Color(0xFF2E7D32),
-            lightBg = Color(0xFFEFF8F0),
-            lightFlap = Color(0xFFD4EED7),
-            darkBg = Color(0xFF2A4D33),
-            darkFlap = Color(0xFF3C6D48)
+            lightBg = Color(0xFFDFF3E3),
+            lightFlap = Color(0xFFC1E7C7),
+            darkBg = Color(0xFF285437),
+            darkFlap = Color(0xFF38754D)
         ),
         NoteColorOption(
             key = "ROXO_COSMICO",
             displayName = "Roxo Cósmico",
             primaryColor = Color(0xFF7E57C2),
-            lightBg = Color(0xFFF6F0FD),
-            lightFlap = Color(0xFFE5D5F9),
-            darkBg = Color(0xFF45335E),
-            darkFlap = Color(0xFF634986)
+            lightBg = Color(0xFFEFE4FA),
+            lightFlap = Color(0xFFDDCBF7),
+            darkBg = Color(0xFF533B70),
+            darkFlap = Color(0xFF72519B)
         ),
         NoteColorOption(
             key = "ROSA_CORAL",
             displayName = "Rosa Coral",
             primaryColor = Color(0xFFE91E63),
-            lightBg = Color(0xFFFFF0F4),
-            lightFlap = Color(0xFFFFD4E1),
-            darkBg = Color(0xFF552D40),
-            darkFlap = Color(0xFF79405C)
+            lightBg = Color(0xFFFDE2EC),
+            lightFlap = Color(0xFFFAC4D7),
+            darkBg = Color(0xFF65334D),
+            darkFlap = Color(0xFF8B476B)
         ),
         NoteColorOption(
             key = "AMBAR_DOURADO",
             displayName = "Âmbar Dourado",
             primaryColor = Color(0xFFD97706),
-            lightBg = Color(0xFFFFF8E6),
-            lightFlap = Color(0xFFFFE8B0),
-            darkBg = Color(0xFF4F3E22),
-            darkFlap = Color(0xFF715931)
+            lightBg = Color(0xFFFDF0CF),
+            lightFlap = Color(0xFFFCE19E),
+            darkBg = Color(0xFF5C4622),
+            darkFlap = Color(0xFF806231)
         ),
         NoteColorOption(
             key = "VERDE_MENTA",
             displayName = "Verde Menta",
             primaryColor = Color(0xFF00897B),
-            lightBg = Color(0xFFEDFAF6),
-            lightFlap = Color(0xFFC7F1E7),
-            darkBg = Color(0xFF2A4E47),
-            darkFlap = Color(0xFF3D6E64)
+            lightBg = Color(0xFFDCF5EE),
+            lightFlap = Color(0xFFBBEADC),
+            darkBg = Color(0xFF2B574F),
+            darkFlap = Color(0xFF3B776C)
         ),
         NoteColorOption(
             key = "CARAMELO_AVELA",
             displayName = "Kraft Avelã",
             primaryColor = Color(0xFF8D6E63),
-            lightBg = Color(0xFFF5EDE5),
-            lightFlap = Color(0xFFE2D3C6),
-            darkBg = Color(0xFF4A3E37),
-            darkFlap = Color(0xFF6A594F)
+            lightBg = Color(0xFFEDE0D4),
+            lightFlap = Color(0xFFDAC5B5),
+            darkBg = Color(0xFF55433B),
+            darkFlap = Color(0xFF755E53)
         ),
         NoteColorOption(
             key = "AZUL_CELESTE",
             displayName = "Azul Celeste",
             primaryColor = Color(0xFF0288D1),
-            lightBg = Color(0xFFEEF8FE),
-            lightFlap = Color(0xFFCDECFB),
-            darkBg = Color(0xFF29465D),
-            darkFlap = Color(0xFF3B6485)
+            lightBg = Color(0xFFDCF0FB),
+            lightFlap = Color(0xFFB9E0F8),
+            darkBg = Color(0xFF2A5070),
+            darkFlap = Color(0xFF3B6F9B)
         ),
         NoteColorOption(
             key = "VERDE_LIMA",
             displayName = "Verde Lima",
             primaryColor = Color(0xFF689F38),
-            lightBg = Color(0xFFF5FBE6),
-            lightFlap = Color(0xFFE0F4B8),
-            darkBg = Color(0xFF3D4D29),
-            darkFlap = Color(0xFF576E3A)
+            lightBg = Color(0xFFEDF7D4),
+            lightFlap = Color(0xFFD9EFA7),
+            darkBg = Color(0xFF46592B),
+            darkFlap = Color(0xFF627D3D)
         ),
         NoteColorOption(
             key = "FRAMBOESA_DOCE",
             displayName = "Framboesa Doce",
             primaryColor = Color(0xFFAD1457),
-            lightBg = Color(0xFFFEECF4),
-            lightFlap = Color(0xFFFAC9DF),
-            darkBg = Color(0xFF542C43),
-            darkFlap = Color(0xFF783E60)
+            lightBg = Color(0xFFFCE1F0),
+            lightFlap = Color(0xFFFAC3E2),
+            darkBg = Color(0xFF63304E),
+            darkFlap = Color(0xFF8B446E)
         )
     )
 

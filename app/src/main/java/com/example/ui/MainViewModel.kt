@@ -998,7 +998,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dueTimestamp: Long?,
         reminderMinutesBefore: Int,
         customSoundUri: String = "",
-        loopAlarm: Boolean = false
+        loopAlarm: Boolean = false,
+        isDisruptive: Boolean = false
     ) {
         viewModelScope.launch {
             repository.insertTask(
@@ -1010,7 +1011,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     dueDateTimestamp = dueTimestamp,
                     reminderMinutesBefore = reminderMinutesBefore,
                     customSoundUri = customSoundUri,
-                    loopAlarm = loopAlarm
+                    loopAlarm = loopAlarm,
+                    isDisruptive = isDisruptive
                 )
             )
             _userMessage.emit("Tarefa criada com sucesso!")

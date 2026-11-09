@@ -1494,18 +1494,18 @@ private fun HabitEmojiSection(
                 shape = RoundedCornerShape(18.dp),
                 color = if (isDark) Color(0xFF352B20) else Color(0xFFFDECE2),
                 border = BorderStroke(1.dp, cardBorder),
-                modifier = Modifier.size(62.dp)
+                modifier = Modifier.size(70.dp)
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(2.dp)
+                        .padding(4.dp)
                 ) {
                     Text(
                         text = selectedEmoji.ifBlank { "💧" },
-                        fontSize = 28.sp,
-                        lineHeight = 34.sp
+                        fontSize = 32.sp,
+                        lineHeight = 38.sp
                     )
                 }
             }
@@ -1516,12 +1516,12 @@ private fun HabitEmojiSection(
                 border = BorderStroke(1.dp, cardBorder),
                 modifier = Modifier
                     .weight(1f)
-                    .height(62.dp)
+                    .height(70.dp)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text(
@@ -1529,7 +1529,7 @@ private fun HabitEmojiSection(
                         fontSize = 11.sp,
                         color = subTextColor
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     BasicTextField(
                         value = selectedEmoji,
                         onValueChange = { input ->
@@ -1541,8 +1541,8 @@ private fun HabitEmojiSection(
                         },
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(
-                            fontSize = 18.sp,
-                            lineHeight = 22.sp,
+                            fontSize = 20.sp,
+                            lineHeight = 28.sp,
                             fontWeight = FontWeight.Medium,
                             color = textColor
                         ),

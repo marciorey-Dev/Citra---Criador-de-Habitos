@@ -190,11 +190,56 @@ object CitraDocsFileManager {
      */
     fun deleteNoteMarkdown(context: Context, title: String, uuid: String? = null): Boolean {
         var deletedAny = false
-        val targetFilenames = setOf(
+
+        fun normalizeStr(s: String): String =
+            java.text.Normalizer.normalize(s.lowercase().trim(), java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+
+        val normTitle = normalizeStr(title)
+        val sanitizedTitle = normalizeStr(sanitizeFilename(title))
+
+        val targetFilenames = mutableSetOf(
             "${sanitizeFilename(title)}.md".lowercase(),
             "$title.md".lowercase(),
-            "${title.trim()}.md".lowercase()
+            "${title.trim()}.md".lowercase(),
+            "$normTitle.md",
+            "$sanitizedTitle.md"
         )
+        if (title.isBlank() || title.equals("Sem título", ignoreCase = true) || title.equals("Nota sem título", ignoreCase = true)) {
+            targetFilenames.add("nota_sem_titulo.md")
+            targetFilenames.add("sem_titulo.md")
+        }
+
+        // Helper to check if file matches title or contains UUID
+        fun isTargetFile(f: File, filename: String): Boolean {
+            val lowerName = filename.lowercase()
+            val normName = normalizeStr(filename)
+            if (targetFilenames.contains(lowerName) || targetFilenames.contains(normName)) {
+                return true
+            }
+            if (uuid != null && uuid.isNotBlank()) {
+                if (lowerName.contains(uuid.lowercase())) return true
+                try {
+                    if (f.exists() && f.canRead() && f.length() < 256 * 1024) {
+                        val header = f.bufferedReader().use { reader ->
+                            val sb = StringBuilder()
+                            var line = reader.readLine()
+                            var linesRead = 0
+                            while (line != null && linesRead < 40) {
+                                sb.append(line).append("\n")
+                                line = reader.readLine()
+                                linesRead++
+                            }
+                            sb.toString()
+                        }
+                        if (header.contains(uuid, ignoreCase = true)) {
+                            return true
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            return false
+        }
 
         // 1. Direct File Deletion across all candidate directories
         val folders = getAllDocsFolders(context)
@@ -202,27 +247,7 @@ object CitraDocsFileManager {
             if (!folder.exists()) continue
             val allFiles = folder.listFiles { f -> f.isFile && f.name.endsWith(".md", ignoreCase = true) } ?: continue
             for (f in allFiles) {
-                var shouldDelete = targetFilenames.contains(f.name.lowercase())
-                if (!shouldDelete && uuid != null && uuid.isNotBlank()) {
-                    try {
-                        val header = f.bufferedReader().use { reader ->
-                            val sb = StringBuilder()
-                            var line = reader.readLine()
-                            var linesRead = 0
-                            while (line != null && linesRead < 15) {
-                                sb.append(line).append("\n")
-                                line = reader.readLine()
-                                linesRead++
-                            }
-                            sb.toString()
-                        }
-                        if (header.contains(uuid)) {
-                            shouldDelete = true
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                if (shouldDelete) {
+                if (isTargetFile(f, f.name)) {
                     val filePath = f.absolutePath
                     val ok = f.delete()
                     if (ok || !f.exists()) {
@@ -240,48 +265,39 @@ object CitraDocsFileManager {
             }
         }
 
-        // 2. Android MediaStore ContentResolver Deletion (Scoped Storage on API 29+)
+        // 2. Android MediaStore ContentResolver Deletion (Scoped Storage standard deletion)
         try {
             val externalUri = android.provider.MediaStore.Files.getContentUri("external")
-            val selection = "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ? OR ${android.provider.MediaStore.MediaColumns.DATA} LIKE ?"
-            val args = arrayOf("%.md", "%Citra Docs%")
             val projection = arrayOf(
                 android.provider.MediaStore.MediaColumns._ID,
                 android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
                 android.provider.MediaStore.MediaColumns.DATA
             )
-            context.contentResolver.query(externalUri, projection, selection, args, null)?.use { cursor ->
+            // Query files in Documents/Citra Docs or matching display name
+            context.contentResolver.query(externalUri, projection, null, null, null)?.use { cursor ->
                 val idCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns._ID)
                 val nameCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
                 val dataCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
+
                 while (cursor.moveToNext()) {
                     val id = if (idCol >= 0) cursor.getLong(idCol) else -1L
                     val name = if (nameCol >= 0) cursor.getString(nameCol) else null
                     val data = if (dataCol >= 0) cursor.getString(dataCol) else null
 
-                    var match = false
-                    if (name != null && targetFilenames.contains(name.lowercase())) {
-                        match = true
-                    }
-                    if (!match && data != null && uuid != null && uuid.isNotBlank()) {
-                        try {
-                            val f = File(data)
-                            if (f.exists() && f.canRead()) {
-                                val firstLine = f.bufferedReader().use { it.readLine() ?: "" }
-                                if (firstLine.contains(uuid)) match = true
-                            }
-                        } catch (_: Exception) {}
-                    }
+                    if (name == null || !name.endsWith(".md", ignoreCase = true)) continue
+                    val isInCitraDocs = (data != null && data.contains("Citra Docs", ignoreCase = true))
 
-                    if (match && id != -1L) {
-                        try {
-                            val deleteUri = android.content.ContentUris.withAppendedId(externalUri, id)
-                            context.contentResolver.delete(deleteUri, null, null)
-                            deletedAny = true
-                            if (data != null) {
-                                File(data).delete()
-                            }
-                        } catch (_: Exception) {}
+                    if (isInCitraDocs || targetFilenames.contains(name.lowercase()) || (uuid != null && name.contains(uuid, ignoreCase = true))) {
+                        val file = if (data != null) File(data) else null
+                        val matches = if (file != null) isTargetFile(file, name) else targetFilenames.contains(name.lowercase())
+                        if (matches && id != -1L) {
+                            try {
+                                val deleteUri = android.content.ContentUris.withAppendedId(externalUri, id)
+                                context.contentResolver.delete(deleteUri, null, null)
+                                deletedAny = true
+                                file?.delete()
+                            } catch (_: Exception) {}
+                        }
                     }
                 }
             }

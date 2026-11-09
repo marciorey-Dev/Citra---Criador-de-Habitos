@@ -906,8 +906,8 @@ fun CalendarScreen(
             initialDateStr = selectedDateStr,
             onlyAskTime = true,
             onDismiss = { showAddTaskDialog = false },
-            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm ->
-                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm)
+            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm, disruptive ->
+                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm, disruptive)
                 showAddTaskDialog = false
             }
         )

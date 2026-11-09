@@ -149,10 +149,10 @@ object NoteExportHelper {
             if (cleanTitle.equals("Índice", ignoreCase = true) || cleanTitle.contains("Índice")) continue
 
             val prefix = "$indent$cleanTitle "
-            val suffix = " (Página $page)"
-            val dashesCount = (targetWidth - prefix.length - suffix.length).coerceAtLeast(6)
+            val pageSuffix = " página $page"
+            val dashesCount = (targetWidth - prefix.length - pageSuffix.length).coerceAtLeast(8)
             val dashes = "-".repeat(dashesCount)
-            tocSb.append("$prefix$dashes$suffix\n\n")
+            tocSb.append("$prefix$dashes$pageSuffix\n\n")
         }
         tocSb.append("<!-- pagebreak -->\n\n")
 
@@ -1507,7 +1507,7 @@ object NoteExportHelper {
                 is CalloutBlock -> sb.append("<div class=\"callout callout-${block.type}\"><strong>${block.type.uppercase()}:</strong> ${renderInlineHtml(block.text, themeHex)}</div>\n")
                 is ToggleBlock -> sb.append("<details open><summary>${escapeHtml(block.title)}</summary><p>${renderInlineHtml(block.content, themeHex)}</p></details>\n")
                 is DividerBlock -> sb.append("<hr style=\"border:none; border-top: 2px solid var(--primary); margin: 24px 0;\">\n")
-                is PageBreakBlock -> sb.append("<div style=\"page-break-after: always; break-after: page; border-top: 1px dashed #cbd5e1; margin: 30px 0; text-align: center;\"><span style=\"font-size: 0.75rem; color: #94a3b8; background: #fff; padding: 0 10px; position: relative; top: -10px;\">QUEBRA DE PÁGINA</span></div>\n")
+                is PageBreakBlock -> sb.append("<div style=\"page-break-after: always; break-after: page; height: 0; margin: 0; padding: 0;\"></div>\n")
 
                 is ImageBlock -> {
                     val bmp = loadBitmapFromUrl(context, block.url)
@@ -2229,7 +2229,7 @@ object NoteExportHelper {
                 is CalloutBlock -> sb.append("[AVISO - ").append(block.type.uppercase()).append("]: ").append(block.text).append("\n\n")
                 is ToggleBlock -> sb.append("▼ ").append(block.title).append("\n   ").append(block.content).append("\n\n")
                 is DividerBlock -> sb.append("-------------------------------------\n\n")
-                is PageBreakBlock -> sb.append("\n=== [QUEBRA DE PÁGINA] ===\n\n")
+                is PageBreakBlock -> sb.append("\n\n")
                 is ImageBlock -> sb.append("[IMAGEM: ").append(block.alt).append("]\n\n")
                 is AudioBlock -> sb.append("[ÁUDIO: ").append(block.title).append("]\n\n")
             }
@@ -2358,7 +2358,7 @@ object NoteExportHelper {
                     is CalloutBlock -> writer.write("<div class=\"callout callout-${block.type}\"><strong>${block.type.uppercase()}:</strong> ${renderInlineHtml(block.text, themeHex)}</div>\n")
                     is ToggleBlock -> writer.write("<details open><summary>${escapeHtml(block.title)}</summary><p>${renderInlineHtml(block.content, themeHex)}</p></details>\n")
                     is DividerBlock -> writer.write("<hr style=\"border:none; border-top: 2px solid var(--primary); margin: 24px 0;\">\n")
-                    is PageBreakBlock -> writer.write("<div style=\"page-break-after: always; break-after: page; border-top: 1px dashed #cbd5e1; margin: 30px 0; text-align: center;\"><span style=\"font-size: 0.75rem; color: #94a3b8; background: #fff; padding: 0 10px; position: relative; top: -10px;\">QUEBRA DE PÁGINA</span></div>\n")
+                    is PageBreakBlock -> writer.write("<div style=\"page-break-after: always; break-after: page; height: 0; margin: 0; padding: 0;\"></div>\n")
 
                     is ImageBlock -> {
                         val bmp = loadBitmapFromUrl(context, block.url)

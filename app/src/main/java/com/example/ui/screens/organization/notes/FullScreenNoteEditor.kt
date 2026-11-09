@@ -184,8 +184,7 @@ fun FullScreenNoteEditor(
 
     // Unified continuous Markdown document (Obsidian style)
     var editorValue by remember {
-        val initialContent = (initialNote?.content ?: "")
-            .replace(Regex("<!--\\s*citra:fin:[^>]*-->\\s*\\n?"), "")
+        val initialContent = com.example.data.backup.FinanceNoteMarkdownEngine.stripFinanceMarkers(initialNote?.content ?: "")
         mutableStateOf(TextFieldValue(initialContent))
     }
     var editorMode by remember {
@@ -402,8 +401,7 @@ fun FullScreenNoteEditor(
             return
         }
         val finalTitle = title.trim().ifBlank { "Sem título" }
-        val finalContent = editorValue.text
-            .replace(Regex("<!--\\s*citra:fin:[^>]*-->\\s*\\n?"), "")
+        val finalContent = com.example.data.backup.FinanceNoteMarkdownEngine.stripFinanceMarkers(editorValue.text)
 
         // Sync directly to physical .md file in Documents/Citra Docs/ with UUID and old title cleanup
         CitraDocsFileManager.saveNoteMarkdown(
@@ -2032,7 +2030,7 @@ fun FullScreenNoteEditor(
                                         }
                                         "inline_code" -> ToolbarToolButton(label = "<>", icon = Icons.Default.Code) {
                                             if (editorMode == NoteEditorMode.READING) {
-                                                appendToEndOfNote("```kotlin\n// código\n```")
+                                                Toast.makeText(context, "Mude para o modo de Edição para formatar texto", Toast.LENGTH_SHORT).show()
                                             } else {
                                                 pushHistory()
                                                 editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
@@ -2121,7 +2119,7 @@ fun FullScreenNoteEditor(
                                         }
                                         "code_block" -> ToolbarToolButton(label = "Código", icon = Icons.Default.Code) {
                                             if (editorMode == NoteEditorMode.READING) {
-                                                appendToEndOfNote("```kotlin\n// código\n```")
+                                                Toast.makeText(context, "Mude para o modo de Edição para inserir código", Toast.LENGTH_SHORT).show()
                                             } else {
                                                 pushHistory()
                                                 editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
@@ -2134,7 +2132,7 @@ fun FullScreenNoteEditor(
                                         }
                                         "math" -> ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
                                             if (editorMode == NoteEditorMode.READING) {
-                                                appendToEndOfNote("$$\nE = mc^2\n$$")
+                                                Toast.makeText(context, "Mude para o modo de Edição para inserir matemática", Toast.LENGTH_SHORT).show()
                                             } else {
                                                 pushHistory()
                                                 editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(

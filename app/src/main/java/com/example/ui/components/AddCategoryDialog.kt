@@ -51,18 +51,18 @@ fun AddCategoryDialog(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(58.dp)
                             .background(OrangeContainer, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = selectedEmoji.ifBlank { "🎯" },
-                            fontSize = 24.sp,
-                            lineHeight = 28.sp
+                            fontSize = 28.sp,
+                            lineHeight = 34.sp
                         )
                     }
                     OutlinedTextField(
@@ -75,6 +75,10 @@ fun AddCategoryDialog(
                             }
                         },
                         label = { Text("Emoji (1 emoji)") },
+                        textStyle = LocalTextStyle.current.copy(
+                            fontSize = 20.sp,
+                            lineHeight = 28.sp
+                        ),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
@@ -110,7 +114,8 @@ fun AddCategoryDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        onConfirm(name, selectedEmoji)
+                        val cleanEmoji = com.example.util.EmojiHelper.filterToSingleEmoji(selectedEmoji, fallback = "🎯")
+                        onConfirm(name.trim(), cleanEmoji)
                     }
                 },
                 enabled = name.isNotBlank(),

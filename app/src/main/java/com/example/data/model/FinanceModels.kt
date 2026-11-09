@@ -90,15 +90,38 @@ enum class FinanceCurrency(
     PHP("PHP", "₱", "Peso Filipino (₱)", "Filipinas, Philippines"),
     VND("VND", "₫", "Dong Vietnamita (₫)", "Vietnã, Vietnam"),
     TWD("TWD", "NT$", "Novo Dólar Taiwanês (NT$)", "Taiwan"),
+    PKR("PKR", "₨", "Rúpia Paquistanesa (₨)", "Paquistão, Pakistan"),
+    BDT("BDT", "৳", "Taka de Bangladesh (৳)", "Bangladesh"),
+
+    // Outros Países / Europa & América Latina
+    CZK("CZK", "Kč", "Coroa Checa (Kč)", "Chéquia, República Checa, Czech Republic"),
+    HUF("HUF", "Ft", "Florim Húngaro (Ft)", "Hungria, Hungary"),
+    RON("RON", "lei", "Leu Romeno (lei)", "Romênia, Romania"),
+    BGN("BGN", "лв", "Lev Búlgaro (лв)", "Bulgária, Bulgaria"),
+    ISK("ISK", "kr", "Coroa Islandesa (kr)", "Islândia, Iceland"),
+    CRC("CRC", "₡", "Colón Costarriquenho (₡)", "Costa Rica"),
+    DOP("DOP", "RD$", "Peso Dominicano (RD$)", "República Dominicana"),
+    DZD("DZD", "DA", "Dinar Argelino (DA)", "Argélia, Algeria"),
+    TND("TND", "DT", "Dinar Tunisiano (DT)", "Tunísia, Tunisia"),
+    KWD("KWD", "KD", "Dinar Kuwaitiano (KD)", "Kuwait"),
+    BHD("BHD", "BD", "Dinar do Bahrein (BD)", "Bahrein, Bahrain"),
+    OMR("OMR", "RO", "Rial de Omã (RO)", "Omã, Oman"),
 
     // Criptomoedas
     BTC("BTC", "₿", "Bitcoin (BTC)", "Criptomoeda, Global, Decentralized"),
     ETH("ETH", "Ξ", "Ethereum (ETH)", "Criptomoeda, Global, Smart Contracts"),
     USDT("USDT", "₮", "Tether USD (USDT)", "Criptomoeda, Stablecoin, Global"),
+    USDC("USDC", "USDC", "USD Coin (USDC)", "Criptomoeda, Stablecoin, Global"),
     SOL("SOL", "SOL", "Solana (SOL)", "Criptomoeda, Global"),
     BNB("BNB", "BNB", "BNB (BNB)", "Criptomoeda, Binance, Global"),
     XRP("XRP", "XRP", "XRP (XRP)", "Criptomoeda, Ripple, Global"),
-    ADA("ADA", "ADA", "Cardano (ADA)", "Criptomoeda, Global");
+    ADA("ADA", "ADA", "Cardano (ADA)", "Criptomoeda, Global"),
+    DOGE("DOGE", "Ð", "Dogecoin (DOGE)", "Criptomoeda, Global, Meme"),
+    DOT("DOT", "DOT", "Polkadot (DOT)", "Criptomoeda, Global"),
+    POL("POL", "POL", "Polygon Token (POL/MATIC)", "Criptomoeda, Polygon, Global"),
+    AVAX("AVAX", "AVAX", "Avalanche (AVAX)", "Criptomoeda, Global"),
+    LINK("LINK", "LINK", "Chainlink (LINK)", "Criptomoeda, Oracle, Global"),
+    LTC("LTC", "Ł", "Litecoin (LTC)", "Criptomoeda, Global");
 
     fun matchesSearch(query: String): Boolean {
         if (query.isBlank()) return true
