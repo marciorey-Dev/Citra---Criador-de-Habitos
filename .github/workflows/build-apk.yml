@@ -1,0 +1,58 @@
+name: Build Android APK (Citra)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Permite disparar a compilação manualmente com 1 clique na aba Actions
+
+jobs:
+  build:
+    name: Compilar APK Debug
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório (Checkout)
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Dar permissão de execução ao gradlew
+        run: chmod +x gradlew
+
+      - name: Restaurar Debug Keystore
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            echo "Decodificando debug.keystore a partir de debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f "debug.keystore" ]; then
+            echo "Criando debug.keystore padrão..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Garantir arquivo de ambiente (.env)
+        run: |
+          if [ ! -f ".env" ]; then
+            cp .env.example .env 2>/dev/null || touch .env
+          fi
+
+      - name: Compilar APK com Gradle
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Renomear APK para fácil identificação
+        run: |
+          mkdir -p build-artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk "build-artifacts/Citra-v1.2.4-debug.apk"
+
+      - name: Disponibilizar APK para Download (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Citra-v1.2.4-APK
+          path: build-artifacts/Citra-v1.2.4-debug.apk
+          retention-days: 14
