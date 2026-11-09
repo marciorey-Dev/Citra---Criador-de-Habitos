@@ -158,6 +158,9 @@ fun FullScreenNoteEditor(
     var toolbarOffsetX by rememberSaveable { mutableFloatStateOf(savedFloatingOffsetX) }
     var toolbarOffsetY by rememberSaveable { mutableFloatStateOf(savedFloatingOffsetY) }
     var isToolbarMinimized by remember { mutableStateOf(false) }
+    val preferencesManager = remember { PreferencesManager(context) }
+    var showReorderToolbarDialog by remember { mutableStateOf(false) }
+    var toolbarItemsOrder by remember { mutableStateOf(preferencesManager.getToolbarOrder()) }
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
     var currentSavedTitle by remember { mutableStateOf(initialNote?.title) }
@@ -1988,6 +1991,19 @@ fun FullScreenNoteEditor(
                                     }
                                 }
 
+                                // Botão de configurações para organizar menu flutuante (arrastar e soltar / reordenar)
+                                IconButton(
+                                    onClick = { showReorderToolbarDialog = true },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = "Organizar menu flutuante",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+
                                 // Minimize toggle
                                 IconButton(
                                     onClick = { isToolbarMinimized = true },
@@ -2003,166 +2019,172 @@ fun FullScreenNoteEditor(
 
                                 VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 2.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
-                                // 1. Inline formatters
-                                ToolbarToolButton(label = "B", icon = Icons.Default.FormatBold) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "**", "**")
-                                }
-                                ToolbarToolButton(label = "I", icon = Icons.Default.FormatItalic) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "*", "*")
-                                }
-                                ToolbarToolButton(label = "<>", icon = Icons.Default.Code) {
-                                    if (editorMode == NoteEditorMode.READING) {
-                                        appendToEndOfNote("```kotlin\n// código\n```")
-                                    } else {
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
-                                    }
-                                }
-
-                                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                                // 2. Line Prefix Tools (Headers, Checklists, Lists, Tables)
-                                Box {
-                                    ToolbarToolButton(label = "Título", icon = Icons.Default.Title) {
-                                        showTitlesMenu = true
-                                    }
-                                    DropdownMenu(
-                                        expanded = showTitlesMenu,
-                                        onDismissRequest = { showTitlesMenu = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("H1 - Título Principal", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
-                                            onClick = {
-                                                showTitlesMenu = false
+                                // Renderização dinâmica conforme a ordem configurada pelo usuário
+                                for (toolId in toolbarItemsOrder) {
+                                    when (toolId) {
+                                        "bold" -> ToolbarToolButton(label = "B", icon = Icons.Default.FormatBold) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "**", "**")
+                                        }
+                                        "italic" -> ToolbarToolButton(label = "I", icon = Icons.Default.FormatItalic) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "*", "*")
+                                        }
+                                        "inline_code" -> ToolbarToolButton(label = "<>", icon = Icons.Default.Code) {
+                                            if (editorMode == NoteEditorMode.READING) {
+                                                appendToEndOfNote("```kotlin\n// código\n```")
+                                            } else {
                                                 pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "# ")
+                                                editorValue = ObsidianMarkdownEngine.wrapSelection(editorValue, "`", "`")
                                             }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("H2 - Subtítulo", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
-                                            onClick = {
-                                                showTitlesMenu = false
+                                        }
+                                        "titles" -> Box {
+                                            ToolbarToolButton(label = "Título", icon = Icons.Default.Title) {
+                                                showTitlesMenu = true
+                                            }
+                                            DropdownMenu(
+                                                expanded = showTitlesMenu,
+                                                onDismissRequest = { showTitlesMenu = false }
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = { Text("H1 - Título Principal", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
+                                                    onClick = {
+                                                        showTitlesMenu = false
+                                                        pushHistory()
+                                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "# ")
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("H2 - Subtítulo", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                                                    onClick = {
+                                                        showTitlesMenu = false
+                                                        pushHistory()
+                                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "## ")
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("H3 - Seção", fontSize = 14.sp, fontWeight = FontWeight.Medium) },
+                                                    onClick = {
+                                                        showTitlesMenu = false
+                                                        pushHistory()
+                                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "### ")
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("H4 - Subseção", fontSize = 13.sp) },
+                                                    onClick = {
+                                                        showTitlesMenu = false
+                                                        pushHistory()
+                                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "#### ")
+                                                    }
+                                                )
+                                                DropdownMenuItem(
+                                                    text = { Text("H5 - Tópico", fontSize = 12.sp) },
+                                                    onClick = {
+                                                        showTitlesMenu = false
+                                                        pushHistory()
+                                                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "##### ")
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        "checklist" -> ToolbarToolButton(label = "Checklist", icon = Icons.Default.CheckBox) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- [ ] ")
+                                        }
+                                        "to_task" -> ToolbarToolButton(label = "Para Tarefa", icon = Icons.Default.AddTask) {
+                                            val lines = editorValue.text.lines()
+                                            val checklistLine = lines.firstOrNull { it.trim().startsWith("- [ ]") || it.trim().startsWith("* [ ]") }
+                                                ?: lines.firstOrNull { it.trim().startsWith("- [x]") || it.trim().startsWith("* [x]") }
+                                            val extracted = if (checklistLine != null) {
+                                                checklistLine.trim().substring(5).removePrefix("~~").removeSuffix("~~").trim()
+                                            } else {
+                                                editorValue.text.take(60).trim().ifBlank { title.ifBlank { "Minha Tarefa" } }
+                                            }
+                                            checklistItemToConvert = extracted
+                                        }
+                                        "list" -> ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- ")
+                                        }
+                                        "quote" -> ToolbarToolButton(label = "Citação", icon = Icons.Default.FormatQuote) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "> ")
+                                        }
+                                        "table" -> ToolbarToolButton(label = "Tabela", icon = Icons.Default.TableChart) {
+                                            if (editorMode == NoteEditorMode.READING) {
+                                                val defaultTable = "| Coluna 1 | Coluna 2 |\n| --- | --- |\n|  |  |"
+                                                appendToEndOfNote(defaultTable)
+                                            } else {
+                                                showCreateTableDialog = true
+                                            }
+                                        }
+                                        "code_block" -> ToolbarToolButton(label = "Código", icon = Icons.Default.Code) {
+                                            if (editorMode == NoteEditorMode.READING) {
+                                                appendToEndOfNote("```kotlin\n// código\n```")
+                                            } else {
                                                 pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "## ")
+                                                editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                    editorValue,
+                                                    "```kotlin\n",
+                                                    "\n```",
+                                                    "```kotlin\n// código\n```"
+                                                )
                                             }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("H3 - Seção", fontSize = 14.sp, fontWeight = FontWeight.Medium) },
-                                            onClick = {
-                                                showTitlesMenu = false
+                                        }
+                                        "math" -> ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
+                                            if (editorMode == NoteEditorMode.READING) {
+                                                appendToEndOfNote("$$\nE = mc^2\n$$")
+                                            } else {
                                                 pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "### ")
+                                                editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                    editorValue,
+                                                    "$$\n",
+                                                    "\n$$",
+                                                    "$$ E = mc^2 $$"
+                                                )
                                             }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("H4 - Subseção", fontSize = 13.sp) },
-                                            onClick = {
-                                                showTitlesMenu = false
-                                                pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "#### ")
+                                        }
+                                        "divider" -> ToolbarToolButton(label = "Divisor", icon = Icons.Default.HorizontalRule) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "---")
+                                        }
+                                        "image" -> ToolbarToolButton(label = "Imagem", icon = Icons.Default.Image) {
+                                            imagePickerLauncher.launch("image/*")
+                                        }
+                                        "audio" -> ToolbarToolButton(label = "Áudio", icon = Icons.Default.Audiotrack) {
+                                            audioPickerLauncher.launch("audio/*")
+                                        }
+                                        "record" -> ToolbarToolButton(
+                                            label = if (isRecordingAudio) "Parar" else "Gravar",
+                                            icon = if (isRecordingAudio) Icons.Default.Stop else Icons.Default.Mic
+                                        ) {
+                                            if (isRecordingAudio) {
+                                                stopRecording()
+                                            } else {
+                                                recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                             }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("H5 - Tópico", fontSize = 12.sp) },
-                                            onClick = {
-                                                showTitlesMenu = false
-                                                pushHistory()
-                                                editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "##### ")
+                                        }
+                                        "callout" -> Box {
+                                            ToolbarToolButton(label = "Callout", icon = Icons.Default.Announcement) {
+                                                showCalloutMenu = true
                                             }
-                                        )
-                                    }
-                                }
-
-                                ToolbarToolButton(label = "Checklist", icon = Icons.Default.CheckBox) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- [ ] ")
-                                }
-
-                                ToolbarToolButton(label = "Para Tarefa", icon = Icons.Default.AddTask) {
-                                    val lines = editorValue.text.lines()
-                                    val checklistLine = lines.firstOrNull { it.trim().startsWith("- [ ]") || it.trim().startsWith("* [ ]") }
-                                        ?: lines.firstOrNull { it.trim().startsWith("- [x]") || it.trim().startsWith("* [x]") }
-                                    val extracted = if (checklistLine != null) {
-                                        checklistLine.trim().substring(5).removePrefix("~~").removeSuffix("~~").trim()
-                                    } else {
-                                        editorValue.text.take(60).trim().ifBlank { title.ifBlank { "Minha Tarefa" } }
-                                    }
-                                    checklistItemToConvert = extracted
-                                }
-
-                                ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- ")
-                                }
-
-                                ToolbarToolButton(label = "Citação", icon = Icons.Default.FormatQuote) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "> ")
-                                }
-
-                                ToolbarToolButton(label = "Tabela", icon = Icons.Default.TableChart) {
-                                    if (editorMode == NoteEditorMode.READING) {
-                                        val defaultTable = "| Coluna 1 | Coluna 2 |\n| --- | --- |\n|  |  |"
-                                        appendToEndOfNote(defaultTable)
-                                    } else {
-                                        showCreateTableDialog = true
-                                    }
-                                }
-
-                                ToolbarToolButton(label = "Código", icon = Icons.Default.Code) {
-                                    if (editorMode == NoteEditorMode.READING) {
-                                        appendToEndOfNote("```kotlin\n// código\n```")
-                                    } else {
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
-                                            editorValue,
-                                            "```kotlin\n",
-                                            "\n```",
-                                            "```kotlin\n// código\n```"
-                                        )
-                                    }
-                                }
-
-                                ToolbarToolButton(label = "Math", icon = Icons.Default.Functions) {
-                                    if (editorMode == NoteEditorMode.READING) {
-                                        appendToEndOfNote("$$\nE = mc^2\n$$")
-                                    } else {
-                                        pushHistory()
-                                        editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
-                                            editorValue,
-                                            "$$\n",
-                                            "\n$$",
-                                            "$$ E = mc^2 $$"
-                                        )
-                                    }
-                                }
-
-                                ToolbarToolButton(label = "Divisor", icon = Icons.Default.HorizontalRule) {
-                                    pushHistory()
-                                    editorValue = ObsidianMarkdownEngine.insertMediaToken(editorValue, "---")
-                                }
-
-                                VerticalDivider(modifier = Modifier.height(20.dp).padding(horizontal = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
-                                // 3. Media buttons (Images & Audios)
-                                ToolbarToolButton(label = "Imagem", icon = Icons.Default.Image) {
-                                    imagePickerLauncher.launch("image/*")
-                                }
-
-                                ToolbarToolButton(label = "Áudio", icon = Icons.Default.Audiotrack) {
-                                    audioPickerLauncher.launch("audio/*")
-                                }
-
-                                ToolbarToolButton(
-                                    label = if (isRecordingAudio) "Parar" else "Gravar",
-                                    icon = if (isRecordingAudio) Icons.Default.Stop else Icons.Default.Mic
-                                ) {
-                                    if (isRecordingAudio) {
-                                        stopRecording()
-                                    } else {
-                                        recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                            DropdownMenu(expanded = showCalloutMenu, onDismissRequest = { showCalloutMenu = false }) {
+                                                DropdownMenuItem(text = { Text("ℹ️ Info") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "INFO", "Informação...") })
+                                                DropdownMenuItem(text = { Text("💡 Dica") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "TIP", "Dica importante...") })
+                                                DropdownMenuItem(text = { Text("⚠️ Aviso") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "WARNING", "Atenção...") })
+                                                DropdownMenuItem(text = { Text("🚨 Importante") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "IMPORTANT", "Crítico...") })
+                                            }
+                                        }
+                                        "details" -> ToolbarToolButton(label = "Recolhível", icon = Icons.Default.UnfoldMore) {
+                                            pushHistory()
+                                            editorValue = ObsidianMarkdownEngine.wrapOrInsertBlock(
+                                                editorValue,
+                                                "<details><summary>Resumo</summary>\n\n",
+                                                "\n\n</details>",
+                                                "<details><summary>Resumo</summary>\nConteúdo recolhível\n</details>"
+                                            )
+                                        }
                                     }
                                 }
 
@@ -2702,6 +2724,18 @@ fun FullScreenNoteEditor(
             onCreateLocalCopy = { version ->
                 showVersionHistoryDialog = false
                 onCreateLocalCopy?.invoke(version)
+            }
+        )
+    }
+
+    // Modal de organização / reordenação do menu flutuante
+    if (showReorderToolbarDialog) {
+        ReorderToolbarDialog(
+            initialOrder = toolbarItemsOrder,
+            onDismiss = { showReorderToolbarDialog = false },
+            onSave = { newOrder ->
+                toolbarItemsOrder = newOrder
+                preferencesManager.saveToolbarOrder(newOrder)
             }
         )
     }

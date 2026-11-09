@@ -31,6 +31,7 @@ import java.util.*
 import kotlin.math.roundToInt
 
 enum class StatsPeriod(val label: String) {
+    DIARIO("Diário"),
     SEMANAL("Semanal"),
     MENSAL("Mensal"),
     ANUAL("Anual")
@@ -77,6 +78,50 @@ fun StatsScreen(
     val periodInfo = remember(selectedPeriod, periodOffset, focusSessions) {
         val cal = Calendar.getInstance()
         when (selectedPeriod) {
+            StatsPeriod.DIARIO -> {
+                cal.add(Calendar.DAY_OF_YEAR, periodOffset)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val startMs = cal.timeInMillis
+
+                val endCal = cal.clone() as Calendar
+                endCal.set(Calendar.HOUR_OF_DAY, 23)
+                endCal.set(Calendar.MINUTE, 59)
+                endCal.set(Calendar.SECOND, 59)
+                val endMs = endCal.timeInMillis
+
+                val df = SimpleDateFormat("dd 'de' MMMM", Locale("pt", "BR"))
+                val title = if (periodOffset == 0) "Hoje (${df.format(cal.time)})"
+                else if (periodOffset == -1) "Ontem (${df.format(cal.time)})"
+                else df.format(cal.time)
+
+                val currentCal = Calendar.getInstance()
+                val isCurrentDay = currentCal.get(Calendar.YEAR) == cal.get(Calendar.YEAR) &&
+                        currentCal.get(Calendar.DAY_OF_YEAR) == cal.get(Calendar.DAY_OF_YEAR)
+                val currentHour = currentCal.get(Calendar.HOUR_OF_DAY)
+
+                val bars = (0..23).map { h ->
+                    val hCalStart = cal.clone() as Calendar
+                    hCalStart.set(Calendar.HOUR_OF_DAY, h)
+                    hCalStart.set(Calendar.MINUTE, 0)
+                    val hCalEnd = cal.clone() as Calendar
+                    hCalEnd.set(Calendar.HOUR_OF_DAY, h)
+                    hCalEnd.set(Calendar.MINUTE, 59)
+                    hCalEnd.set(Calendar.SECOND, 59)
+
+                    val mins = focusSessions.filter {
+                        it.timestamp in hCalStart.timeInMillis..hCalEnd.timeInMillis
+                    }.sumOf { it.durationMinutes }
+
+                    val isCurrent = isCurrentDay && currentHour == h
+                    val label = if (h % 4 == 0 || h == 23) "${h}h" else ""
+                    Triple(label, mins, isCurrent)
+                }
+
+                PeriodComputation(startMs, endMs, title, bars)
+            }
             StatsPeriod.SEMANAL -> {
                 cal.firstDayOfWeek = Calendar.MONDAY
                 cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
@@ -237,6 +282,44 @@ fun StatsScreen(
     val mostProductiveBucket = remember(periodInfo.bars) {
         val top = periodInfo.bars.maxByOrNull { it.second }
         if (top != null && top.second > 0) "${top.first} (${top.second}m)" else "—"
+    }
+
+    val bestFocusMoment = remember(selectedPeriod, periodInfo.bars) {
+        when (selectedPeriod) {
+            StatsPeriod.DIARIO -> {
+                val bestHourIndex = periodInfo.bars.indices.maxByOrNull { periodInfo.bars[it].second }
+                val bestMins = if (bestHourIndex != null) periodInfo.bars[bestHourIndex].second else 0
+                if (bestHourIndex != null && bestMins > 0) {
+                    "Melhor foco pelas ${bestHourIndex}h (${bestMins}m)"
+                } else {
+                    "Sem foco registrado hoje"
+                }
+            }
+            StatsPeriod.SEMANAL -> {
+                val top = periodInfo.bars.maxByOrNull { it.second }
+                if (top != null && top.second > 0) {
+                    "Melhor dia: ${top.first} (${top.second}m)"
+                } else {
+                    "Sem foco registrado nesta semana"
+                }
+            }
+            StatsPeriod.MENSAL -> {
+                val top = periodInfo.bars.maxByOrNull { it.second }
+                if (top != null && top.second > 0) {
+                    "Melhor semana: ${top.first} (${top.second}m)"
+                } else {
+                    "Sem foco registrado neste mês"
+                }
+            }
+            StatsPeriod.ANUAL -> {
+                val top = periodInfo.bars.maxByOrNull { it.second }
+                if (top != null && top.second > 0) {
+                    "Melhor mês: ${top.first} (${top.second}m)"
+                } else {
+                    "Sem foco registrado neste ano"
+                }
+            }
+        }
     }
 
     val completedHabitsCount = remember(habits, todayStr) {
@@ -543,7 +626,7 @@ fun StatsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(144.dp)
+                        .height(156.dp)
                         .padding(top = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.Bottom
@@ -553,7 +636,7 @@ fun StatsScreen(
                         val heightFraction = if (mins <= 0) {
                             0.06f
                         } else {
-                            (mins.toFloat() / maxMins.toFloat()).coerceIn(0.08f, 1f)
+                            (mins.toFloat() / maxMins.toFloat()).coerceIn(0.12f, 1f)
                         }
 
                         Column(
@@ -569,34 +652,52 @@ fun StatsScreen(
                                     .fillMaxWidth(),
                                 contentAlignment = Alignment.BottomCenter
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(if (periodInfo.bars.size > 8) 14.dp else 22.dp)
-                                        .fillMaxHeight(heightFraction)
-                                        .clip(CircleShape)
-                                        .background(
-                                            color = if (isCurrent) {
-                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-                                            } else {
-                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                                            }
-                                        )
-                                        .padding(2.dp),
-                                    contentAlignment = Alignment.BottomCenter
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.fillMaxHeight(heightFraction),
+                                    verticalArrangement = Arrangement.Bottom
                                 ) {
+                                    // Minutes on top of elevated bar
                                     if (mins > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(CircleShape)
-                                                .background(
+                                        Text(
+                                            text = if (mins >= 60) "${mins / 60}h${if (mins % 60 != 0) "${mins % 60}m" else ""}" else "${mins}m",
+                                            fontSize = if (periodInfo.bars.size > 14) 7.sp else if (periodInfo.bars.size > 8) 8.5.sp else 9.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            modifier = Modifier.padding(bottom = 2.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .width(if (periodInfo.bars.size > 16) 7.dp else if (periodInfo.bars.size > 8) 14.dp else 22.dp)
+                                            .weight(1f, fill = true)
+                                            .clip(CircleShape)
+                                            .background(
                                                 color = if (isCurrent) {
-                                                    MaterialTheme.colorScheme.primary
+                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
                                                 } else {
-                                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
+                                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                                                 }
                                             )
-                                        )
+                                            .padding(2.dp),
+                                        contentAlignment = Alignment.BottomCenter
+                                    ) {
+                                        if (mins > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        color = if (isCurrent) {
+                                                            MaterialTheme.colorScheme.primary
+                                                        } else {
+                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.78f)
+                                                        }
+                                                    )
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -605,7 +706,7 @@ fun StatsScreen(
 
                             Text(
                                 text = label,
-                                fontSize = if (periodInfo.bars.size > 8) 9.5.sp else 11.sp,
+                                fontSize = if (periodInfo.bars.size > 14) 7.5.sp else if (periodInfo.bars.size > 8) 9.5.sp else 11.sp,
                                 fontWeight = if (isCurrent) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 color = if (isCurrent) {
                                     MaterialTheme.colorScheme.primary
@@ -623,36 +724,59 @@ fun StatsScreen(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                )
+                                Text(
+                                    text = "Média: ${avgMinutesPerBucket}m",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Text(
+                                text = "Total: ${totalPeriodMinutes / 60}h ${totalPeriodMinutes % 60}m",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                            Icon(
+                                imageVector = Icons.Default.Stars,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = "Média: ${avgMinutesPerBucket}m",
+                                text = bestFocusMoment,
                                 fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary
                             )
                         }
-
-                        Text(
-                            text = "Pico: $mostProductiveBucket",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
                     }
                 }
             }

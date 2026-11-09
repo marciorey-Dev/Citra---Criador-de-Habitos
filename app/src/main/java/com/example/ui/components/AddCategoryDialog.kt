@@ -55,16 +55,26 @@ fun AddCategoryDialog(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
+                            .size(52.dp)
                             .background(OrangeContainer, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(selectedEmoji, fontSize = 22.sp)
+                        Text(
+                            text = selectedEmoji.ifBlank { "🎯" },
+                            fontSize = 24.sp,
+                            lineHeight = 28.sp
+                        )
                     }
                     OutlinedTextField(
                         value = selectedEmoji,
-                        onValueChange = { if (it.length <= 4) selectedEmoji = it },
-                        label = { Text("Emoji") },
+                        onValueChange = { input ->
+                            if (input.isEmpty()) {
+                                selectedEmoji = ""
+                            } else {
+                                selectedEmoji = com.example.util.EmojiHelper.filterToSingleEmoji(input, fallback = "")
+                            }
+                        },
+                        label = { Text("Emoji (1 emoji)") },
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )

@@ -654,7 +654,6 @@ fun TaskItemCard(
     }
 }
 
-// A. CRIAÇÃO RÁPIDA DE TAREFAS: Essencial é apenas Nome e Data
 @Composable
 fun QuickAddTaskDialog(
     categories: List<Category>,
@@ -670,7 +669,7 @@ fun QuickAddTaskDialog(
         initialDateStr = initialDateStr,
         onlyAskTime = onlyAskTime,
         onDismiss = onDismiss,
-        onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, _, _ ->
+        onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, _, _, _ ->
             onConfirm(title, category, priority, dueText, dueTimestamp, minutesBefore)
         }
     )
@@ -683,7 +682,7 @@ fun QuickAddTaskDialog(
     initialDateStr: String? = null,
     onlyAskTime: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int, customSoundUri: String, loopAlarm: Boolean) -> Unit
+    onConfirm: (title: String, category: String, priority: TaskPriority, dueDateText: String, dueTimestamp: Long?, reminderMinutesBefore: Int, customSoundUri: String, loopAlarm: Boolean, isDisruptive: Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var title by remember(initialTitle) { mutableStateOf(initialTitle) }
@@ -711,6 +710,7 @@ fun QuickAddTaskDialog(
     var reminderMinutesBefore by remember { mutableStateOf(15) }
     var customSoundUri by remember { mutableStateOf("") }
     var loopAlarm by remember { mutableStateOf(false) }
+    var isDisruptive by remember { mutableStateOf(false) }
     var showMoreOptions by remember { mutableStateOf(false) }
 
     fun openDateTimePicker() {
@@ -1179,6 +1179,47 @@ fun QuickAddTaskDialog(
                                     )
                                 }
                             }
+
+                            // Disruptive / Urgent Task Card
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = cardBg,
+                                border = BorderStroke(1.dp, if (isDisruptive) orangeCta else cardBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "Tarefa Perturbadora (Urgente) ⚠️",
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isDisruptive) orangeCta else textColor
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Ao vencer, exibe a tela cheia de sobreposição do Modo Não Perturbe sinalizando urgência",
+                                            fontSize = 11.sp,
+                                            color = subTextColor
+                                        )
+                                    }
+                                    Switch(
+                                        checked = isDisruptive,
+                                        onCheckedChange = { isDisruptive = it },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = orangeCta
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -1211,7 +1252,7 @@ fun QuickAddTaskDialog(
                         Button(
                             onClick = {
                                 if (title.isNotBlank()) {
-                                    onConfirm(title.trim(), category, priority, dueDateText, selectedTimestamp, reminderMinutesBefore, customSoundUri, loopAlarm)
+                                    onConfirm(title.trim(), category, priority, dueDateText, selectedTimestamp, reminderMinutesBefore, customSoundUri, loopAlarm, isDisruptive)
                                 }
                             },
                             enabled = title.isNotBlank(),
@@ -1256,6 +1297,7 @@ fun EditTaskDialog(
     var reminderMinutesBefore by remember { mutableStateOf(task.reminderMinutesBefore) }
     var customSoundUri by remember { mutableStateOf(task.customSoundUri) }
     var loopAlarm by remember { mutableStateOf(task.loopAlarm) }
+    var isDisruptive by remember { mutableStateOf(task.isDisruptive) }
 
     fun openDateTimePicker() {
         val currentCal = Calendar.getInstance()
@@ -1619,6 +1661,45 @@ fun EditTaskDialog(
                                 )
                             }
                         }
+
+                        // Disruptive / Urgent Task Card
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = cardBg,
+                            border = BorderStroke(1.dp, if (isDisruptive) orangeCta else cardBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Tarefa Perturbadora (Urgente) ⚠️",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDisruptive) orangeCta else textColor
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Ao vencer, exibe a tela cheia de sobreposição do Modo Não Perturbe sinalizando urgência",
+                                        fontSize = 11.sp,
+                                        color = subTextColor
+                                    )
+                                }
+                                Switch(
+                                    checked = isDisruptive,
+                                    onCheckedChange = { isDisruptive = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = orangeCta
+                                    )
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(20.dp))
@@ -1658,7 +1739,8 @@ fun EditTaskDialog(
                                             dueDateTimestamp = selectedTimestamp,
                                             reminderMinutesBefore = reminderMinutesBefore,
                                             customSoundUri = customSoundUri,
-                                            loopAlarm = loopAlarm
+                                            loopAlarm = loopAlarm,
+                                            isDisruptive = isDisruptive
                                         )
                                     )
                                 }

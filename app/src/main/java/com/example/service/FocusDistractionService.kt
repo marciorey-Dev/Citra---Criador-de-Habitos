@@ -118,6 +118,14 @@ class FocusDistractionService : Service() {
                 showOverlay("Modo de Teste: Prévia da Tela de Foco 🍊")
                 return START_NOT_STICKY
             }
+            ACTION_SHOW_TASK_OVERLAY -> {
+                val taskTitle = intent?.getStringExtra(EXTRA_TASK_TITLE) ?: "Tarefa Urgente"
+                showOverlay(
+                    titleMessage = "Tarefa Urgente! ⚠️",
+                    subtitleMessage = "A tarefa \"$taskTitle\" atingiu o prazo e é perturbadora/urgente, não pode esperar!\nAbra o Citra agora para conferir ou concluir."
+                )
+                return START_NOT_STICKY
+            }
             else -> {
                 startForegroundNotification()
                 lastKnownForegroundPackage = packageName
@@ -351,14 +359,17 @@ class FocusDistractionService : Service() {
         return lastKnownForegroundPackage
     }
 
-    private fun showOverlay(titleMessage: String) {
+    private fun showOverlay(
+        titleMessage: String,
+        subtitleMessage: String = "O Modo Sem Perturbações do Citra está ativo!\nDeixe as distrações para depois e mantenha seu ritmo até o fim do timer."
+    ) {
         if (isOverlayShowing) return
         if (!FocusPermissionHelper.hasOverlayPermission(this)) return
 
         serviceScope.launch(Dispatchers.Main) {
             try {
                 if (overlayView == null) {
-                    overlayView = createOverlayView(titleMessage)
+                    overlayView = createOverlayView(titleMessage, subtitleMessage)
                 }
 
                 val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -404,7 +415,7 @@ class FocusDistractionService : Service() {
         }
     }
 
-    private fun createOverlayView(titleMessage: String): View {
+    private fun createOverlayView(titleMessage: String, subtitleMessage: String): View {
         val rootLayout = FrameLayout(this).apply {
             // Full-screen vibrant Citra Orange matching the login intro screen
             setBackgroundColor(Color.parseColor("#FFFF8B1F"))
@@ -424,6 +435,7 @@ class FocusDistractionService : Service() {
         // Animated Citra Mascot View with double blinking eyes & subtle breathing pulse
         val mascot = CitraMascotView(this).apply {
             layoutParams = LinearLayout.LayoutParams(dpToPx(190), dpToPx(200)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
                 bottomMargin = dpToPx(20)
             }
         }
@@ -448,7 +460,7 @@ class FocusDistractionService : Service() {
 
         // Subtitle message
         val descView = TextView(this).apply {
-            text = "O Modo Sem Perturbações do Citra está ativo!\nDeixe as distrações para depois e mantenha seu ritmo até o fim do timer."
+            text = subtitleMessage
             setTextColor(Color.parseColor("#F5FFFFFF"))
             textSize = 14.5f
             gravity = Gravity.CENTER
@@ -541,6 +553,8 @@ class FocusDistractionService : Service() {
         const val ACTION_START = "com.example.citra.action.START_FOCUS_OVERLAY"
         const val ACTION_STOP = "com.example.citra.action.STOP_FOCUS_OVERLAY"
         const val ACTION_TEST_OVERLAY = "com.example.citra.action.TEST_FOCUS_OVERLAY"
+        const val ACTION_SHOW_TASK_OVERLAY = "com.example.citra.action.SHOW_TASK_OVERLAY"
+        const val EXTRA_TASK_TITLE = "extra_task_title"
         const val ACTION_OPEN_FROM_FOCUS_OVERLAY = "com.example.citra.action.OPEN_FROM_FOCUS_OVERLAY"
         const val ACTION_PAUSE_FROM_FOCUS_OVERLAY = "com.example.citra.action.PAUSE_FROM_FOCUS_OVERLAY"
 
@@ -565,6 +579,18 @@ class FocusDistractionService : Service() {
         fun testOverlay(context: Context) {
             val intent = Intent(context, FocusDistractionService::class.java).apply {
                 action = ACTION_TEST_OVERLAY
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun showDisruptiveTaskOverlay(context: Context, taskTitle: String) {
+            val intent = Intent(context, FocusDistractionService::class.java).apply {
+                action = ACTION_SHOW_TASK_OVERLAY
+                putExtra(EXTRA_TASK_TITLE, taskTitle)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

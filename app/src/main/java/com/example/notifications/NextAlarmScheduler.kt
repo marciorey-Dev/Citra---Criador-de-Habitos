@@ -32,7 +32,8 @@ object NextAlarmScheduler {
         val title: String,
         val message: String,
         val soundUri: String,
-        val loopAlarm: Boolean = false
+        val loopAlarm: Boolean = false,
+        val isDisruptive: Boolean = false
     )
 
     fun scheduleNextAlarm(context: Context) {
@@ -112,7 +113,8 @@ object NextAlarmScheduler {
                                 title = "Prazo da Tarefa: ${task.title}",
                                 message = "Prazo final agora! Conclua sua tarefa.",
                                 soundUri = sound,
-                                loopAlarm = task.loopAlarm
+                                loopAlarm = task.loopAlarm,
+                                isDisruptive = task.isDisruptive
                             )
                         )
                     }
@@ -195,6 +197,7 @@ object NextAlarmScheduler {
                         putExtra(NotificationHelper.EXTRA_ID, (nextCandidate.entityId % 10000).toInt())
                         putExtra(NotificationHelper.EXTRA_SOUND_URI, nextCandidate.soundUri)
                         putExtra(NotificationHelper.EXTRA_LOOP_ALARM, nextCandidate.loopAlarm)
+                        putExtra(NotificationHelper.EXTRA_IS_DISRUPTIVE, nextCandidate.isDisruptive)
                         if (nextCandidate.type.startsWith("habit")) {
                             putExtra(NotificationHelper.EXTRA_HABIT_ID, nextCandidate.entityId)
                         } else {

@@ -1494,10 +1494,19 @@ private fun HabitEmojiSection(
                 shape = RoundedCornerShape(18.dp),
                 color = if (isDark) Color(0xFF352B20) else Color(0xFFFDECE2),
                 border = BorderStroke(1.dp, cardBorder),
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(62.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(text = selectedEmoji.ifBlank { "💧" }, fontSize = 28.sp)
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(2.dp)
+                ) {
+                    Text(
+                        text = selectedEmoji.ifBlank { "💧" },
+                        fontSize = 28.sp,
+                        lineHeight = 34.sp
+                    )
                 }
             }
 
@@ -1507,26 +1516,33 @@ private fun HabitEmojiSection(
                 border = BorderStroke(1.dp, cardBorder),
                 modifier = Modifier
                     .weight(1f)
-                    .height(56.dp)
+                    .height(62.dp)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        text = "Qualquer Emoji do Teclado",
-                        fontSize = 10.5.sp,
+                        text = "Emoji do Hábito (1 emoji)",
+                        fontSize = 11.sp,
                         color = subTextColor
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     BasicTextField(
                         value = selectedEmoji,
-                        onValueChange = { onSelectEmoji(it) },
+                        onValueChange = { input ->
+                            if (input.isEmpty()) {
+                                onSelectEmoji("")
+                            } else {
+                                onSelectEmoji(com.example.util.EmojiHelper.filterToSingleEmoji(input, fallback = ""))
+                            }
+                        },
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(
-                            fontSize = 16.sp,
+                            fontSize = 18.sp,
+                            lineHeight = 22.sp,
                             fontWeight = FontWeight.Medium,
                             color = textColor
                         ),

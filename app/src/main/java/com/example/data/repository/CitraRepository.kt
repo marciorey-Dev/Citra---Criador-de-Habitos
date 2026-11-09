@@ -22,6 +22,7 @@ class CitraRepository(
     val categoryDao = database.categoryDao()
     val achievementDao = database.achievementDao()
     val noteVersionDao = database.noteVersionDao()
+    val financeDao = database.financeDao()
     val preferencesManager = PreferencesManager(context)
     val authRepository by lazy { com.example.data.auth.AuthRepository.getInstance(context) }
 
@@ -392,7 +393,14 @@ class CitraRepository(
         habits: List<Habit>,
         sessions: List<FocusSession>,
         categories: List<Category>,
-        achievements: List<Achievement> = emptyList()
+        achievements: List<Achievement> = emptyList(),
+        notes: List<Note> = emptyList(),
+        financeEntries: List<FinanceEntry> = emptyList(),
+        financeCategories: List<FinanceCategory> = emptyList(),
+        financeWallets: List<FinanceWallet> = emptyList(),
+        financeRecurringRules: List<FinanceRecurringRule> = emptyList(),
+        financeBudgets: List<FinanceBudget> = emptyList(),
+        financeNoteLinks: List<FinanceNoteLink> = emptyList()
     ) {
         if (tasks.isNotEmpty()) taskDao.insertTasks(tasks)
         if (habits.isNotEmpty()) habitDao.insertHabits(habits)
@@ -426,6 +434,27 @@ class CitraRepository(
                     )
                 }
             }
+        }
+        if (notes.isNotEmpty()) {
+            noteDao.insertNotes(notes)
+        }
+        if (financeCategories.isNotEmpty()) {
+            financeDao.insertCategories(financeCategories)
+        }
+        if (financeWallets.isNotEmpty()) {
+            financeDao.insertWallets(financeWallets)
+        }
+        if (financeEntries.isNotEmpty()) {
+            financeDao.insertEntries(financeEntries)
+        }
+        if (financeRecurringRules.isNotEmpty()) {
+            financeDao.insertRecurringRules(financeRecurringRules)
+        }
+        if (financeBudgets.isNotEmpty()) {
+            financeDao.insertBudgets(financeBudgets)
+        }
+        if (financeNoteLinks.isNotEmpty()) {
+            financeDao.insertLinks(financeNoteLinks)
         }
         com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(context)
     }

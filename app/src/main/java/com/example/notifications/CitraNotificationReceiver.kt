@@ -152,6 +152,7 @@ class CitraNotificationReceiver : BroadcastReceiver() {
 
             val taskId = intent.getLongExtra(NotificationHelper.EXTRA_TASK_ID, -1L)
             val habitIdExtra = intent.getLongExtra(NotificationHelper.EXTRA_HABIT_ID, -1L)
+            val isDisruptive = intent.getBooleanExtra(NotificationHelper.EXTRA_IS_DISRUPTIVE, false)
 
             NotificationHelper.showInstantNotification(
                 context = context,
@@ -165,6 +166,21 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                 taskId = taskId,
                 habitId = habitIdExtra
             )
+
+            // If task was marked as disruptive, display the overlay alert
+            if (isDisruptive || (type == NotificationHelper.TYPE_TASK && taskId > 0)) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val task = if (taskId > 0) {
+                            AppDatabase.getInstance(context).taskDao().getTaskById(taskId)
+                        } else null
+                        if (isDisruptive || task?.isDisruptive == true) {
+                            val cleanTitle = task?.title ?: title.replace("Prazo da Tarefa: ", "")
+                            com.example.service.FocusDistractionService.showDisruptiveTaskOverlay(context, cleanTitle)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
 
             // Immediately schedule the NEXT single alarm from Room truth
             NextAlarmScheduler.scheduleNextAlarm(context)

@@ -41,6 +41,7 @@ object NotificationHelper {
     const val EXTRA_LOOP_ALARM = "notification_loop_alarm"
     const val EXTRA_IS_MISSED = "notification_is_missed"
     const val EXTRA_TASK_ID = "notification_task_id"
+    const val EXTRA_IS_DISRUPTIVE = "notification_is_disruptive"
     const val EXTRA_IS_ALARM_SCREEN = "notification_is_alarm_screen"
 
     const val TYPE_TASK = "task"

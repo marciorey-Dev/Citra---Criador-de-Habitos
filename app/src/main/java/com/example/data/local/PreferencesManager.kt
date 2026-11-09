@@ -254,6 +254,13 @@ class PreferencesManager(private val context: Context) {
         _citraTimerBallsJson.value = "[]"
     }
 
+    fun refreshCitraTimerBalls() {
+        val current = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
+        if (_citraTimerBallsJson.value != current) {
+            _citraTimerBallsJson.value = current
+        }
+    }
+
     fun setSyncEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("sync_enabled", enabled).apply()
         _syncEnabled.value = enabled
@@ -656,6 +663,28 @@ class PreferencesManager(private val context: Context) {
             .putBoolean("finance_biometric_enabled", false)
             .putBoolean("finances_setup_completed", false)
             .apply()
+    }
+
+    fun getToolbarOrder(): List<String> {
+        val raw = prefs.getString("toolbar_items_order", null)
+        if (raw.isNullOrBlank()) {
+            return DEFAULT_TOOLBAR_ORDER
+        }
+        val list = raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val combined = list + DEFAULT_TOOLBAR_ORDER.filterNot { it in list }
+        return combined
+    }
+
+    fun saveToolbarOrder(order: List<String>) {
+        prefs.edit().putString("toolbar_items_order", order.joinToString(",")).apply()
+    }
+
+    companion object {
+        val DEFAULT_TOOLBAR_ORDER = listOf(
+            "bold", "italic", "inline_code", "titles", "checklist", "to_task",
+            "list", "quote", "table", "code_block", "math", "divider",
+            "image", "audio", "record", "callout", "details"
+        )
     }
 }
 

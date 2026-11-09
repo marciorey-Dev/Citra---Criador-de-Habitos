@@ -190,13 +190,13 @@ class CitraMascotView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val scaleFactor = Math.min(w / 200f, h / 212f)
+        val scaleFactor = Math.min(w / 200f, h / 212f) * 0.95f
         val offsetX = (w - 200f * scaleFactor) / 2f
         val offsetY = (h - 212f * scaleFactor) / 2f
 
         canvas.save()
         canvas.translate(offsetX, offsetY)
-        canvas.scale(scaleFactor * pulseScale, scaleFactor * pulseScale, 100f, 100f)
+        canvas.scale(scaleFactor * pulseScale, scaleFactor * pulseScale, 100f * scaleFactor, 106f * scaleFactor)
         canvas.translate(0f, 12f)
 
         // 1. Body

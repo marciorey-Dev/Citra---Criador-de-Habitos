@@ -320,10 +320,17 @@ private fun DialogSoundRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    val audioName = remember(customUri) { SoundEffectsManager.getAudioDisplayName(context, customUri) }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Text(text = "🎶", fontSize = 14.sp)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = "Áudio Local Selecionado", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = audioName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(

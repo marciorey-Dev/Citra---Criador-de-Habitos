@@ -410,6 +410,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun restoreTimerSnapshotOnStartup() {
+        preferencesManager.refreshCitraTimerBalls()
         val snapshot = preferencesManager.loadTimerSnapshot() ?: return
         try {
             val phase = try {
@@ -492,6 +493,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             isPaused = false,
                             selectedCategory = snapshot.selectedCategory
                         )
+                    }
+                    if (phase == PomodoroPhase.FOCUS) {
+                        spawnTimerCitraBall(snapshot.focusMinutes)
                     }
                     onPhaseCompleted()
                 }
@@ -1509,7 +1513,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             habits = habits.value,
             focusSessions = focusSessions.value,
             categories = categories.value,
-            achievements = achievements.value
+            achievements = achievements.value,
+            notes = notes.value,
+            financeEntries = financeEntries.value,
+            financeCategories = financeCategories.value,
+            financeWallets = financeWallets.value,
+            financeRecurringRules = financeRecurringRules.value,
+            financeBudgets = financeBudgets.value,
+            financeNoteLinks = financeNoteLinks.value
         )
     }
 
@@ -1522,9 +1533,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     habits = parsed.habits,
                     sessions = parsed.focusSessions,
                     categories = parsed.categories,
-                    achievements = parsed.achievements
+                    achievements = parsed.achievements,
+                    notes = parsed.notes,
+                    financeEntries = parsed.financeEntries,
+                    financeCategories = parsed.financeCategories,
+                    financeWallets = parsed.financeWallets,
+                    financeRecurringRules = parsed.financeRecurringRules,
+                    financeBudgets = parsed.financeBudgets,
+                    financeNoteLinks = parsed.financeNoteLinks
                 )
-                _userMessage.emit("Backup local restaurado com sucesso!")
+                _userMessage.emit("Backup local completo restaurado com sucesso!")
             } catch (e: Exception) {
                 _userMessage.emit("Erro ao restaurar backup: arquivo inválido.")
             }

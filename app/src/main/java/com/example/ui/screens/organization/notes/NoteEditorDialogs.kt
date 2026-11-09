@@ -896,3 +896,180 @@ fun CreateTableDialog(
     )
 }
 
+data class ToolbarItemDef(
+    val id: String,
+    val title: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
+val ALL_TOOLBAR_ITEMS: List<ToolbarItemDef> = listOf(
+    ToolbarItemDef("bold", "Negrito", Icons.Default.FormatBold),
+    ToolbarItemDef("italic", "Itálico", Icons.Default.FormatItalic),
+    ToolbarItemDef("inline_code", "Código em Linha", Icons.Default.Code),
+    ToolbarItemDef("titles", "Títulos (H1 - H5)", Icons.Default.Title),
+    ToolbarItemDef("checklist", "Checklist", Icons.Default.CheckBox),
+    ToolbarItemDef("to_task", "Converter para Tarefa", Icons.Default.AddTask),
+    ToolbarItemDef("list", "Lista com Marcadores", Icons.Default.FormatListBulleted),
+    ToolbarItemDef("quote", "Citação", Icons.Default.FormatQuote),
+    ToolbarItemDef("table", "Tabela Markdown", Icons.Default.TableChart),
+    ToolbarItemDef("code_block", "Bloco de Código", Icons.Default.Code),
+    ToolbarItemDef("math", "Fórmula Matemática", Icons.Default.Functions),
+    ToolbarItemDef("divider", "Linha Divisória", Icons.Default.HorizontalRule),
+    ToolbarItemDef("image", "Imagem", Icons.Default.Image),
+    ToolbarItemDef("audio", "Áudio", Icons.Default.Audiotrack),
+    ToolbarItemDef("record", "Gravação de Voz", Icons.Default.Mic),
+    ToolbarItemDef("callout", "Destaque / Aviso", Icons.Default.Announcement),
+    ToolbarItemDef("details", "Bloco Recolhível", Icons.Default.UnfoldMore)
+)
+
+@Composable
+fun ReorderToolbarDialog(
+    initialOrder: List<String>,
+    onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit
+) {
+    val itemsMap = remember { ALL_TOOLBAR_ITEMS.associateBy { it.id } }
+    var currentList by remember(initialOrder) {
+        val valid = initialOrder.filter { itemsMap.containsKey(it) }.toMutableList()
+        ALL_TOOLBAR_ITEMS.forEach { item ->
+            if (!valid.contains(item.id)) valid.add(item.id)
+        }
+        mutableStateOf(valid.toList())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text("Organizar Menu Flutuante", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Reordene os botões da barra flutuante", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(currentList, key = { it }) { itemId ->
+                        val def = itemsMap[itemId] ?: ToolbarItemDef(itemId, itemId, Icons.Default.Build)
+                        val index = currentList.indexOf(itemId)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DragHandle,
+                                    contentDescription = "Mover",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = def.icon,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = def.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = {
+                                        if (index > 0) {
+                                            val mutable = currentList.toMutableList()
+                                            val item = mutable.removeAt(index)
+                                            mutable.add(index - 1, item)
+                                            currentList = mutable
+                                        }
+                                    },
+                                    enabled = index > 0,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowUp,
+                                        contentDescription = "Mover para cima",
+                                        tint = if (index > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (index < currentList.lastIndex) {
+                                            val mutable = currentList.toMutableList()
+                                            val item = mutable.removeAt(index)
+                                            mutable.add(index + 1, item)
+                                            currentList = mutable
+                                        }
+                                    },
+                                    enabled = index < currentList.lastIndex,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Mover para baixo",
+                                        tint = if (index < currentList.lastIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    TextButton(
+                        onClick = {
+                            currentList = ALL_TOOLBAR_ITEMS.map { it.id }
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Restaurar Padrão", fontSize = 12.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(currentList)
+                    onDismiss()
+                }
+            ) {
+                Text("Salvar Ordem")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
+}
+
+
