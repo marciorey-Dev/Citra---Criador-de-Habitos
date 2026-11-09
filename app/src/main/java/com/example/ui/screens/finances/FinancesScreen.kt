@@ -1,8 +1,5 @@
 package com.example.ui.screens.finances
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +13,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,7 +23,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,9 +34,6 @@ import com.example.data.model.*
 import com.example.ui.MainViewModel
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
-import com.example.util.squashBounce
-import com.example.util.squashBounceClickable
-import com.example.util.staggeredEntrance
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -59,8 +51,7 @@ enum class FinancePeriodMode(val label: String) {
 @Composable
 fun FinancesScreen(
     viewModel: MainViewModel,
-    onOpenFinanceSettings: () -> Unit,
-    isInitialLaunch: Boolean = false
+    onOpenFinanceSettings: () -> Unit
 ) {
     val defaultCurrencyCode by viewModel.financeDefaultCurrency.collectAsState()
     val baseBalanceMinor by viewModel.financeBaseBalanceMinor.collectAsState()
@@ -117,7 +108,7 @@ fun FinancesScreen(
 
     var showEntryEditor by remember { mutableStateOf(false) }
     var editingEntry by remember { mutableStateOf<FinanceEntry?>(null) }
-    var showCurrencyDialog by remember { mutableStateOf(false) }
+    var currencyMenuExpanded by remember { mutableStateOf(false) }
     var overflowMenuExpanded by remember { mutableStateOf(false) }
     var showLinkCreatorDialog by remember { mutableStateOf(false) }
     var showLinksManagerDialog by remember { mutableStateOf(false) }
@@ -125,27 +116,6 @@ fun FinancesScreen(
     var showBudgetsDialog by remember { mutableStateOf(false) }
     var showRecurringDialog by remember { mutableStateOf(false) }
     var showExchangeRatesDialog by remember { mutableStateOf(false) }
-
-    val pendingNoteToOpen by viewModel.pendingOpenNoteFromFinances.collectAsState()
-    var activeFinanceEditorNote by remember { mutableStateOf<Note?>(null) }
-    val allNotesForEditor by viewModel.notes.collectAsState()
-    val allTasksForEditor by viewModel.tasks.collectAsState()
-    val allHabitsForEditor by viewModel.habits.collectAsState()
-    val pomodoroStateForEditor by viewModel.pomodoroState.collectAsState()
-    val noteCategoriesForEditor by viewModel.categories.collectAsState()
-
-    LaunchedEffect(pendingNoteToOpen) {
-        pendingNoteToOpen?.let { note ->
-            activeFinanceEditorNote = note
-            viewModel.clearPendingOpenNoteFromFinances()
-            viewModel.setNoteEditorOpen(true)
-        }
-    }
-
-    BackHandler(enabled = activeFinanceEditorNote != null) {
-        activeFinanceEditorNote = null
-        viewModel.setNoteEditorOpen(false)
-    }
     var completingPlannedEntry by remember { mutableStateOf<FinanceEntry?>(null) }
 
     // Compute period [startMillis, endMillis]
@@ -260,9 +230,7 @@ fun FinancesScreen(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (isInitialLaunch) Modifier.staggeredEntrance(0) else Modifier)
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -272,8 +240,7 @@ fun FinancesScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .padding(vertical = 2.dp, horizontal = 2.dp)
+                            modifier = Modifier.padding(vertical = 2.dp, horizontal = 2.dp)
                         ) {
                             Text(
                                 text = "SALDO ATUAL",
@@ -289,31 +256,47 @@ fun FinancesScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             // Currency selector pill (Kz ▾)
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainer,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable { showCurrencyDialog = true }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            Box {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { currencyMenuExpanded = true }
                                 ) {
-                                    Text(
-                                        text = activeCurrency.symbol,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.5.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Icon(
-                                        Icons.Default.ArrowDropDown,
-                                        contentDescription = "Mudar moeda",
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = activeCurrency.symbol,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.5.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Icon(
+                                            Icons.Default.ArrowDropDown,
+                                            contentDescription = "Mudar moeda",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = currencyMenuExpanded,
+                                    onDismissRequest = { currencyMenuExpanded = false }
+                                ) {
+                                    FinanceCurrency.entries.forEach { curr ->
+                                        DropdownMenuItem(
+                                            text = { Text(curr.displayName) },
+                                            onClick = {
+                                                viewModel.setFinanceDefaultCurrency(curr.code)
+                                                currencyMenuExpanded = false
+                                            }
+                                        )
+                                    }
                                 }
                             }
 
@@ -489,90 +472,57 @@ fun FinancesScreen(
             }
         }
 
-        // 2. Segmented Pill Toggle: [ ↘ DESPESAS ] [ ↗ RENDAS ] (Animated Sliding Pill)
+        // 2. Segmented Pill Toggle: [ ↘ DESPESAS ] [ ↗ RENDAS ]
         item {
-            val isExpense = selectedType == FinanceEntryType.EXPENSE
-            val animatedPillColor by animateColorAsState(
-                targetValue = if (isExpense) MaterialTheme.colorScheme.primary else GreenAccent,
-                animationSpec = tween(durationMillis = 300),
-                label = "financePillColor"
-            )
-
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (isInitialLaunch) Modifier.staggeredEntrance(1) else Modifier)
+                modifier = Modifier.fillMaxWidth()
             ) {
-                BoxWithConstraints(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(4.dp)
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val halfWidth = maxWidth / 2
-                    val indicatorOffset by animateDpAsState(
-                        targetValue = if (isExpense) 0.dp else halfWidth,
-                        animationSpec = spring(
-                            dampingRatio = 0.75f,
-                            stiffness = Spring.StiffnessMediumLow
-                        ),
-                        label = "financeIndicatorOffset"
-                    )
+                    FinanceEntryType.entries.forEach { type ->
+                        val selected = selectedType == type
+                        val pillBg = when {
+                            selected && type == FinanceEntryType.EXPENSE -> MaterialTheme.colorScheme.primary
+                            selected && type == FinanceEntryType.INCOME -> GreenAccent
+                            else -> Color.Transparent
+                        }
+                        val pillContent = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
 
-                    // Sliding Pill Indicator
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = animatedPillColor,
-                        shadowElevation = 2.dp,
-                        modifier = Modifier
-                            .offset(x = indicatorOffset)
-                            .width(halfWidth)
-                            .height(42.dp)
-                    ) {}
-
-                    // Clickable Labels Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp)
-                    ) {
-                        FinanceEntryType.entries.forEach { type ->
-                            val selected = selectedType == type
-                            val textColor by animateColorAsState(
-                                targetValue = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                animationSpec = tween(200),
-                                label = "financeTextColor_${type.name}"
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .squashBounceClickable { selectedType = type }
-                                    .testTag("finance_type_${type.id.lowercase()}"),
-                                contentAlignment = Alignment.Center
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = pillBg,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { selectedType = type }
+                                .testTag("finance_type_${type.id.lowercase()}")
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = if (type == FinanceEntryType.EXPENSE) Icons.Default.SouthEast else Icons.Default.NorthEast,
-                                        contentDescription = null,
-                                        tint = textColor,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (type == FinanceEntryType.EXPENSE) "DESPESAS" else "RENDAS",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 13.sp,
-                                        color = textColor
-                                    )
-                                }
+                                Icon(
+                                    imageVector = if (type == FinanceEntryType.EXPENSE) Icons.Default.SouthEast else Icons.Default.NorthEast,
+                                    contentDescription = null,
+                                    tint = pillContent,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (type == FinanceEntryType.EXPENSE) "DESPESAS" else "RENDAS",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp,
+                                    color = pillContent
+                                )
                             }
                         }
                     }
@@ -819,21 +769,8 @@ fun FinancesScreen(
                         if (pieSlices.isEmpty()) {
                             EmptyFinanceChartPlaceholder(isExpenseMode = true)
                         } else {
-                            val chartProgress = remember { Animatable(0f) }
-                            LaunchedEffect(pieSlices, selectedType, periodMode) {
-                                chartProgress.snapTo(0f)
-                                chartProgress.animateTo(
-                                    targetValue = 1f,
-                                    animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
-                                )
-                            }
-
                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer {
-                                        alpha = chartProgress.value
-                                    },
+                                modifier = Modifier.fillMaxWidth(),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Box(
@@ -848,31 +785,21 @@ fun FinancesScreen(
                                             (size.height - diameter) / 2f
                                         )
                                         var startAngle = -90f
-                                        val animatedTotalSweep = 360f * chartProgress.value
-                                        var accumulated = 0f
                                         pieSlices.forEach { slice ->
-                                            val sliceSweep = slice.fraction * 360f
-                                            val availableSweep = (animatedTotalSweep - accumulated).coerceAtLeast(0f)
-                                            val sweep = sliceSweep.coerceAtMost(availableSweep)
-                                            if (sweep > 0f) {
-                                                drawArc(
-                                                    color = slice.color,
-                                                    startAngle = startAngle,
-                                                    sweepAngle = sweep,
-                                                    useCenter = false,
-                                                    topLeft = topLeft,
-                                                    size = Size(diameter, diameter),
-                                                    style = Stroke(width = strokeWidth)
-                                                )
-                                                startAngle += sweep
-                                            }
-                                            accumulated += sliceSweep
+                                            val sweep = (slice.fraction * 360f).coerceAtLeast(3f)
+                                            drawArc(
+                                                color = slice.color,
+                                                startAngle = startAngle,
+                                                sweepAngle = sweep,
+                                                useCenter = false,
+                                                topLeft = topLeft,
+                                                size = Size(diameter, diameter),
+                                                style = Stroke(width = strokeWidth)
+                                            )
+                                            startAngle += sweep
                                         }
                                     }
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.graphicsLayer { alpha = chartProgress.value }
-                                    ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
                                             text = "TOTAL",
                                             fontSize = 10.5.sp,
@@ -1320,7 +1247,6 @@ fun FinancesScreen(
     }
 
 
-
     // Custom Date Range Picker Dialog
     if (showCustomRangePicker) {
         val rangeState = rememberDateRangePickerState(
@@ -1424,17 +1350,6 @@ fun FinancesScreen(
         )
     }
 
-    if (showCurrencyDialog) {
-        SearchableCurrencyPickerDialog(
-            selectedCurrency = activeCurrency,
-            onDismiss = { showCurrencyDialog = false },
-            onSelectCurrency = { curr ->
-                viewModel.setFinanceDefaultCurrency(curr.code)
-                showCurrencyDialog = false
-            }
-        )
-    }
-
     if (showWalletsDialog) {
         FinanceWalletsDialog(
             wallets = wallets,
@@ -1531,79 +1446,6 @@ fun FinancesScreen(
             onDeleteLink = { viewModel.deleteFinanceNoteLink(it) }
         )
     }
-
-    if (activeFinanceEditorNote != null) {
-        FullScreenNoteEditor(
-            initialNote = activeFinanceEditorNote,
-            categories = noteCategoriesForEditor,
-            allNotes = allNotesForEditor,
-            tasks = allTasksForEditor,
-            habits = allHabitsForEditor,
-            pomodoroState = pomodoroStateForEditor,
-            onSaveAndClose = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
-                viewModel.saveNote(
-                    id = activeFinanceEditorNote?.id ?: 0L,
-                    title = title,
-                    content = content,
-                    category = category,
-                    iconEmoji = "💰",
-                    associatedDate = activeFinanceEditorNote?.associatedDate,
-                    isPinned = isPinned,
-                    backgroundImageUri = bgUri,
-                    backgroundBlur = blur,
-                    backgroundBrightness = brightness,
-                    uuid = activeFinanceEditorNote?.uuid,
-                    oldTitle = activeFinanceEditorNote?.title,
-                    noteColor = nColor
-                )
-                activeFinanceEditorNote = null
-                viewModel.setNoteEditorOpen(false)
-            },
-            onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
-                val currentUuid = activeFinanceEditorNote?.uuid ?: java.util.UUID.randomUUID().toString()
-                viewModel.saveNote(
-                    id = activeFinanceEditorNote?.id ?: 0L,
-                    title = title,
-                    content = content,
-                    category = category,
-                    iconEmoji = "💰",
-                    associatedDate = activeFinanceEditorNote?.associatedDate,
-                    isPinned = isPinned,
-                    backgroundImageUri = bgUri,
-                    backgroundBlur = blur,
-                    backgroundBrightness = brightness,
-                    uuid = currentUuid,
-                    oldTitle = activeFinanceEditorNote?.title,
-                    noteColor = nColor,
-                    onSaved = { savedId ->
-                        activeFinanceEditorNote = Note(
-                            id = savedId,
-                            uuid = currentUuid,
-                            title = title,
-                            content = content,
-                            category = category,
-                            iconEmoji = "💰",
-                            isPinned = isPinned,
-                            backgroundImageUri = bgUri,
-                            backgroundBlur = blur,
-                            backgroundBrightness = brightness,
-                            noteColor = nColor
-                        )
-                    }
-                )
-            },
-            onClose = {
-                activeFinanceEditorNote = null
-                viewModel.setNoteEditorOpen(false)
-            },
-            onDelete = {
-                activeFinanceEditorNote?.let { viewModel.deleteNote(it) }
-                activeFinanceEditorNote = null
-                viewModel.setNoteEditorOpen(false)
-            },
-            financesEnabled = true
-        )
-    }
 }
 
 @Composable
@@ -1643,26 +1485,14 @@ private fun FinanceEntryRowCard(
         SimpleDateFormat("dd MMM", Locale("pt", "AO")).format(Date(entry.dateMillis))
     }
 
-    val enterAnim = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
-        enterAnim.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
-        )
-    }
-
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                alpha = enterAnim.value
-                translationY = (1f - enterAnim.value) * 36f
-            }
             .clip(RoundedCornerShape(20.dp))
-            .squashBounceClickable { onEdit() }
+            .clickable { onEdit() }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

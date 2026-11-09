@@ -3,13 +3,11 @@ package com.example.ui.screens.organization
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,7 +25,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,7 +48,9 @@ import com.example.data.model.TaskPriority
 import com.example.ui.MainViewModel
 import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
-import com.example.ui.screens.organization.notes.*
+import com.example.ui.screens.organization.notes.FullScreenNoteEditor
+import com.example.ui.screens.organization.notes.NoteEditorMode
+import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
 import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
 import com.example.util.NoteExportHelper
@@ -62,8 +61,7 @@ enum class NoteSortOption(val label: String) {
     LAST_UPDATED("Última Atualização"),
     CREATION_DATE("Data de Criação"),
     ALPHABETICAL("Ordem A-Z"),
-    CATEGORY("Empilhar por Categoria"),
-    COLOR("Por Cor"),
+    CATEGORY("Categoria"),
     SIZE("Tamanho")
 }
 
@@ -71,8 +69,7 @@ enum class NoteLayoutMode(val label: String) {
     GRID_2("Grade"),
     GRID_3("Grade Pequena"),
     DETAILS("Detalhes"),
-    LIST("Lista"),
-    STACKS("Pilhas")
+    LIST("Lista")
 }
 
 @Composable
@@ -133,26 +130,22 @@ fun NotesSubTab(
 ) {
     val context = LocalContext.current
     val notes by viewModel.notes.collectAsState()
-    val archivedNotes by viewModel.archivedNotes.collectAsState()
     val trashNotes by viewModel.trashNotes.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val selectedCategoryFilter by viewModel.selectedNoteCategoryFilter.collectAsState()
     val openCreateTrigger by viewModel.openCreateNoteTrigger.collectAsState()
-    val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var activeNoteToEdit by remember { mutableStateOf<Note?>(null) }
     var isCreatingNew by remember { mutableStateOf(false) }
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteForSubmenu by remember { mutableStateOf<Note?>(null) }
+    var noteToShareViaCitra by remember { mutableStateOf<Note?>(null) }
     var showTrashDialog by remember { mutableStateOf(false) }
-    var showArchivedNotesDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
     var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
-    var isGridStackedByCategory by rememberSaveable { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
-    var expandedCategories by remember { mutableStateOf(setOf<String>()) }
 
     val importMultipleNotesLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -167,14 +160,6 @@ fun NotesSubTab(
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
         if (openCreateTrigger) {
-            val draftCat = viewModel.ensureCategoryForDraft()
-            activeNoteToEdit = Note(
-                id = 0L,
-                title = "",
-                content = "",
-                category = draftCat,
-                iconEmoji = "📝"
-            )
             isCreatingNew = true
             viewModel.resetCreateNoteTrigger()
         }
@@ -214,7 +199,6 @@ fun NotesSubTab(
                     NoteSortOption.CREATION_DATE -> b.id.compareTo(a.id)
                     NoteSortOption.ALPHABETICAL -> a.title.compareTo(b.title, ignoreCase = true)
                     NoteSortOption.CATEGORY -> a.category.compareTo(b.category, ignoreCase = true)
-                    NoteSortOption.COLOR -> (a.noteColor ?: "ZZZ").compareTo(b.noteColor ?: "ZZZ")
                     NoteSortOption.SIZE -> b.content.length.compareTo(a.content.length)
                 }
             }
@@ -295,12 +279,15 @@ fun NotesSubTab(
                 onInsertFinanceBlock = {
                     showInsertFinanceBlockDialog = true
                 },
+                onShareViaCitra = { t, c, cat ->
+                    noteToShareViaCitra = Note(title = t, content = c, category = cat)
+                },
                 onClose = {
                     isCreatingNew = false
                     activeNoteToEdit = null
                     viewModel.setNoteEditorOpen(false)
                 },
-                onSaveAndClose = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
+                onSaveAndClose = { title, content, category, isPinned, bgUri, blur, brightness, noteColor ->
                     viewModel.saveNote(
                         id = activeNoteToEdit?.id ?: 0L,
                         title = title,
@@ -314,13 +301,13 @@ fun NotesSubTab(
                         backgroundBrightness = brightness,
                         uuid = activeNoteToEdit?.uuid,
                         oldTitle = activeNoteToEdit?.title,
-                        noteColor = nColor
+                        noteColor = noteColor
                     )
                     isCreatingNew = false
                     activeNoteToEdit = null
                     viewModel.setNoteEditorOpen(false)
                 },
-                onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness, nColor ->
+                onSaveOnly = { title, content, category, isPinned, bgUri, blur, brightness, noteColor ->
                     val currentUuid = activeNoteToEdit?.uuid ?: UUID.randomUUID().toString()
                     viewModel.saveNote(
                         id = activeNoteToEdit?.id ?: 0L,
@@ -335,7 +322,7 @@ fun NotesSubTab(
                         backgroundBrightness = brightness,
                         uuid = currentUuid,
                         oldTitle = activeNoteToEdit?.title,
-                        noteColor = nColor,
+                        noteColor = noteColor,
                         onSaved = { savedId ->
                             activeNoteToEdit = Note(
                                 id = savedId,
@@ -348,7 +335,7 @@ fun NotesSubTab(
                                 backgroundImageUri = bgUri,
                                 backgroundBlur = blur,
                                 backgroundBrightness = brightness,
-                                noteColor = nColor
+                                noteColor = noteColor
                             )
                         }
                     )
@@ -365,7 +352,7 @@ fun NotesSubTab(
                     activeNoteToEdit = note
                     isCreatingNew = false
                 },
-                initialMode = if (defaultNoteOpenMode == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
+                initialMode = NoteEditorMode.LIVE_PREVIEW,
                 onModeChanged = null,
                 onToggleChecklistTaskSync = { checklistText, isChecked ->
                     viewModel.syncChecklistToTask(checklistText, isChecked)
@@ -482,7 +469,7 @@ fun NotesSubTab(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Pesquisar",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                            tint = MaterialTheme.colorScheme.outline,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -494,7 +481,7 @@ fun NotesSubTab(
                                 Text(
                                     text = "Pesquisar notas ou ideias...",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                    color = MaterialTheme.colorScheme.outline,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -504,8 +491,7 @@ fun NotesSubTab(
                                 onValueChange = { searchQuery = it },
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontWeight = FontWeight.Medium
+                                    color = MaterialTheme.colorScheme.onSurface
                                 ),
                                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.fillMaxWidth()
@@ -527,21 +513,21 @@ fun NotesSubTab(
                     }
                 }
 
-                // Archived Notes Discrete Circular Button
+                // Create New Folder Circular Button
                 Surface(
                     shape = CircleShape,
                     color = surfaceContainerLow,
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .clickable { showArchivedNotesDialog = true }
-                        .testTag("notes_archived_btn")
+                        .clickable { showAddFolderDialog = true }
+                        .testTag("notes_create_folder_btn")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.Archive,
-                            contentDescription = "Notas Arquivadas",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = "Criar nova pasta",
+                            tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(21.dp)
                         )
                     }
@@ -742,8 +728,7 @@ fun NotesSubTab(
                                             NoteSortOption.LAST_UPDATED -> Icons.Default.Update
                                             NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
                                             NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
-                                            NoteSortOption.CATEGORY -> Icons.Default.Layers
-                                            NoteSortOption.COLOR -> Icons.Default.Palette
+                                            NoteSortOption.CATEGORY -> Icons.Default.Label
                                             NoteSortOption.SIZE -> Icons.Default.FormatSize
                                         },
                                         contentDescription = null,
@@ -753,9 +738,6 @@ fun NotesSubTab(
                                 },
                                 onClick = {
                                     currentSort = opt
-                                    if (opt == NoteSortOption.CATEGORY) {
-                                        currentLayout = NoteLayoutMode.STACKS
-                                    }
                                     showSortMenu = false
                                 }
                             )
@@ -792,7 +774,6 @@ fun NotesSubTab(
                                         NoteLayoutMode.GRID_3 -> Icons.Default.ViewComfy
                                         NoteLayoutMode.DETAILS -> Icons.Default.ViewAgenda
                                         NoteLayoutMode.LIST -> Icons.Default.ViewList
-                                        NoteLayoutMode.STACKS -> Icons.Default.Layers
                                     },
                                     contentDescription = mode.label,
                                     modifier = Modifier.size(17.dp),
@@ -800,25 +781,6 @@ fun NotesSubTab(
                                 )
                             }
                         }
-                    }
-                }
-
-                Surface(
-                    shape = CircleShape,
-                    color = if (isGridStackedByCategory) MaterialTheme.colorScheme.primaryContainer else surfaceContainerLow,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable { isGridStackedByCategory = !isGridStackedByCategory }
-                        .testTag("notes_stack_toggle_btn")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesomeMotion,
-                            contentDescription = "Empilhar por categoria",
-                            modifier = Modifier.size(18.dp),
-                            tint = if (isGridStackedByCategory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                        )
                     }
                 }
             }
@@ -861,9 +823,9 @@ fun NotesSubTab(
             NoteLayoutMode.GRID_2 -> {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_grid")
@@ -874,39 +836,6 @@ fun NotesSubTab(
                     if (sortedNotes.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             emptyNotesItem()
-                        }
-                    } else if (isGridStackedByCategory) {
-                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
-                        categoriesWithNotes.forEach { (catName, catNotes) ->
-                            val isExpanded = expandedCategories.contains(catName)
-                            if (!isExpanded) {
-                                item(key = "g2_stack_$catName") {
-                                    CategoryGridStackCard(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        topNoteTitle = catNotes.firstOrNull()?.title.orEmpty(),
-                                        isCompact = false,
-                                        onClick = { expandedCategories = expandedCategories + catName }
-                                    )
-                                }
-                            } else {
-                                item(key = "g2_hdr_$catName", span = { GridItemSpan(maxLineSpan) }) {
-                                    CategoryExpandedHeader(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        onCollapse = { expandedCategories = expandedCategories - catName }
-                                    )
-                                }
-                                items(catNotes, key = { it.id }) { note ->
-                                    SquareNoteCard(
-                                        note = note,
-                                        onClick = { activeNoteToEdit = note },
-                                        onLongClick = { noteForSubmenu = note },
-                                        onTogglePin = { viewModel.togglePinNote(note) },
-                                        onDelete = { noteToDelete = note }
-                                    )
-                                }
-                            }
                         }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
@@ -919,6 +848,7 @@ fun NotesSubTab(
                             )
                         }
                     }
+                    // Quick Draft Tile (Card 6 from HTML)
                     item {
                         QuickDraftTile(
                             onClick = { showTemplatesMenu = true }
@@ -929,9 +859,9 @@ fun NotesSubTab(
             NoteLayoutMode.GRID_3 -> {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(start = 6.dp, end = 6.dp, top = 6.dp, bottom = 92.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_grid_small")
@@ -942,39 +872,6 @@ fun NotesSubTab(
                     if (sortedNotes.isEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) {
                             emptyNotesItem()
-                        }
-                    } else if (isGridStackedByCategory) {
-                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
-                        categoriesWithNotes.forEach { (catName, catNotes) ->
-                            val isExpanded = expandedCategories.contains(catName)
-                            if (!isExpanded) {
-                                item(key = "g3_stack_$catName") {
-                                    CategoryGridStackCard(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        topNoteTitle = catNotes.firstOrNull()?.title.orEmpty(),
-                                        isCompact = true,
-                                        onClick = { expandedCategories = expandedCategories + catName }
-                                    )
-                                }
-                            } else {
-                                item(key = "g3_hdr_$catName", span = { GridItemSpan(maxLineSpan) }) {
-                                    CategoryExpandedHeader(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        onCollapse = { expandedCategories = expandedCategories - catName }
-                                    )
-                                }
-                                items(catNotes, key = { it.id }) { note ->
-                                    SmallSquareNoteCard(
-                                        note = note,
-                                        onClick = { activeNoteToEdit = note },
-                                        onLongClick = { noteForSubmenu = note },
-                                        onTogglePin = { viewModel.togglePinNote(note) },
-                                        onDelete = { noteToDelete = note }
-                                    )
-                                }
-                            }
                         }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
@@ -996,8 +893,8 @@ fun NotesSubTab(
             }
             NoteLayoutMode.DETAILS -> {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_details_list")
@@ -1008,37 +905,6 @@ fun NotesSubTab(
                     if (sortedNotes.isEmpty()) {
                         item {
                             emptyNotesItem()
-                        }
-                    } else if (isGridStackedByCategory) {
-                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
-                        categoriesWithNotes.forEach { (catName, catNotes) ->
-                            val isExpanded = expandedCategories.contains(catName)
-                            if (!isExpanded) {
-                                item(key = "det_stack_$catName") {
-                                    CategoryDetailsStackCard(
-                                        categoryName = catName,
-                                        notes = catNotes,
-                                        onClick = { expandedCategories = expandedCategories + catName }
-                                    )
-                                }
-                            } else {
-                                item(key = "det_hdr_$catName") {
-                                    CategoryExpandedHeader(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        onCollapse = { expandedCategories = expandedCategories - catName }
-                                    )
-                                }
-                                items(catNotes, key = { it.id }) { note ->
-                                    DetailNoteCard(
-                                        note = note,
-                                        onClick = { activeNoteToEdit = note },
-                                        onLongClick = { noteForSubmenu = note },
-                                        onTogglePin = { viewModel.togglePinNote(note) },
-                                        onDelete = { noteToDelete = note }
-                                    )
-                                }
-                            }
                         }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
@@ -1060,8 +926,8 @@ fun NotesSubTab(
             }
             NoteLayoutMode.LIST -> {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("notes_simple_list")
@@ -1072,37 +938,6 @@ fun NotesSubTab(
                     if (sortedNotes.isEmpty()) {
                         item {
                             emptyNotesItem()
-                        }
-                    } else if (isGridStackedByCategory) {
-                        val categoriesWithNotes = sortedNotes.groupBy { it.category }
-                        categoriesWithNotes.forEach { (catName, catNotes) ->
-                            val isExpanded = expandedCategories.contains(catName)
-                            if (!isExpanded) {
-                                item(key = "list_stack_$catName") {
-                                    CategoryListStackCard(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        onClick = { expandedCategories = expandedCategories + catName }
-                                    )
-                                }
-                            } else {
-                                item(key = "list_hdr_$catName") {
-                                    CategoryExpandedHeader(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        onCollapse = { expandedCategories = expandedCategories - catName }
-                                    )
-                                }
-                                items(catNotes, key = { it.id }) { note ->
-                                    ListNoteCard(
-                                        note = note,
-                                        onClick = { activeNoteToEdit = note },
-                                        onLongClick = { noteForSubmenu = note },
-                                        onTogglePin = { viewModel.togglePinNote(note) },
-                                        onDelete = { noteToDelete = note }
-                                    )
-                                }
-                            }
                         }
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
@@ -1122,76 +957,11 @@ fun NotesSubTab(
                     }
                 }
             }
-            NoteLayoutMode.STACKS -> {
-                val categoriesWithNotes = remember(sortedNotes) {
-                    sortedNotes.groupBy { it.category }
-                }
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 92.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("notes_stacks_list")
-                ) {
-                    item {
-                        topBarHeaderItem()
-                    }
-                    if (sortedNotes.isEmpty()) {
-                        item {
-                            emptyNotesItem()
-                        }
-                    } else {
-                        items(categoriesWithNotes.keys.toList(), key = { it }) { catName ->
-                            val catNotes = categoriesWithNotes[catName] ?: emptyList()
-                            val isExpanded = expandedCategories.contains(catName)
-                            if (!isExpanded) {
-                                CategoryDetailsStackCard(
-                                    categoryName = catName,
-                                    notes = catNotes,
-                                    onClick = { expandedCategories = expandedCategories + catName }
-                                )
-                            } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    CategoryExpandedHeader(
-                                        categoryName = catName,
-                                        noteCount = catNotes.size,
-                                        onCollapse = { expandedCategories = expandedCategories - catName }
-                                    )
-                                    catNotes.forEach { note ->
-                                        DetailNoteCard(
-                                            note = note,
-                                            onClick = { activeNoteToEdit = note },
-                                            onLongClick = { noteForSubmenu = note },
-                                            onTogglePin = { viewModel.togglePinNote(note) },
-                                            onDelete = { noteToDelete = note }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    item {
-                        QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
-                        )
-                    }
-                }
-            }
         }
 
         // Circular Citrus Glow FAB
         FloatingActionButton(
-            onClick = {
-                val draftCat = viewModel.ensureCategoryForDraft()
-                activeNoteToEdit = Note(
-                    id = 0L,
-                    title = "",
-                    content = "",
-                    category = draftCat,
-                    iconEmoji = "📝"
-                )
-                isCreatingNew = true
-            },
+            onClick = { isCreatingNew = true },
             shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -1243,7 +1013,6 @@ fun NotesSubTab(
             onDismiss = { noteForSubmenu = null },
             onTogglePin = { viewModel.togglePinNote(note) },
             onDelete = { noteToDelete = note },
-            onToggleArchive = { viewModel.setNoteArchived(note, !note.isArchived) },
             onDuplicate = {
                 viewModel.saveNote(
                     id = 0L,
@@ -1256,6 +1025,9 @@ fun NotesSubTab(
                     backgroundBlur = note.backgroundBlur,
                     backgroundBrightness = note.backgroundBrightness
                 )
+            },
+            onShareViaCitra = {
+                noteToShareViaCitra = it
             }
         )
     }
@@ -1272,20 +1044,12 @@ fun NotesSubTab(
         )
     }
 
-    // Archived Notes Dialog
-    if (showArchivedNotesDialog) {
-        ArchivedNotesDialog(
-            archivedNotes = archivedNotes,
-            onOpenNote = { note ->
-                activeNoteToEdit = note
-                isCreatingNew = false
-                showArchivedNotesDialog = false
-            },
-            onUnarchive = { viewModel.setNoteArchived(it, false) },
-            onDelete = {
-                viewModel.deleteNote(it)
-            },
-            onDismiss = { showArchivedNotesDialog = false }
+    // Share via Citra Dialog (Blue Globe)
+    noteToShareViaCitra?.let { note ->
+        com.example.ui.screens.inbox.SendNoteDialog(
+            viewModel = viewModel,
+            initialNote = note,
+            onDismiss = { noteToShareViaCitra = null }
         )
     }
 }
@@ -1371,7 +1135,7 @@ private fun QuickDraftTile(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 260.dp)
+            .heightIn(min = 175.dp)
             .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
             .testTag("notes_quick_draft_tile")
@@ -1431,11 +1195,6 @@ fun SquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isDark = isAppDarkTheme()
-    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
-        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
-    }
-
     val dateText = remember(note.updatedAt) {
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt))
     }
@@ -1444,33 +1203,45 @@ fun SquareNoteCard(
     }
     val previewImageUri = extractFirstImageUri(note)
     val hasImage = previewImageUri != null
-    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 200)
+    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 120)
 
-    val badgeBg = if (note.noteColor != null) {
-        paperColors.badgeBg
-    } else when (note.category.lowercase().trim()) {
+    val cardContainerColor = if (note.isPinned) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    val cardBorderColor = if (note.isPinned) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+    }
+
+    val badgeBg = when (note.category.lowercase().trim()) {
         "criatividade", "ideias" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
         "estudos", "study" -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f)
         "logística", "finanças", "trabalho", "work" -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.45f)
         else -> MaterialTheme.colorScheme.surfaceVariant
     }
-    val badgeFg = if (note.noteColor != null) {
-        paperColors.badgeFg
-    } else when (note.category.lowercase().trim()) {
+    val badgeFg = when (note.category.lowercase().trim()) {
         "criatividade", "ideias" -> MaterialTheme.colorScheme.onPrimaryContainer
         "estudos", "study" -> MaterialTheme.colorScheme.onSecondaryContainer
         "logística", "finanças", "trabalho", "work" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onSurface
     }
 
-    PaperNoteSurface(
-        cornerRadius = 16.dp,
-        foldSize = 22.dp,
-        paperColors = paperColors,
-        isPinned = note.isPinned,
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 3.dp else 1.5.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 260.dp)
+            .heightIn(min = 175.dp)
+            .border(
+                width = 1.dp,
+                color = cardBorderColor,
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clip(RoundedCornerShape(20.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
@@ -1480,7 +1251,7 @@ fun SquareNoteCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 10.dp, start = 12.dp, end = 24.dp, bottom = 12.dp),
+                .padding(14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1528,7 +1299,7 @@ fun SquareNoteCard(
                             Icon(
                                 imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                 contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
+                                tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -1555,7 +1326,7 @@ fun SquareNoteCard(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(88.dp)
+                            .height(64.dp)
                             .clip(RoundedCornerShape(12.dp))
                     )
                 }
@@ -1567,7 +1338,7 @@ fun SquareNoteCard(
                     fontSize = 15.sp,
                     lineHeight = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = paperColors.onBackgroundColor,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1577,10 +1348,10 @@ fun SquareNoteCard(
                     Text(
                         text = cleanExcerpt,
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.88f),
-                        maxLines = if (previewImageUri != null) 4 else 6,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (previewImageUri != null) 2 else 3,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -1601,14 +1372,14 @@ fun SquareNoteCard(
                     Icon(
                         imageVector = Icons.Default.Schedule,
                         contentDescription = null,
-                        tint = paperColors.onBackgroundColor.copy(alpha = 0.85f),
+                        tint = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = dateText,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.outline
                     )
                 }
 
@@ -1636,7 +1407,7 @@ fun SquareNoteCard(
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .background(paperColors.accentColor, CircleShape)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
                         )
                     }
                 }
@@ -1657,29 +1428,34 @@ fun SmallSquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isDark = isAppDarkTheme()
-    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
-        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
+    val cardContainerColor = if (note.isPinned) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else {
+        MaterialTheme.colorScheme.surface
     }
 
-    PaperNoteSurface(
-        cornerRadius = 14.dp,
-        foldSize = 18.dp,
-        paperColors = paperColors,
-        isPinned = note.isPinned,
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 2.5.dp else 1.dp),
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(0.9f)
+            .border(
+                width = 1.dp,
+                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
-            .testTag("note_small_card_${note.id}")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 8.dp, start = 8.dp, end = 20.dp, bottom = 8.dp),
+                .padding(10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -1689,13 +1465,13 @@ fun SmallSquareNoteCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = paperColors.badgeBg
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                 ) {
                     Text(
                         text = note.category.take(6),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = paperColors.badgeFg,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -1704,7 +1480,7 @@ fun SmallSquareNoteCard(
                     Icon(
                         imageVector = Icons.Filled.PushPin,
                         contentDescription = "Fixada",
-                        tint = paperColors.accentColor,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(13.dp)
                     )
                 }
@@ -1714,7 +1490,7 @@ fun SmallSquareNoteCard(
                 text = note.title,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
-                color = paperColors.onBackgroundColor,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 14.sp
@@ -1723,8 +1499,8 @@ fun SmallSquareNoteCard(
             Text(
                 text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
                 fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.outline
             )
         }
     }
@@ -1743,25 +1519,30 @@ fun DetailNoteCard(
     onDelete: () -> Unit
 ) {
     val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 180)
-    val isDark = isAppDarkTheme()
-    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
-        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
+    val cardContainerColor = if (note.isPinned) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else {
+        MaterialTheme.colorScheme.surface
     }
 
-    PaperNoteSurface(
-        cornerRadius = 16.dp,
-        foldSize = 22.dp,
-        paperColors = paperColors,
-        isPinned = note.isPinned,
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 2.5.dp else 1.5.dp),
         modifier = Modifier
             .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clip(RoundedCornerShape(20.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
-            .testTag("note_detail_card_${note.id}")
     ) {
-        Column(modifier = Modifier.padding(top = 10.dp, start = 14.dp, end = 24.dp, bottom = 14.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1769,7 +1550,7 @@ fun DetailNoteCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = paperColors.badgeBg
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -1779,14 +1560,14 @@ fun DetailNoteCard(
                         Icon(
                             imageVector = categoryIconFor(note.category),
                             contentDescription = null,
-                            tint = paperColors.badgeFg,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(12.dp)
                         )
                         Text(
                             text = note.category,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = paperColors.badgeFg
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
@@ -1795,15 +1576,14 @@ fun DetailNoteCard(
                     Text(
                         text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
+                        color = MaterialTheme.colorScheme.outline
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
                         Icon(
                             imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                             contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                            tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline,
+                            tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1827,7 +1607,7 @@ fun DetailNoteCard(
                 text = note.title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = paperColors.onBackgroundColor
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             if (cleanExcerpt.isNotBlank()) {
@@ -1836,7 +1616,7 @@ fun DetailNoteCard(
                     text = cleanExcerpt,
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 12.sp,
-                    color = paperColors.onBackgroundColor.copy(alpha = 0.75f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 17.sp,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis
@@ -1858,28 +1638,32 @@ fun ListNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val isDark = isAppDarkTheme()
-    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
-        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
+    val cardContainerColor = if (note.isPinned) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+    } else {
+        MaterialTheme.colorScheme.surface
     }
 
-    PaperNoteSurface(
-        cornerRadius = 14.dp,
-        foldSize = 16.dp,
-        paperColors = paperColors,
-        isPinned = note.isPinned,
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = cardContainerColor,
         modifier = Modifier
             .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = if (note.isPinned) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
-            .testTag("note_list_card_${note.id}")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.dp, end = 20.dp, top = 10.dp, bottom = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -1889,13 +1673,13 @@ fun ListNoteCard(
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = paperColors.badgeBg
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                 ) {
                     Text(
                         text = note.category.take(8),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = paperColors.badgeFg,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
@@ -1906,7 +1690,7 @@ fun ListNoteCard(
                     text = note.title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = paperColors.onBackgroundColor,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -1918,7 +1702,7 @@ fun ListNoteCard(
                     Icon(
                         imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                         contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                        tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline,
+                        tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1954,348 +1738,193 @@ fun NotesTrashDialog(
     var noteToPermanentlyDelete by remember { mutableStateOf<Note?>(null) }
     var showEmptyTrashConfirm by remember { mutableStateOf(false) }
 
-    val isDark = isAppDarkTheme()
-    val warmBg = if (isDark) Color(0xFF1E1C19) else Color(0xFFFAF7F2)
-    val cardBg = if (isDark) Color(0xFF24211D) else Color.White
-    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEFE6DC)
-    val badgeBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
-    val closeBtnBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
-    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
-    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
-
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 18.dp, vertical = 28.dp),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(32.dp),
-                color = warmBg,
-                shadowElevation = 10.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentHeight()
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Top drag pill
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .width(42.dp)
-                            .height(4.5.dp)
-                            .background(
-                                color = if (isDark) Color(0xFF423B33) else Color(0xFFD6CBC3),
-                                shape = CircleShape
-                            )
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Header Row: Red icon, "Lixeira", "(3)" badge, and close button
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF3E1F1F) else Color(0xFFFFECEB),
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.DeleteOutline,
-                                    contentDescription = null,
-                                    tint = if (isDark) Color(0xFFEF5350) else Color(0xFFD32F2F),
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Text(
-                            text = "Lixeira",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textColor
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(24.dp)
                         )
-
                         Spacer(modifier = Modifier.width(8.dp))
-
-                        Surface(
-                            shape = CircleShape,
-                            color = badgeBg
-                        ) {
-                            Text(
-                                text = "(${trashNotes.size})",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = subTextColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.weight(1f))
-
-                        Surface(
-                            shape = CircleShape,
-                            color = closeBtnBg,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .clickable { onDismiss() }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Fechar",
-                                    tint = subTextColor,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Anotações excluídas ficam disponíveis por 30 dias para recuperação antes da exclusão permanente.",
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        color = subTextColor
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    if (trashNotes.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "A lixeira está vazia.",
-                                color = subTextColor,
-                                fontSize = 13.sp
-                            )
-                        }
-                    } else {
-                        // Action buttons row: "Restaurar todas" | "Esvaziar lixeira"
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isDark) Color(0xFF26211C) else Color(0xFFFAF5EE),
-                                border = BorderStroke(1.dp, if (isDark) Color(0xFF4A4237) else Color(0xFFE2D6CA)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable { onRestoreAll() }
-                                    .testTag("trash_restore_all_btn")
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = null,
-                                        tint = if (isDark) Color(0xFFE57373) else Color(0xFFC0392B),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Restaurar todas",
-                                        fontSize = 12.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isDark) Color(0xFFE57373) else Color(0xFFC0392B)
-                                    )
-                                }
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = Color(0xFFB71C1C),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(44.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable { showEmptyTrashConfirm = true }
-                                    .testTag("trash_empty_btn")
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Esvaziar lixeira",
-                                        fontSize = 12.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-
-                        if (showEmptyTrashConfirm) {
-                            AlertDialog(
-                                onDismissRequest = { showEmptyTrashConfirm = false },
-                                title = { Text("Esvaziar lixeira?", fontWeight = FontWeight.Bold) },
-                                text = { Text("Todas as ${trashNotes.size} anotações na lixeira serão excluídas permanentemente. Esta ação não pode ser desfeita.") },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            showEmptyTrashConfirm = false
-                                            onEmptyTrash()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                    ) {
-                                        Text("Esvaziar")
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showEmptyTrashConfirm = false }) {
-                                        Text("Cancelar")
-                                    }
-                                }
-                            )
-                        }
-
-                        // List of trashed note cards
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 290.dp)
-                        ) {
-                            items(trashNotes, key = { it.id }) { note ->
-                                Surface(
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = cardBg,
-                                    border = BorderStroke(1.dp, cardBorder),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = note.title.ifBlank { "Sem título" },
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = textColor,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Spacer(modifier = Modifier.height(3.dp))
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    imageVector = Icons.Default.LocalOffer,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFFFF6F00),
-                                                    modifier = Modifier.size(12.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    text = note.category.ifBlank { "Citra" },
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color(0xFFFF6F00)
-                                                )
-                                            }
-                                        }
-
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            // Green restore circular button
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = if (isDark) Color(0xFF1B3824) else Color(0xFFE8F7ED),
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .clickable { onRestore(note) }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Refresh,
-                                                        contentDescription = "Restaurar",
-                                                        tint = if (isDark) Color(0xFF4ADE80) else Color(0xFF2E7D32),
-                                                        modifier = Modifier.size(17.dp)
-                                                    )
-                                                }
-                                            }
-
-                                            // Red delete circular button
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = if (isDark) Color(0xFF3D1E1E) else Color(0xFFFFEAEA),
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .clickable { noteToPermanentlyDelete = note }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.DeleteOutline,
-                                                        contentDescription = "Excluir Definitivamente",
-                                                        tint = if (isDark) Color(0xFFF87171) else Color(0xFFD32F2F),
-                                                        modifier = Modifier.size(17.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    // Full-width orange "Concluir" button
-                    Button(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(25.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFF6A00),
-                            contentColor = Color.White
-                        )
-                    ) {
                         Text(
-                            text = "Concluir",
-                            fontSize = 15.sp,
+                            text = "Lixeira (${trashNotes.size})",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar")
+                    }
+                }
+
+                Text(
+                    text = "Anotações excluídas ficam disponíveis por 30 dias para recuperação antes da exclusão permanente.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (trashNotes.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "A lixeira está vazia.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onRestoreAll,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("trash_restore_all_btn")
+                        ) {
+                            Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restaurar todas", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = { showEmptyTrashConfirm = true },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("trash_empty_btn")
+                        ) {
+                            Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Esvaziar lixeira", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    if (showEmptyTrashConfirm) {
+                        AlertDialog(
+                            onDismissRequest = { showEmptyTrashConfirm = false },
+                            title = { Text("Esvaziar lixeira?", fontWeight = FontWeight.Bold) },
+                            text = { Text("Todas as ${trashNotes.size} anotações na lixeira serão excluídas permanentemente. Esta ação não pode ser desfeita.") },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showEmptyTrashConfirm = false
+                                        onEmptyTrash()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                ) {
+                                    Text("Esvaziar")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showEmptyTrashConfirm = false }) {
+                                    Text("Cancelar")
+                                }
+                            }
+                        )
+                    }
+
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                    ) {
+                        trashNotes.forEach { note ->
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = note.title,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = note.category,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Row {
+                                        IconButton(
+                                            onClick = { onRestore(note) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Restore,
+                                                contentDescription = "Restaurar",
+                                                tint = MaterialTheme.colorScheme.secondary
+                                            )
+                                        }
+
+                                        IconButton(
+                                            onClick = { noteToPermanentlyDelete = note },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteForever,
+                                                contentDescription = "Excluir Definitivamente",
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Concluir")
                 }
             }
         }
@@ -2325,7 +1954,7 @@ fun NoteSubmenuDialog(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
-    onToggleArchive: () -> Unit = {}
+    onShareViaCitra: (Note) -> Unit = {}
 ) {
     val context = LocalContext.current
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -2381,27 +2010,34 @@ fun NoteSubmenuDialog(
                     }
                 }
 
-                // Archive / Unarchive
+                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                // Compartilhar via Citra (Globo Azul)
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = Color.Transparent,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            onToggleArchive()
                             onDismiss()
+                            onShareViaCitra(note)
                         }
                         .padding(vertical = 8.dp, horizontal = 4.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = if (note.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                            imageVector = Icons.Default.Public,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
+                            tint = Color(0xFF2563EB),
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(if (note.isArchived) "Desarquivar nota" else "Arquivar nota", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "Compartilhar via Citra",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF2563EB)
+                        )
                     }
                 }
 
@@ -2581,511 +2217,3 @@ fun NoteSubmenuDialog(
         }
     )
 }
-
-@Composable
-fun ArchivedNotesDialog(
-    archivedNotes: List<Note>,
-    onOpenNote: (Note) -> Unit,
-    onUnarchive: (Note) -> Unit,
-    onDelete: (Note) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var searchQuery by remember { mutableStateOf("") }
-    val filtered = remember(archivedNotes, searchQuery) {
-        if (searchQuery.isBlank()) archivedNotes
-        else archivedNotes.filter {
-            it.title.contains(searchQuery, ignoreCase = true) ||
-            it.content.contains(searchQuery, ignoreCase = true) ||
-            it.category.contains(searchQuery, ignoreCase = true)
-        }
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Archive,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Text(
-                            text = "Notas Arquivadas",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Fechar")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Search field
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Buscar notas arquivadas...", fontSize = 13.sp) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    trailingIcon = if (searchQuery.isNotEmpty()) {
-                        {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    } else null,
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                if (filtered.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Archive,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = if (searchQuery.isNotBlank()) "Nenhuma nota encontrada" else "Nenhuma nota arquivada",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(filtered, key = { it.id }) { note ->
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpenNote(note) }
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = note.title.ifBlank { "Sem título" },
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.5.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = note.content.take(80).replace("\n", " ").trim(),
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
-                                        ) {
-                                            Text(
-                                                text = note.category,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(
-                                            onClick = { onUnarchive(note) },
-                                            modifier = Modifier.size(36.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Unarchive,
-                                                contentDescription = "Desarquivar",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = { onDelete(note) },
-                                            modifier = Modifier.size(36.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.DeleteOutline,
-                                                contentDescription = "Excluir",
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryGridStackCard(
-    categoryName: String,
-    noteCount: Int,
-    topNoteTitle: String,
-    isCompact: Boolean = false,
-    onClick: () -> Unit
-) {
-    val categoryIcon = categoryIconFor(categoryName)
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = androidx.compose.foundation.BorderStroke(
-            1.5.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-        ),
-        shadowElevation = 2.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(if (isCompact) 130.dp else 175.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(if (isCompact) 10.dp else 14.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-                    modifier = Modifier.size(if (isCompact) 28.dp else 34.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = categoryIcon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(if (isCompact) 16.dp else 18.dp)
-                        )
-                    }
-                }
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                ) {
-                    Text(
-                        text = "$noteCount",
-                        fontSize = if (isCompact) 11.sp else 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = categoryName,
-                    fontSize = if (isCompact) 13.sp else 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (!isCompact && topNoteTitle.isNotBlank()) {
-                    Text(
-                        text = topNoteTitle,
-                        fontSize = 11.5.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "Toque para abrir",
-                    fontSize = if (isCompact) 9.5.sp else 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryExpandedHeader(
-    categoryName: String,
-    noteCount: Int,
-    onCollapse: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = categoryIconFor(categoryName),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = categoryName,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.5.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        text = "$noteCount notas",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                    )
-                }
-            }
-
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 1.dp,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClick = onCollapse)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowUp,
-                        contentDescription = "Recolher",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Recolher",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryDetailsStackCard(
-    categoryName: String,
-    notes: List<Note>,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = androidx.compose.foundation.BorderStroke(
-            1.5.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = categoryIconFor(categoryName),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Column {
-                        Text(
-                            text = categoryName,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Text(
-                            text = "${notes.size} anotações empilhadas",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Expandir",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-            if (notes.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = notes.take(3).joinToString(" • ") { it.title.ifBlank { "Sem título" } },
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryListStackCard(
-    categoryName: String,
-    noteCount: Int,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = categoryIconFor(categoryName),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = categoryName,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "$noteCount notas",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Expandir",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
-

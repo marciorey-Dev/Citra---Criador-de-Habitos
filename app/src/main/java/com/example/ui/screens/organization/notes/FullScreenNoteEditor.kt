@@ -143,7 +143,8 @@ fun FullScreenNoteEditor(
     onRestoreVersion: ((NoteVersion) -> Unit)? = null,
     onCreateLocalCopy: ((NoteVersion) -> Unit)? = null,
     financesEnabled: Boolean = false,
-    onInsertFinanceBlock: (() -> Unit)? = null
+    onInsertFinanceBlock: (() -> Unit)? = null,
+    onShareViaCitra: ((title: String, content: String, category: String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -944,6 +945,27 @@ fun FullScreenNoteEditor(
                                 onClick = {
                                     isPinned = !isPinned
                                     showMenu = false
+                                }
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Compartilhar via Citra",
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF2563EB)
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Public,
+                                        contentDescription = null,
+                                        tint = Color(0xFF2563EB)
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    onShareViaCitra?.invoke(title, editorValue.text, category)
                                 }
                             )
 

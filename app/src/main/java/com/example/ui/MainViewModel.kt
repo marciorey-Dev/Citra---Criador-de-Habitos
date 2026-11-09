@@ -19,6 +19,8 @@ import com.example.data.local.NotificationSettings
 import com.example.data.local.SavedTimerSnapshot
 import com.example.data.model.*
 import com.example.data.repository.CitraRepository
+import com.example.data.auth.AuthRepository
+import com.example.data.inbox.InboxRepository
 import com.example.notifications.NextAlarmScheduler
 import com.example.notifications.NotificationHelper
 import com.example.ui.theme.ThemeAccent
@@ -60,6 +62,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val repository = CitraRepository(application, database)
     val musicPlayer = LocalMusicPlayer(application)
     val preferencesManager = PreferencesManager(application)
+    val authRepository = AuthRepository.getInstance(application)
+    val inboxRepository = InboxRepository.getInstance(application)
+
+    // Inbox & Direct Note Messaging States
+    private val _inboxMessages = MutableStateFlow<List<InboxMessage>>(emptyList())
+    val inboxMessages: StateFlow<List<InboxMessage>> = _inboxMessages.asStateFlow()
+
+    private val _unreadInboxCount = MutableStateFlow(0)
+    val unreadInboxCount: StateFlow<Int> = _unreadInboxCount.asStateFlow()
+
+    private val _isInboxRefreshing = MutableStateFlow(false)
+    val isInboxRefreshing: StateFlow<Boolean> = _isInboxRefreshing.asStateFlow()
+
+    private val _recipientLookupState = MutableStateFlow<RecipientLookupState>(RecipientLookupState.Idle)
+    val recipientLookupState: StateFlow<RecipientLookupState> = _recipientLookupState.asStateFlow()
+
+    private var recipientSearchJob: Job? = null
 
     // Inspiring citrus quotes
     val citrusQuotes = listOf(
@@ -392,6 +411,179 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             repository.seedInitialDataIfNeeded()
+        }
+        viewModelScope.launch {
+            authRepository.currentUser.collect { user ->
+                if (user != null && !user.isGuest) {
+                    refreshInbox()
+                }
+            }
+        }
+        refreshInbox()
+    }
+
+    // --- Inbox & Direct Note Messaging Methods ---
+    fun searchRecipient(query: String) {
+        recipientSearchJob?.cancel()
+        val clean = query.trim().removePrefix("@")
+        if (clean.isBlank()) {
+            _recipientLookupState.value = RecipientLookupState.Idle
+            return
+        }
+        _recipientLookupState.value = RecipientLookupState.Loading
+        recipientSearchJob = viewModelScope.launch {
+            delay(350L) // debounce
+            val result = inboxRepository.searchRecipient(clean)
+            _recipientLookupState.value = result
+        }
+    }
+
+    fun resetRecipientLookup() {
+        recipientSearchJob?.cancel()
+        _recipientLookupState.value = RecipientLookupState.Idle
+    }
+
+    fun refreshInbox() {
+        val user = authRepository.currentUser.value
+        val uid = if (user != null && !user.isGuest) user.uid else ""
+        if (uid.isBlank()) {
+            _inboxMessages.value = emptyList()
+            _unreadInboxCount.value = 0
+            return
+        }
+        viewModelScope.launch {
+            _isInboxRefreshing.value = true
+            inboxRepository.fetchInboxMessages(uid).collect { list ->
+                _inboxMessages.value = list
+                _unreadInboxCount.value = list.count { !it.isRead }
+                _isInboxRefreshing.value = false
+            }
+        }
+    }
+
+    fun markInboxMessageRead(message: InboxMessage) {
+        val user = authRepository.currentUser.value ?: return
+        if (message.isRead) return
+        _inboxMessages.update { list ->
+            list.map { if (it.id == message.id) it.copy(isRead = true) else it }
+        }
+        _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
+        viewModelScope.launch {
+            inboxRepository.markAsRead(user.uid, message)
+        }
+    }
+
+    fun downloadInboxNote(message: InboxMessage, onSuccess: () -> Unit = {}) {
+        val user = authRepository.currentUser.value ?: return
+        if (message.isOfficialDev || message.isBroadcast) {
+            viewModelScope.launch {
+                _userMessage.emit("Comunicados oficiais da equipe são apenas para leitura.")
+            }
+            return
+        }
+        viewModelScope.launch {
+            saveNote(
+                id = 0L,
+                title = message.title,
+                content = message.contentMarkdown,
+                category = message.category.ifBlank { "Recebidas" },
+                iconEmoji = "📬"
+            )
+            inboxRepository.markAsDownloaded(user.uid, message)
+            _inboxMessages.update { list ->
+                list.map { if (it.id == message.id) it.copy(isDownloaded = true, isRead = true) else it }
+            }
+            _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
+            _userMessage.emit("Nota salva no seu bloco de notas!")
+            onSuccess()
+        }
+    }
+
+    fun deleteInboxMessage(message: InboxMessage) {
+        val user = authRepository.currentUser.value ?: return
+        _inboxMessages.update { list -> list.filter { it.id != message.id } }
+        if (!message.isRead) {
+            _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
+        }
+        viewModelScope.launch {
+            inboxRepository.deleteMessage(user.uid, message)
+            _userMessage.emit("Mensagem removida da caixa de entrada.")
+        }
+    }
+
+    fun clearInbox() {
+        val user = authRepository.currentUser.value ?: return
+        val currentList = _inboxMessages.value
+        _inboxMessages.value = emptyList()
+        _unreadInboxCount.value = 0
+        viewModelScope.launch {
+            inboxRepository.clearInbox(user.uid, currentList)
+            _userMessage.emit("Caixa de entrada limpa.")
+        }
+    }
+
+    fun sendNoteMessage(
+        recipientUid: String?,
+        isBroadcast: Boolean,
+        title: String,
+        content: String,
+        category: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val user = authRepository.currentUser.value
+        if (user == null || user.isGuest) {
+            onError("Você precisa entrar com uma conta para enviar notas.")
+            return
+        }
+
+        val authUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        val email = authUser?.email
+        val isDev = InboxRepository.isDeveloper(email)
+
+        val message = InboxMessage(
+            id = java.util.UUID.randomUUID().toString(),
+            senderUid = user.uid,
+            senderDisplayName = user.displayName,
+            senderUsername = user.username,
+            senderPhotoUrl = user.photoUrl,
+            senderEmail = email,
+            isOfficialDev = isDev,
+            title = title.ifBlank { "Sem título" },
+            contentMarkdown = content,
+            category = category.ifBlank { "Geral" },
+            sentAtMillis = System.currentTimeMillis(),
+            isRead = false,
+            isDownloaded = false,
+            isBroadcast = isBroadcast
+        )
+
+        viewModelScope.launch {
+            if (isBroadcast) {
+                if (!isDev) {
+                    onError("Apenas contas de desenvolvedor podem enviar comunicados globais.")
+                    return@launch
+                }
+                val res = inboxRepository.sendBroadcastMessage(message)
+                if (res.isSuccess) {
+                    _userMessage.emit("Comunicado global enviado com sucesso!")
+                    onSuccess()
+                } else {
+                    onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar comunicado")
+                }
+            } else {
+                if (recipientUid.isNullOrBlank()) {
+                    onError("Destinatário não especificado")
+                    return@launch
+                }
+                val res = inboxRepository.sendDirectMessage(recipientUid, message)
+                if (res.isSuccess) {
+                    _userMessage.emit("Nota enviada com sucesso!")
+                    onSuccess()
+                } else {
+                    onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar nota")
+                }
+            }
         }
     }
 
