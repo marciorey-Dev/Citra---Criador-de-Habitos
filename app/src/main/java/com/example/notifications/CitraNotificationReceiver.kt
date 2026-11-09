@@ -75,7 +75,6 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                                     snapshot.copy(
                                         phaseName = "BREAK",
                                         remainingSeconds = breakSec,
-                                        totalPhaseSeconds = breakSec,
                                         isRunning = false,
                                         isPaused = false,
                                         targetEndTimeMillis = 0L

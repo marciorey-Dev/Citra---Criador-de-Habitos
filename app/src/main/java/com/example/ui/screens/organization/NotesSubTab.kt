@@ -3,6 +3,7 @@ package com.example.ui.screens.organization
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -1953,193 +1954,348 @@ fun NotesTrashDialog(
     var noteToPermanentlyDelete by remember { mutableStateOf<Note?>(null) }
     var showEmptyTrashConfirm by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+    val isDark = isAppDarkTheme()
+    val warmBg = if (isDark) Color(0xFF1E1C19) else Color(0xFFFAF7F2)
+    val cardBg = if (isDark) Color(0xFF24211D) else Color.White
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEFE6DC)
+    val badgeBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
+    val closeBtnBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 28.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.fillMaxWidth()
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = warmBg,
+                shadowElevation = 10.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteSweep,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                    // Top drag pill
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .width(42.dp)
+                            .height(4.5.dp)
+                            .background(
+                                color = if (isDark) Color(0xFF423B33) else Color(0xFFD6CBC3),
+                                shape = CircleShape
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Header Row: Red icon, "Lixeira", "(3)" badge, and close button
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isDark) Color(0xFF3E1F1F) else Color(0xFFFFECEB),
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = if (isDark) Color(0xFFEF5350) else Color(0xFFD32F2F),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
                         Text(
-                            text = "Lixeira (${trashNotes.size})",
-                            style = MaterialTheme.typography.titleMedium,
+                            text = "Lixeira",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Surface(
+                            shape = CircleShape,
+                            color = badgeBg
+                        ) {
+                            Text(
+                                text = "(${trashNotes.size})",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = subTextColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        Surface(
+                            shape = CircleShape,
+                            color = closeBtnBg,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = subTextColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Anotações excluídas ficam disponíveis por 30 dias para recuperação antes da exclusão permanente.",
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = subTextColor
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (trashNotes.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "A lixeira está vazia.",
+                                color = subTextColor,
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
+                        // Action buttons row: "Restaurar todas" | "Esvaziar lixeira"
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isDark) Color(0xFF26211C) else Color(0xFFFAF5EE),
+                                border = BorderStroke(1.dp, if (isDark) Color(0xFF4A4237) else Color(0xFFE2D6CA)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable { onRestoreAll() }
+                                    .testTag("trash_restore_all_btn")
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = if (isDark) Color(0xFFE57373) else Color(0xFFC0392B),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Restaurar todas",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color(0xFFE57373) else Color(0xFFC0392B)
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color(0xFFB71C1C),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable { showEmptyTrashConfirm = true }
+                                    .testTag("trash_empty_btn")
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Esvaziar lixeira",
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+
+                        if (showEmptyTrashConfirm) {
+                            AlertDialog(
+                                onDismissRequest = { showEmptyTrashConfirm = false },
+                                title = { Text("Esvaziar lixeira?", fontWeight = FontWeight.Bold) },
+                                text = { Text("Todas as ${trashNotes.size} anotações na lixeira serão excluídas permanentemente. Esta ação não pode ser desfeita.") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showEmptyTrashConfirm = false
+                                            onEmptyTrash()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Text("Esvaziar")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showEmptyTrashConfirm = false }) {
+                                        Text("Cancelar")
+                                    }
+                                }
+                            )
+                        }
+
+                        // List of trashed note cards
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 290.dp)
+                        ) {
+                            items(trashNotes, key = { it.id }) { note ->
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = cardBg,
+                                    border = BorderStroke(1.dp, cardBorder),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = note.title.ifBlank { "Sem título" },
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = textColor,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.height(3.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.LocalOffer,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFFF6F00),
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = note.category.ifBlank { "Citra" },
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xFFFF6F00)
+                                                )
+                                            }
+                                        }
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // Green restore circular button
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = if (isDark) Color(0xFF1B3824) else Color(0xFFE8F7ED),
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .clickable { onRestore(note) }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Refresh,
+                                                        contentDescription = "Restaurar",
+                                                        tint = if (isDark) Color(0xFF4ADE80) else Color(0xFF2E7D32),
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Red delete circular button
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = if (isDark) Color(0xFF3D1E1E) else Color(0xFFFFEAEA),
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .clip(CircleShape)
+                                                    .clickable { noteToPermanentlyDelete = note }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.DeleteOutline,
+                                                        contentDescription = "Excluir Definitivamente",
+                                                        tint = if (isDark) Color(0xFFF87171) else Color(0xFFD32F2F),
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // Full-width orange "Concluir" button
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(25.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF6A00),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(
+                            text = "Concluir",
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Fechar")
-                    }
-                }
-
-                Text(
-                    text = "Anotações excluídas ficam disponíveis por 30 dias para recuperação antes da exclusão permanente.",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                if (trashNotes.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "A lixeira está vazia.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 13.sp
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onRestoreAll,
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("trash_restore_all_btn")
-                        ) {
-                            Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Restaurar todas", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Button(
-                            onClick = { showEmptyTrashConfirm = true },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error,
-                                contentColor = Color.White
-                            ),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("trash_empty_btn")
-                        ) {
-                            Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Esvaziar lixeira", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-
-                    if (showEmptyTrashConfirm) {
-                        AlertDialog(
-                            onDismissRequest = { showEmptyTrashConfirm = false },
-                            title = { Text("Esvaziar lixeira?", fontWeight = FontWeight.Bold) },
-                            text = { Text("Todas as ${trashNotes.size} anotações na lixeira serão excluídas permanentemente. Esta ação não pode ser desfeita.") },
-                            confirmButton = {
-                                Button(
-                                    onClick = {
-                                        showEmptyTrashConfirm = false
-                                        onEmptyTrash()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                ) {
-                                    Text("Esvaziar")
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showEmptyTrashConfirm = false }) {
-                                    Text("Cancelar")
-                                }
-                            }
-                        )
-                    }
-
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 280.dp)
-                    ) {
-                        trashNotes.forEach { note ->
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = note.title,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = note.category,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    Row {
-                                        IconButton(
-                                            onClick = { onRestore(note) },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Restore,
-                                                contentDescription = "Restaurar",
-                                                tint = MaterialTheme.colorScheme.secondary
-                                            )
-                                        }
-
-                                        IconButton(
-                                            onClick = { noteToPermanentlyDelete = note },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.DeleteForever,
-                                                contentDescription = "Excluir Definitivamente",
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Concluir")
                 }
             }
         }

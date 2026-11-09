@@ -3,6 +3,7 @@ package com.example.ui.screens.organization
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,12 +31,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.Category
 import com.example.data.model.Task
 import com.example.data.model.TaskPriority
 import com.example.data.model.isReadyForMainList
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
+import com.example.ui.theme.isAppDarkTheme
 import com.example.ui.tutorial.tutorialTarget
 import com.example.util.SoundEffectsManager
 import java.text.SimpleDateFormat
@@ -68,6 +75,7 @@ fun TasksSubTab(
 
     val pendingCount = remember(tasks) { tasks.count { !it.isCompleted && it.isReadyForMainList() } }
     val completedCount = remember(tasks) { tasks.count { it.isCompleted } }
+    val futureCount = remember(tasks) { tasks.count { !it.isCompleted && !it.isReadyForMainList() } }
     val completionPercent = remember(tasks, completedCount) {
         val totalVisible = tasks.count { it.isReadyForMainList() || it.isCompleted }
         if (totalVisible == 0) 0 else (completedCount * 100) / totalVisible
@@ -77,7 +85,8 @@ fun TasksSubTab(
         when (filterMode) {
             "PENDING" -> tasks.filter { !it.isCompleted && it.isReadyForMainList() }
             "COMPLETED" -> tasks.filter { it.isCompleted }
-            else -> tasks.filter { it.isCompleted || it.isReadyForMainList() }
+            "FUTURE" -> tasks.filter { !it.isCompleted && !it.isReadyForMainList() }
+            else -> tasks
         }
     }
 
@@ -106,13 +115,15 @@ fun TasksSubTab(
                             onClick = { filterMode = "PENDING" }
                         )
                     }
-                    item {
-                        TaskFilterPill(
-                            label = "Todas (${tasks.size})",
-                            selected = filterMode == "ALL",
-                            showActiveDot = false,
-                            onClick = { filterMode = "ALL" }
-                        )
+                    if (futureCount > 0) {
+                        item {
+                            TaskFilterPill(
+                                label = "Agendadas (+3d) ($futureCount)",
+                                selected = filterMode == "FUTURE",
+                                showActiveDot = false,
+                                onClick = { filterMode = "FUTURE" }
+                            )
+                        }
                     }
                     item {
                         TaskFilterPill(
@@ -120,6 +131,14 @@ fun TasksSubTab(
                             selected = filterMode == "COMPLETED",
                             showActiveDot = false,
                             onClick = { filterMode = "COMPLETED" }
+                        )
+                    }
+                    item {
+                        TaskFilterPill(
+                            label = "Todas (${tasks.size})",
+                            selected = filterMode == "ALL",
+                            showActiveDot = false,
+                            onClick = { filterMode = "ALL" }
                         )
                     }
                 }
@@ -740,171 +759,485 @@ fun QuickAddTaskDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "⚡", fontSize = 22.sp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Nova Tarefa", fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // 1. Campo essencial: Nome
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Nome da Tarefa *") },
-                    placeholder = { Text("Ex: Ler capítulo 3...") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("task_title_input")
-                )
+    val isDark = isAppDarkTheme()
+    val warmBg = if (isDark) Color(0xFF1E1C19) else Color(0xFFFAF7F2)
+    val cardBg = if (isDark) Color(0xFF26231E) else Color(0xFFFAF5EE)
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEDE3D7)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF5D544C)
+    val closeBtnBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
+    val greenContainer = if (isDark) Color(0xFF1B3824) else Color(0xFFE8F7ED)
+    val greenBorder = if (isDark) Color(0xFF4ADE80) else Color(0xFF48BB78)
+    val greenText = if (isDark) Color(0xFF4ADE80) else Color(0xFF1B5E20)
+    val orangeCta = Color(0xFFFF6A00)
 
-                // 2. Campo essencial: Data
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+    val formattedDisplayDate = remember(selectedTimestamp, cal) {
+        val target = selectedTimestamp ?: cal.timeInMillis
+        SimpleDateFormat("dd/MM/yyyy 'às' HH:mm", Locale.getDefault()).format(Date(target))
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = warmBg,
+                shadowElevation = 10.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { openDateTimePicker() }
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
+                    // Top drag pill
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .width(42.dp)
+                            .height(4.5.dp)
+                            .background(
+                                color = if (isDark) Color(0xFF423B33) else Color(0xFFD6CBC3),
+                                shape = CircleShape
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Header Row: Yellow lightning bolt icon, Title, Subtitle, Close Button
                     Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isDark) Color(0xFF3E331A) else Color(0xFFFFF3CD),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF59E0B),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Nova Tarefa",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Defina detalhes e compromissos",
+                                fontSize = 12.sp,
+                                color = subTextColor
+                            )
+                        }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = closeBtnBg,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = subTextColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // Label: NOME DA TAREFA *
+                    Text(
+                        text = "NOME DA TAREFA *",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Title input container
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            if (title.isEmpty()) {
+                                Text(
+                                    text = "Revisar layout aconchegante",
+                                    fontSize = 14.5.sp,
+                                    color = subTextColor.copy(alpha = 0.65f)
+                                )
+                            }
+                            BasicTextField(
+                                value = title,
+                                onValueChange = { title = it },
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = textColor
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("task_title_input")
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Date & Time Picker Card
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { openDateTimePicker() }
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Event, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (onlyAskTime) {
-                                    val timeOnly = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(selectedTimestamp ?: cal.timeInMillis))
-                                    "Horário: $timeOnly • Dia $dueDateText"
-                                } else {
-                                    "Prazo: $dueDateText"
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        Icon(Icons.Default.EditCalendar, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                // Opções opcionais (expansíveis)
-                TextButton(
-                    onClick = { showMoreOptions = !showMoreOptions },
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Icon(
-                        imageVector = if (showMoreOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        if (showMoreOptions) "Menos detalhes" else "+ Mais opções (Prioridade, Categoria, Alarme)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                AnimatedVisibility(visible = showMoreOptions) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // Category selection
-                        Text("Categoria:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(categories) { cat ->
-                                FilterChip(
-                                    selected = category == cat.name,
-                                    onClick = { category = cat.name },
-                                    label = { Text("${cat.emoji} ${cat.name}", fontSize = 11.sp) }
-                                )
-                            }
-                        }
-
-                        // Priority
-                        Text("Prioridade:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TaskPriority.values().forEach { prio ->
-                                val isSelected = priority == prio
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { priority = prio },
-                                    label = { Text(prio.label) },
-                                    modifier = Modifier.weight(1f)
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isDark) Color(0xFF3D2314) else Color(0xFFFFEFE3),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarToday,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF6F00),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
-                        }
 
-                        // Lead reminder time
-                        Text("Lembrar com antecedência:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(0 to "No prazo", 15 to "15m", 30 to "30m", 60 to "1h").forEach { (mins, lbl) ->
-                                FilterChip(
-                                    selected = reminderMinutesBefore == mins,
-                                    onClick = { reminderMinutesBefore = mins },
-                                    label = { Text(lbl, fontSize = 11.sp) }
-                                )
-                            }
-                        }
+                            Spacer(modifier = Modifier.width(12.dp))
 
-                        TaskAudioSelectionRow(
-                            customSoundUri = customSoundUri,
-                            onSoundSelected = { customSoundUri = it },
-                            onClear = { customSoundUri = "" }
-                        )
-
-                        // Opção de Toque em Loop
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = if (onlyAskTime) "Prazo selecionado" else "Prazo definido",
+                                    fontSize = 11.5.sp,
+                                    color = subTextColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = formattedDisplayDate,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
                             }
-                            Switch(
-                                checked = loopAlarm,
-                                onCheckedChange = { loopAlarm = it }
+
+                            Icon(
+                                imageVector = Icons.Default.EditCalendar,
+                                contentDescription = "Editar prazo",
+                                tint = Color(0xFFFF6F00),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Collapsible toggle link: "^ Menos detalhes" / "v Mais detalhes"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showMoreOptions = !showMoreOptions }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (showMoreOptions) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = orangeCta,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (showMoreOptions) "Menos detalhes" else "Mais detalhes",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = orangeCta
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showMoreOptions) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.padding(top = 10.dp)
+                        ) {
+                            // CATEGORIA
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "CATEGORIA:",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = labelColor
+                                )
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(categories) { cat ->
+                                        val isSelected = category.equals(cat.name, ignoreCase = true)
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = if (isSelected) greenContainer else cardBg,
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) greenBorder else cardBorder
+                                            ),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable { category = cat.name }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(text = cat.emoji, fontSize = 13.sp)
+                                                Text(
+                                                    text = cat.name,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) greenText else textColor
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = greenText,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // PRIORIDADE
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "PRIORIDADE:",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = labelColor
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    TaskPriority.values().forEach { prio ->
+                                        val isSelected = priority == prio
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = if (isSelected) greenContainer else cardBg,
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) greenBorder else cardBorder
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(42.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable { priority = prio }
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                Text(
+                                                    text = if (isSelected) "${prio.label} •" else prio.label,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) greenText else textColor
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // LEMBRAR COM ANTECEDÊNCIA
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "LEMBRAR COM ANTECEDÊNCIA:",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = labelColor
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(0 to "No prazo", 15 to "15m", 30 to "30m", 60 to "1h").forEach { (mins, lbl) ->
+                                        val isSelected = reminderMinutesBefore == mins
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = if (isSelected) greenContainer else cardBg,
+                                            border = BorderStroke(
+                                                width = if (isSelected) 1.5.dp else 1.dp,
+                                                color = if (isSelected) greenBorder else cardBorder
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(42.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable { reminderMinutesBefore = mins }
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                Text(
+                                                    text = lbl,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) greenText else textColor
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Loop Alarm Card
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = cardBg,
+                                border = BorderStroke(1.dp, cardBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Toque em Loop Contínuo",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = textColor
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Toca som repetidamente até você dispensar",
+                                            fontSize = 11.sp,
+                                            color = subTextColor
+                                        )
+                                    }
+                                    Switch(
+                                        checked = loopAlarm,
+                                        onCheckedChange = { loopAlarm = it },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = orangeCta
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Action buttons row: Cancelar | Salvar Tarefa →
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isDark) Color(0xFF2E2A24) else Color(0xFFEFEAE4),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Cancelar",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = textColor
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (title.isNotBlank()) {
+                                    onConfirm(title.trim(), category, priority, dueDateText, selectedTimestamp, reminderMinutesBefore, customSoundUri, loopAlarm)
+                                }
+                            },
+                            enabled = title.isNotBlank(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = orangeCta,
+                                contentColor = Color.White,
+                                disabledContainerColor = orangeCta.copy(alpha = 0.4f),
+                                disabledContentColor = Color.White.copy(alpha = 0.6f)
+                            ),
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .height(48.dp)
+                                .testTag("save_task_btn")
+                        ) {
+                            Text(
+                                text = "Salvar Tarefa →",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isNotBlank()) {
-                        onConfirm(title.trim(), category, priority, dueDateText, selectedTimestamp, reminderMinutesBefore, customSoundUri, loopAlarm)
-                    }
-                },
-                enabled = title.isNotBlank(),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.testTag("save_task_btn")
-            ) {
-                Text("Salvar Tarefa", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
-                Text("Cancelar")
-            }
-        },
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }
 
 @Composable
@@ -950,120 +1283,407 @@ fun EditTaskDialog(
         ).show()
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Editar Tarefa", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Título da Tarefa") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+    val isDark = isAppDarkTheme()
+    val warmBg = if (isDark) Color(0xFF1E1C19) else Color(0xFFFAF7F2)
+    val cardBg = if (isDark) Color(0xFF26231E) else Color(0xFFFAF5EE)
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEDE3D7)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF5D544C)
+    val closeBtnBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
+    val greenContainer = if (isDark) Color(0xFF1B3824) else Color(0xFFE8F7ED)
+    val greenBorder = if (isDark) Color(0xFF4ADE80) else Color(0xFF48BB78)
+    val greenText = if (isDark) Color(0xFF4ADE80) else Color(0xFF1B5E20)
+    val orangeCta = Color(0xFFFF6A00)
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+    val formattedDisplayDate = remember(selectedTimestamp, dueDateText) {
+        if (selectedTimestamp != null && selectedTimestamp!! > 0) {
+            SimpleDateFormat("dd/MM/yyyy 'às' HH:mm", Locale.getDefault()).format(Date(selectedTimestamp!!))
+        } else {
+            dueDateText
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = warmBg,
+                shadowElevation = 10.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { openDateTimePicker() }
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .width(42.dp)
+                            .height(4.5.dp)
+                            .background(
+                                color = if (isDark) Color(0xFF423B33) else Color(0xFFD6CBC3),
+                                shape = CircleShape
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isDark) Color(0xFF3E331A) else Color(0xFFFFF3CD),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF59E0B),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Editar Tarefa",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Ajuste detalhes e compromissos",
+                                fontSize = 12.sp,
+                                color = subTextColor
+                            )
+                        }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = closeBtnBg,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = subTextColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Text(
+                        text = "NOME DA TAREFA *",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            BasicTextField(
+                                value = title,
+                                onValueChange = { title = it },
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = textColor
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { openDateTimePicker() }
                     ) {
-                        Text(text = "📅 Prazo: $dueDateText", fontSize = 13.sp)
-                        Icon(Icons.Default.EditCalendar, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isDark) Color(0xFF3D2314) else Color(0xFFFFEFE3),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarToday,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF6F00),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
 
-                Text("Categoria:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(categories) { cat ->
-                        FilterChip(
-                            selected = category == cat.name,
-                            onClick = { category = cat.name },
-                            label = { Text("${cat.emoji} ${cat.name}", fontSize = 11.sp) }
-                        )
-                    }
-                }
+                            Spacer(modifier = Modifier.width(12.dp))
 
-                Text("Prioridade:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TaskPriority.values().forEach { prio ->
-                        FilterChip(
-                            selected = priority == prio,
-                            onClick = { priority = prio },
-                            label = { Text(prio.label) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Prazo definido",
+                                    fontSize = 11.5.sp,
+                                    color = subTextColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = formattedDisplayDate,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
+                            }
 
-                TaskAudioSelectionRow(
-                    customSoundUri = customSoundUri,
-                    onSoundSelected = { customSoundUri = it },
-                    onClear = { customSoundUri = "" }
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(
-                        checked = loopAlarm,
-                        onCheckedChange = { loopAlarm = it }
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isNotBlank()) {
-                        onConfirm(
-                            task.copy(
-                                title = title.trim(),
-                                category = category,
-                                priority = priority,
-                                dueDateText = dueDateText,
-                                dueDateTimestamp = selectedTimestamp,
-                                reminderMinutesBefore = reminderMinutesBefore,
-                                customSoundUri = customSoundUri,
-                                loopAlarm = loopAlarm
+                            Icon(
+                                imageVector = Icons.Default.EditCalendar,
+                                contentDescription = "Editar prazo",
+                                tint = Color(0xFFFF6F00),
+                                modifier = Modifier.size(22.dp)
                             )
-                        )
+                        }
                     }
-                },
-                enabled = title.isNotBlank(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Salvar Alterações")
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "CATEGORIA:",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = labelColor
+                            )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(categories) { cat ->
+                                    val isSelected = category.equals(cat.name, ignoreCase = true)
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isSelected) greenContainer else cardBg,
+                                        border = BorderStroke(
+                                            width = if (isSelected) 1.5.dp else 1.dp,
+                                            color = if (isSelected) greenBorder else cardBorder
+                                        ),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { category = cat.name }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(text = cat.emoji, fontSize = 13.sp)
+                                            Text(
+                                                text = cat.name,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) greenText else textColor
+                                            )
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = greenText,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "PRIORIDADE:",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = labelColor
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                TaskPriority.values().forEach { prio ->
+                                    val isSelected = priority == prio
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isSelected) greenContainer else cardBg,
+                                        border = BorderStroke(
+                                            width = if (isSelected) 1.5.dp else 1.dp,
+                                            color = if (isSelected) greenBorder else cardBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(42.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { priority = prio }
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.fillMaxSize()
+                                        ) {
+                                            Text(
+                                                text = if (isSelected) "${prio.label} •" else prio.label,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) greenText else textColor
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = cardBg,
+                            border = BorderStroke(1.dp, cardBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Toque em Loop Contínuo",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textColor
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Toca som repetidamente até você dispensar",
+                                        fontSize = 11.sp,
+                                        color = subTextColor
+                                    )
+                                }
+                                Switch(
+                                    checked = loopAlarm,
+                                    onCheckedChange = { loopAlarm = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = orangeCta
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isDark) Color(0xFF2E2A24) else Color(0xFFEFEAE4),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Cancelar",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = textColor
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (title.isNotBlank()) {
+                                    onConfirm(
+                                        task.copy(
+                                            title = title.trim(),
+                                            category = category,
+                                            priority = priority,
+                                            dueDateText = dueDateText,
+                                            dueDateTimestamp = selectedTimestamp,
+                                            reminderMinutesBefore = reminderMinutesBefore,
+                                            customSoundUri = customSoundUri,
+                                            loopAlarm = loopAlarm
+                                        )
+                                    )
+                                }
+                            },
+                            enabled = title.isNotBlank(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = orangeCta,
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .height(48.dp)
+                        ) {
+                            Text(
+                                text = "Salvar Alterações",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
-                Text("Cancelar")
-            }
-        },
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }
 
 @Composable

@@ -13,12 +13,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import com.example.data.model.isScheduledForDate
+import com.example.data.model.getEffectiveDueTimestamp
 
 object NextAlarmScheduler {
     const val REQUEST_CODE_NEXT_REMINDER = 90001
     const val ACTION_TRIGGER_SCHEDULED_REMINDER = "com.example.citra.TRIGGER_SCHEDULED_REMINDER"
 
     const val TYPE_TASK_ADVANCE = "task_advance"
+    const val TYPE_TASK_71H = "task_71h"
     const val TYPE_TASK_EXACT = "task_exact"
     const val TYPE_HABIT_ADVANCE = "habit_advance"
     const val TYPE_HABIT_EXACT = "habit_exact"
@@ -52,7 +54,7 @@ object NextAlarmScheduler {
                 )
 
                 val now = System.currentTimeMillis()
-                val tasks = db.taskDao().getAllTasksSync().filter { !it.isCompleted && it.dueDateTimestamp != null }
+                val tasks = db.taskDao().getAllTasksSync().filter { !it.isCompleted }
                 val habits = db.habitDao().getAllHabitsSync().filter { it.reminderTime.isNotBlank() }
 
                 val defaultTaskSound = if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
@@ -62,8 +64,25 @@ object NextAlarmScheduler {
 
                 // 1. Evaluate Tasks
                 tasks.forEach { task ->
-                    val due = task.dueDateTimestamp ?: return@forEach
+                    val due = task.getEffectiveDueTimestamp() ?: return@forEach
                     val sound = if (task.customSoundUri.isNotBlank()) task.customSoundUri else defaultTaskSound
+
+                    // 71 hours before reminder
+                    val time71hMs = 71L * 60L * 60L * 1000L
+                    val trigger71h = due - time71hMs
+                    if (trigger71h > now + 1500L) {
+                        candidates.add(
+                            ScheduledReminderCandidate(
+                                triggerTime = trigger71h,
+                                type = TYPE_TASK_71H,
+                                entityId = task.id,
+                                title = "Aviso (71h): ${task.title}",
+                                message = "Faltam 71 horas para o prazo da sua tarefa!",
+                                soundUri = sound,
+                                loopAlarm = false
+                            )
+                        )
+                    }
 
                     // Advance reminder
                     if (task.reminderMinutesBefore > 0) {

@@ -292,7 +292,7 @@
 <!-- Legenda Inferior Charmosa com contador dinâmico -->
 <div class="mt-3.5 flex items-center justify-center space-x-1.5 text-xs text-slate-500 font-medium">
 <span id="citrus-sub-icon">🍊</span>
-<span id="seeds-count-label">Dial cítrico • 12/12 sementes ativas</span>
+<span id="seeds-count-label">12/12 sementes ativas</span>
 </div>
 </div>
 <!-- END: CitrusDialSection -->
@@ -439,7 +439,7 @@
 
       // 3. Segmentos e Sementes ativas (12 segmentos)
       const activeSeedsCount = Math.ceil(fraction * TOTAL_SEEDS);
-      seedsCountLabel.textContent = `Dial cítrico • ${activeSeedsCount}/${TOTAL_SEEDS} sementes ativas`;
+      seedsCountLabel.textContent = `${activeSeedsCount}/${TOTAL_SEEDS} sementes ativas`;
 
       for (let i = 0; i < TOTAL_SEEDS; i++) {
         const seed = document.getElementById(`seed-${i}`);

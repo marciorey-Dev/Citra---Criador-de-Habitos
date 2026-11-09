@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.TaskPriority
+import com.example.data.model.isReadyForMainList
 import com.example.ui.MainViewModel
 import com.example.ui.components.CitraMascote
 import com.example.ui.components.MascotHumor
@@ -52,7 +53,7 @@ fun HomeScreen(
     val dailyWelcomePhrase by viewModel.dailyWelcomePhrase.collectAsState()
     val todayStr = viewModel.todayString
 
-    val pendingTasks = remember(tasks) { tasks.filter { !it.isCompleted } }
+    val pendingTasks = remember(tasks) { tasks.filter { !it.isCompleted && it.isReadyForMainList() } }
     val currentTask = pendingTasks.firstOrNull()
     val nextTasks = pendingTasks.drop(1).take(3)
 

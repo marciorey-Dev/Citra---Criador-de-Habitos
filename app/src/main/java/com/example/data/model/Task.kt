@@ -27,23 +27,32 @@ data class Task(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+fun Task.getEffectiveDueTimestamp(): Long? {
+    dueDateTimestamp?.let { if (it > 0) return it }
+    return try {
+        if (dueDateText.isNotBlank()) {
+            val clean = dueDateText.trim()
+            val sdf = when {
+                clean.contains("-") && clean.contains(":") ->
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                clean.contains("-") ->
+                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                clean.contains("/") && clean.contains(":") ->
+                    java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
+                clean.contains("/") ->
+                    java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
+                else -> null
+            }
+            sdf?.parse(clean)?.time
+        } else null
+    } catch (_: Exception) { null }
+}
+
 fun Task.isReadyForMainList(now: Long = System.currentTimeMillis()): Boolean {
     // 72 hours window in milliseconds (72 * 60 * 60 * 1000L)
     val maxLeadTimeMs = 72L * 60L * 60L * 1000L
 
-    val targetTs = dueDateTimestamp ?: run {
-        try {
-            if (dueDateText.isNotBlank()) {
-                val clean = dueDateText.trim()
-                val sdf = if (clean.contains("-")) {
-                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                } else if (clean.contains("/")) {
-                    java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
-                } else null
-                sdf?.parse(clean.take(10))?.time
-            } else null
-        } catch (_: Exception) { null }
-    } ?: return true // No due date set: immediately visible
+    val targetTs = getEffectiveDueTimestamp() ?: return true // No due date set: immediately visible
 
     val diff = targetTs - now
     // If due date is more than 72 hours in future, stay hidden from main lists until 72h window

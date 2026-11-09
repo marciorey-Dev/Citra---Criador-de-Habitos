@@ -1,6 +1,7 @@
 package com.example.ui.screens.organization
 
 import android.app.TimePickerDialog
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +28,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.Category
 import com.example.data.model.Habit
 import com.example.data.model.calculateWeeklyStreak
@@ -34,6 +40,7 @@ import com.example.data.model.getFrequencyLabel
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.theme.OrangeContainer
+import com.example.ui.theme.isAppDarkTheme
 import com.example.ui.tutorial.tutorialTarget
 import com.example.util.SoundEffectsManager
 import java.text.SimpleDateFormat
@@ -678,106 +685,319 @@ fun AddHabitDialog(
         ).show()
     }
 
-    AlertDialog(
+    val isDark = isAppDarkTheme()
+    val warmBg = if (isDark) Color(0xFF1E1C19) else Color(0xFFFAF7F2)
+    val cardBg = if (isDark) Color(0xFF26231E) else Color(0xFFFAF5EE)
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEDE3D7)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF5D544C)
+    val closeBtnBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
+    val greenContainer = if (isDark) Color(0xFF1B3824) else Color(0xFFE8F7ED)
+    val greenBorder = if (isDark) Color(0xFF4ADE80) else Color(0xFF48BB78)
+    val greenText = if (isDark) Color(0xFF4ADE80) else Color(0xFF1B5E20)
+    val orangeCta = Color(0xFFFF6A00)
+
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Novo Hábito Diário", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = warmBg,
+                shadowElevation = 10.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
             ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Nome do Hábito") },
-                    placeholder = { Text("Ex: Beber 2L de água...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                HabitEmojiSection(
-                    selectedEmoji = selectedEmoji,
-                    onSelectEmoji = { selectedEmoji = it }
-                )
-
-                Text("Horário Fixo:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { openTimePicker() }
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
+                    // Top drag handle pill
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .width(42.dp)
+                            .height(4.5.dp)
+                            .background(
+                                color = if (isDark) Color(0xFF423B33) else Color(0xFFD6CBC3),
+                                shape = CircleShape
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Header Row: Title & Close Button
                     Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Novo Hábito Diário",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        Surface(
+                            shape = CircleShape,
+                            color = closeBtnBg,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = subTextColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // Input Field: "Nome do Hábito"
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            if (title.isEmpty()) {
+                                Text(
+                                    text = "Nome do Hábito",
+                                    fontSize = 14.5.sp,
+                                    color = subTextColor.copy(alpha = 0.65f)
+                                )
+                            }
+                            BasicTextField(
+                                value = title,
+                                onValueChange = { title = it },
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = textColor
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Emoji Section (interactive tile, keyboard input, and presets)
+                    HabitEmojiSection(
+                        selectedEmoji = selectedEmoji,
+                        onSelectEmoji = { selectedEmoji = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Horário Fixo
+                    Text(
+                        text = "Horário Fixo:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { openTimePicker() }
                     ) {
-                        Text(text = "⏰ Notificar diariamente às: $reminderTime", fontSize = 13.sp)
-                        Icon(Icons.Default.AccessTime, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "⏰ Notificar diariamente às: $reminderTime",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = "Editar horário",
+                                tint = subTextColor,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
                     }
-                }
 
-                Text("Avisar com antecedência (máx 10 min):", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to "No horário", 5 to "5 min", 10 to "10 min").forEach { (mins, lbl) ->
-                        FilterChip(
-                            selected = reminderLeadMinutes == mins,
-                            onClick = { reminderLeadMinutes = mins },
-                            label = { Text(lbl, fontSize = 11.sp) }
-                        )
-                    }
-                }
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                HabitFrequencySelector(
-                    frequencyDays = frequencyDays,
-                    onFrequencyChanged = { frequencyDays = it }
-                )
-
-                HabitAudioSelectionRow(
-                    customSoundUri = customSoundUri,
-                    onSoundSelected = { customSoundUri = it },
-                    onClear = { customSoundUri = "" }
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(
-                        checked = loopAlarm,
-                        onCheckedChange = { loopAlarm = it }
+                    // Avisar com antecedência (máx 10 min):
+                    Text(
+                        text = "Avisar com antecedência (máx 10 min):",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor
                     )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(0 to "No horário", 5 to "5 min", 10 to "10 min").forEach { (mins, lbl) ->
+                            val isSelected = reminderLeadMinutes == mins
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isSelected) greenContainer else cardBg,
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) greenBorder else cardBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { reminderLeadMinutes = mins }
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Text(
+                                        text = lbl,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) greenText else textColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Toque em Loop Contínuo
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Toque em Loop Contínuo",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Toca som repetidamente até você dispensar",
+                                    fontSize = 11.sp,
+                                    color = subTextColor
+                                )
+                            }
+                            Switch(
+                                checked = loopAlarm,
+                                onCheckedChange = { loopAlarm = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = orangeCta
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Action buttons: Cancelar | Criar Hábito
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.Transparent,
+                            border = BorderStroke(1.dp, if (isDark) Color(0xFF4A4237) else Color(0xFFDDD2C6)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Cancelar",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = orangeCta
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (title.isNotBlank()) {
+                                    onConfirm(title.trim(), category, selectedEmoji, reminderTime, reminderLeadMinutes, frequencyDays, customSoundUri, loopAlarm)
+                                }
+                            },
+                            enabled = title.isNotBlank(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = orangeCta,
+                                contentColor = Color.White,
+                                disabledContainerColor = orangeCta.copy(alpha = 0.4f),
+                                disabledContentColor = Color.White.copy(alpha = 0.6f)
+                            ),
+                            modifier = Modifier
+                                .weight(1.25f)
+                                .height(48.dp)
+                        ) {
+                            Text(
+                                text = "Criar Hábito",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isNotBlank()) {
-                        onConfirm(title.trim(), category, selectedEmoji, reminderTime, reminderLeadMinutes, frequencyDays, customSoundUri, loopAlarm)
-                    }
-                },
-                enabled = title.isNotBlank(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Criar Hábito")
-            }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
-                Text("Cancelar")
-            }
-        },
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }
 
 @Composable
@@ -813,116 +1033,313 @@ fun EditHabitDialog(
         ).show()
     }
 
-    AlertDialog(
+    val isDark = isAppDarkTheme()
+    val warmBg = if (isDark) Color(0xFF1E1C19) else Color(0xFFFAF7F2)
+    val cardBg = if (isDark) Color(0xFF26231E) else Color(0xFFFAF5EE)
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEDE3D7)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF5D544C)
+    val closeBtnBg = if (isDark) Color(0xFF2E2A24) else Color(0xFFF1EAE0)
+    val greenContainer = if (isDark) Color(0xFF1B3824) else Color(0xFFE8F7ED)
+    val greenBorder = if (isDark) Color(0xFF4ADE80) else Color(0xFF48BB78)
+    val greenText = if (isDark) Color(0xFF4ADE80) else Color(0xFF1B5E20)
+    val orangeCta = Color(0xFFFF6A00)
+
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("Editar Hábito", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(32.dp),
+                color = warmBg,
+                shadowElevation = 10.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
             ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Nome do Hábito") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                HabitEmojiSection(
-                    selectedEmoji = selectedEmoji,
-                    onSelectEmoji = { selectedEmoji = it }
-                )
-
-                Text("Horário Fixo:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { openTimePicker() }
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .width(42.dp)
+                            .height(4.5.dp)
+                            .background(
+                                color = if (isDark) Color(0xFF423B33) else Color(0xFFD6CBC3),
+                                shape = CircleShape
+                            )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Editar Hábito",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        Surface(
+                            shape = CircleShape,
+                            color = closeBtnBg,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = subTextColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            BasicTextField(
+                                value = title,
+                                onValueChange = { title = it },
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = textColor
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    HabitEmojiSection(
+                        selectedEmoji = selectedEmoji,
+                        onSelectEmoji = { selectedEmoji = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Horário Fixo:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { openTimePicker() }
                     ) {
-                        Text(text = "⏰ $reminderTime", fontSize = 13.sp)
-                        Icon(Icons.Default.AccessTime, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                Text("Avisar com antecedência (máx 10 min):", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(0 to "No horário", 5 to "5 min", 10 to "10 min").forEach { (mins, lbl) ->
-                        FilterChip(
-                            selected = reminderLeadMinutes == mins,
-                            onClick = { reminderLeadMinutes = mins },
-                            label = { Text(lbl, fontSize = 11.sp) }
-                        )
-                    }
-                }
-
-                HabitFrequencySelector(
-                    frequencyDays = frequencyDays,
-                    onFrequencyChanged = { frequencyDays = it }
-                )
-
-                HabitAudioSelectionRow(
-                    customSoundUri = customSoundUri,
-                    onSoundSelected = { customSoundUri = it },
-                    onClear = { customSoundUri = "" }
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Toque em Loop Contínuo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Toca som repetidamente até você dispensar", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(
-                        checked = loopAlarm,
-                        onCheckedChange = { loopAlarm = it }
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isNotBlank()) {
-                        onConfirm(
-                            habit.copy(
-                                title = title.trim(),
-                                category = category,
-                                iconEmoji = selectedEmoji,
-                                reminderTime = reminderTime,
-                                reminderLeadMinutes = reminderLeadMinutes,
-                                frequencyDays = frequencyDays,
-                                customSoundUri = customSoundUri,
-                                loopAlarm = loopAlarm
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "⏰ Notificar diariamente às: $reminderTime",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
                             )
-                        )
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = "Editar horário",
+                                tint = subTextColor,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
                     }
-                },
-                enabled = title.isNotBlank(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Salvar Alterações")
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Avisar com antecedência (máx 10 min):",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(0 to "No horário", 5 to "5 min", 10 to "10 min").forEach { (mins, lbl) ->
+                            val isSelected = reminderLeadMinutes == mins
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isSelected) greenContainer else cardBg,
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) greenBorder else cardBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { reminderLeadMinutes = mins }
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Text(
+                                        text = lbl,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) greenText else textColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = cardBg,
+                        border = BorderStroke(1.dp, cardBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Toque em Loop Contínuo",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Toca som repetidamente até você dispensar",
+                                    fontSize = 11.sp,
+                                    color = subTextColor
+                                )
+                            }
+                            Switch(
+                                checked = loopAlarm,
+                                onCheckedChange = { loopAlarm = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = orangeCta
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.Transparent,
+                            border = BorderStroke(1.dp, if (isDark) Color(0xFF4A4237) else Color(0xFFDDD2C6)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "Cancelar",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = orangeCta
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (title.isNotBlank()) {
+                                    onConfirm(
+                                        habit.copy(
+                                            title = title.trim(),
+                                            category = category,
+                                            iconEmoji = selectedEmoji,
+                                            reminderTime = reminderTime,
+                                            reminderLeadMinutes = reminderLeadMinutes,
+                                            frequencyDays = frequencyDays,
+                                            customSoundUri = customSoundUri,
+                                            loopAlarm = loopAlarm
+                                        )
+                                    )
+                                }
+                            },
+                            enabled = title.isNotBlank(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = orangeCta,
+                                contentColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1.25f)
+                                .height(48.dp)
+                        ) {
+                            Text(
+                                text = "Salvar Alterações",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
-        },
-        dismissButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(12.dp)) {
-                Text("Cancelar")
-            }
-        },
-        shape = RoundedCornerShape(20.dp)
-    )
+        }
+    }
 }
 
 @Composable
@@ -1048,54 +1465,102 @@ private fun HabitEmojiSection(
     selectedEmoji: String,
     onSelectEmoji: (String) -> Unit
 ) {
+    val isDark = isAppDarkTheme()
+    val cardBg = if (isDark) Color(0xFF26231E) else Color(0xFFFAF5EE)
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEDE3D7)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF7D7268)
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF5D544C)
+    val orangeCta = Color(0xFFFF6A00)
+
     val suggestedEmojis = listOf(
         "💧", "🏃", "📖", "🧘", "🍏", "💪", "🎯", "✍️"
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Escolha ou digite qualquer Emoji (campo livre):", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = "Escolha ou digite qualquer Emoji (campo livre):",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = labelColor
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .background(OrangeContainer, CircleShape),
-                contentAlignment = Alignment.Center
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = if (isDark) Color(0xFF352B20) else Color(0xFFFDECE2),
+                border = BorderStroke(1.dp, cardBorder),
+                modifier = Modifier.size(56.dp)
             ) {
-                Text(selectedEmoji.ifBlank { "🍊" }, fontSize = 22.sp)
+                Box(contentAlignment = Alignment.Center) {
+                    Text(text = selectedEmoji.ifBlank { "💧" }, fontSize = 28.sp)
+                }
             }
 
-            OutlinedTextField(
-                value = selectedEmoji,
-                onValueChange = { onSelectEmoji(it) },
-                label = { Text("Qualquer Emoji do Teclado") },
-                placeholder = { Text("Digite ou cole...") },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = cardBg,
+                border = BorderStroke(1.dp, cardBorder),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Qualquer Emoji do Teclado",
+                        fontSize = 10.5.sp,
+                        color = subTextColor
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    BasicTextField(
+                        value = selectedEmoji,
+                        onValueChange = { onSelectEmoji(it) },
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
 
-        suggestedEmojis.chunked(8).forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                row.forEach { emoji ->
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(
-                                color = if (selectedEmoji == emoji) OrangeContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .clickable { onSelectEmoji(emoji) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = emoji, fontSize = 18.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            suggestedEmojis.forEach { emoji ->
+                val isSelected = selectedEmoji == emoji
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isSelected) {
+                        if (isDark) Color(0xFF3D2314) else Color(0xFFFFF1E6)
+                    } else {
+                        cardBg
+                    },
+                    border = BorderStroke(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = if (isSelected) orangeCta else cardBorder
+                    ),
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onSelectEmoji(emoji) }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(text = emoji, fontSize = 17.sp)
                     }
                 }
             }

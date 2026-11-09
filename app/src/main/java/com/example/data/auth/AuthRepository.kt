@@ -226,7 +226,8 @@ class AuthRepository(private val context: Context) {
 
             val targetContext: Context = activity ?: resolvedContext
             val serverClientId = try {
-                targetContext.getString(R.string.default_web_client_id)
+                val resId = targetContext.resources.getIdentifier("default_web_client_id", "string", targetContext.packageName)
+                if (resId != 0) targetContext.getString(resId) else ""
             } catch (_: Exception) {
                 ""
             }

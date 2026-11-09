@@ -903,9 +903,11 @@ fun CalendarScreen(
     if (showAddTaskDialog) {
         QuickAddTaskDialog(
             categories = categories,
+            initialDateStr = selectedDateStr,
+            onlyAskTime = true,
             onDismiss = { showAddTaskDialog = false },
-            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore ->
-                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore)
+            onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm ->
+                viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm)
                 showAddTaskDialog = false
             }
         )

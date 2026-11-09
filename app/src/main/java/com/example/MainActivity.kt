@@ -914,8 +914,8 @@ class MainActivity : ComponentActivity() {
                     QuickAddTaskDialog(
                         categories = categories,
                         onDismiss = { showQuickAddTaskDialog = false },
-                        onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore ->
-                            viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore)
+                        onConfirm = { title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm ->
+                            viewModel.addTask(title, category, priority, dueText, dueTimestamp, minutesBefore, soundUri, loopAlarm)
                             showQuickAddTaskDialog = false
                         }
                     )

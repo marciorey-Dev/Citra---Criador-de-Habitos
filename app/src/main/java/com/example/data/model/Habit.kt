@@ -22,16 +22,22 @@ data class Habit(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-fun Habit.calculateWeeklyStreak(todayCal: java.util.Calendar = java.util.Calendar.getInstance()): Int {
-    val completedSet = completedDatesCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
-    val mondayCal = (todayCal.clone() as java.util.Calendar).apply {
-        firstDayOfWeek = java.util.Calendar.MONDAY
-        set(java.util.Calendar.DAY_OF_WEEK, java.util.Calendar.MONDAY)
+fun getMondayOfCurrentWeek(cal: java.util.Calendar = java.util.Calendar.getInstance()): java.util.Calendar {
+    val c = (cal.clone() as java.util.Calendar).apply {
         set(java.util.Calendar.HOUR_OF_DAY, 0)
         set(java.util.Calendar.MINUTE, 0)
         set(java.util.Calendar.SECOND, 0)
         set(java.util.Calendar.MILLISECOND, 0)
     }
+    val dow = c.get(java.util.Calendar.DAY_OF_WEEK)
+    val daysFromMonday = if (dow == java.util.Calendar.SUNDAY) 6 else dow - java.util.Calendar.MONDAY
+    c.add(java.util.Calendar.DAY_OF_MONTH, -daysFromMonday)
+    return c
+}
+
+fun Habit.calculateWeeklyStreak(todayCal: java.util.Calendar = java.util.Calendar.getInstance()): Int {
+    val completedSet = completedDatesCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    val mondayCal = getMondayOfCurrentWeek(todayCal)
     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
     val checkCal = (mondayCal.clone() as java.util.Calendar)
     val todayStr = sdf.format(todayCal.time)
