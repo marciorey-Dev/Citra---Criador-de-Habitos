@@ -68,7 +68,6 @@ enum class NoteSortOption(val label: String) {
 enum class NoteLayoutMode(val label: String) {
     GRID_2("Grade"),
     GRID_3("Grade Pequena"),
-    DETAILS("Detalhes"),
     LIST("Lista")
 }
 
@@ -772,7 +771,6 @@ fun NotesSubTab(
                                     imageVector = when (mode) {
                                         NoteLayoutMode.GRID_2 -> Icons.Default.GridView
                                         NoteLayoutMode.GRID_3 -> Icons.Default.ViewComfy
-                                        NoteLayoutMode.DETAILS -> Icons.Default.ViewAgenda
                                         NoteLayoutMode.LIST -> Icons.Default.ViewList
                                     },
                                     contentDescription = mode.label,
@@ -876,39 +874,6 @@ fun NotesSubTab(
                     } else {
                         items(sortedNotes, key = { it.id }) { note ->
                             SmallSquareNoteCard(
-                                note = note,
-                                onClick = { activeNoteToEdit = note },
-                                onLongClick = { noteForSubmenu = note },
-                                onTogglePin = { viewModel.togglePinNote(note) },
-                                onDelete = { noteToDelete = note }
-                            )
-                        }
-                    }
-                    item {
-                        QuickDraftTile(
-                            onClick = { showTemplatesMenu = true }
-                        )
-                    }
-                }
-            }
-            NoteLayoutMode.DETAILS -> {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("notes_details_list")
-                ) {
-                    item {
-                        topBarHeaderItem()
-                    }
-                    if (sortedNotes.isEmpty()) {
-                        item {
-                            emptyNotesItem()
-                        }
-                    } else {
-                        items(sortedNotes, key = { it.id }) { note ->
-                            DetailNoteCard(
                                 note = note,
                                 onClick = { activeNoteToEdit = note },
                                 onLongClick = { noteForSubmenu = note },

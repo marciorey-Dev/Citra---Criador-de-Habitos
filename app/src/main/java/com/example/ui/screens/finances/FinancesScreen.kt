@@ -7,8 +7,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.example.ui.tutorial.CitraTutorialArea
+import com.example.ui.tutorial.tutorialTarget
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -63,7 +66,7 @@ fun FinancesScreen(
     val entries by viewModel.financeEntries.collectAsState()
 
     var isUnlocked by remember { mutableStateOf(false) }
-    val requiresLock = !pinCode.isNullOrBlank() || biometricEnabled
+    val requiresLock = !pinCode.isNullOrBlank()
 
     LaunchedEffect(Unit) {
         viewModel.ensureDefaultFinanceCategories()
@@ -72,7 +75,7 @@ fun FinancesScreen(
     if (requiresLock && !isUnlocked) {
         FinanceLockOverlay(
             expectedPin = pinCode,
-            biometricEnabled = biometricEnabled,
+            biometricEnabled = false,
             onUnlocked = { isUnlocked = true }
         )
         return
@@ -216,7 +219,26 @@ fun FinancesScreen(
     val isExpenseMode = selectedType == FinanceEntryType.EXPENSE
     val modeAccentColor = if (isExpenseMode) MaterialTheme.colorScheme.primary else GreenAccent
 
+    val listState = rememberLazyListState()
+    val activeTutorial by viewModel.activeTutorial.collectAsState()
+
+    LaunchedEffect(activeTutorial?.area, activeTutorial?.stepIndex) {
+        if (activeTutorial?.area == CitraTutorialArea.FINANCES) {
+            val targetIndex = when (activeTutorial?.currentStep?.targetKey) {
+                "finances_summary_card", "finances_wallets_bar", "finances_header_actions" -> 0
+                "finances_type_toggle" -> 1
+                "finances_period_nav" -> 2
+                "finances_distribution_card" -> 3
+                "finances_add_button" -> 4
+                "finances_list_area" -> 5
+                else -> 0
+            }
+            listState.animateScrollToItem(targetIndex)
+        }
+    }
+
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
@@ -230,7 +252,9 @@ fun FinancesScreen(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("finances_summary_card")
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
@@ -253,7 +277,8 @@ fun FinancesScreen(
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.tutorialTarget("finances_header_actions")
                         ) {
                             // Currency selector pill (Kz ▾)
                             Box {
@@ -314,7 +339,9 @@ fun FinancesScreen(
 
                             IconButton(
                                 onClick = { showWalletsDialog = true },
-                                modifier = Modifier.size(34.dp)
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .tutorialTarget(if (wallets.isEmpty()) "finances_wallets_bar" else "finances_wallet_btn")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AccountBalanceWallet,
@@ -420,7 +447,9 @@ fun FinancesScreen(
                         Spacer(modifier = Modifier.height(12.dp))
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .tutorialTarget("finances_wallets_bar")
                         ) {
                             items(wallets, key = { it.id }) { wallet ->
                                 val wNet = realEntries
@@ -478,7 +507,9 @@ fun FinancesScreen(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("finances_type_toggle")
             ) {
                 Row(
                     modifier = Modifier
@@ -536,7 +567,9 @@ fun FinancesScreen(
                 shape = RoundedCornerShape(22.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("finances_period_nav")
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -733,7 +766,9 @@ fun FinancesScreen(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tutorialTarget("finances_distribution_card")
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -1068,6 +1103,7 @@ fun FinancesScreen(
                     .fillMaxWidth()
                     .height(52.dp)
                     .testTag("add_finance_entry_btn")
+                    .tutorialTarget("finances_add_button")
             ) {
                 Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1084,7 +1120,8 @@ fun FinancesScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 2.dp),
+                    .padding(top = 2.dp)
+                    .tutorialTarget("finances_list_area"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {

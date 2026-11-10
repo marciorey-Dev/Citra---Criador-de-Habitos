@@ -55,6 +55,21 @@
 * **JSON Backups:** Export and import full app state through standard `.json` data files.
 * **Cloud Sync:** Firebase Firestore handles user preferences, notes, habits, tasks, and historical analytics when logged in.
 
+## 🚀 Como Compilar o APK pelo GitHub Actions
+
+O repositório conta com integração contínua configurada em `.github/workflows/build-apk.yml`.
+
+### Passo a passo para gerar o APK:
+1. **Compilação Automática:** Todo `push` ou `pull request` em qualquer branch dispara automaticamente a compilação do APK.
+2. **Disparo Manual (1 clique):**
+   - Acesse o repositório no GitHub e clique na aba **Actions**.
+   - No menu lateral esquerdo, selecione **Build Android APK (Citra)**.
+   - Clique em **Run workflow**, escolha o branch e confirme.
+3. **Download do APK:**
+   - Ao finalizar (ícone verde de sucesso), clique na execução realizada.
+   - Role até a seção **Artifacts** na parte inferior e baixe o arquivo **Citra-v1.2.4-APK**.
+   - O APK gerado estará pronto para instalação em qualquer dispositivo Android!
+
 ---
 
 ## 👤 Author & Credits

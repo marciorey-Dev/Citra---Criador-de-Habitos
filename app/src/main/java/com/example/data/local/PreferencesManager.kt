@@ -679,11 +679,26 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putString("toolbar_items_order", order.joinToString(",")).apply()
     }
 
+    fun getToolbarFloatingOffset(): Pair<Float, Float> {
+        val x = prefs.getFloat("toolbar_floating_offset_x", 0f)
+        val y = prefs.getFloat("toolbar_floating_offset_y", 0f)
+        return Pair(x, y)
+    }
+
+    fun saveToolbarFloatingOffset(x: Float, y: Float) {
+        prefs.edit()
+            .putFloat("toolbar_floating_offset_x", x)
+            .putFloat("toolbar_floating_offset_y", y)
+            .apply()
+    }
+
     companion object {
         val DEFAULT_TOOLBAR_ORDER = listOf(
-            "bold", "italic", "inline_code", "titles", "checklist", "to_task",
-            "list", "quote", "table", "code_block", "math", "divider",
-            "image", "audio", "record", "callout", "details"
+            // Primeiro módulo (exatamente os 13 símbolos permitidos no topo por padrão):
+            "bold", "italic", "inline_code", "titles", "checklist", "list",
+            "code_block", "math", "table", "divider", "image", "audio", "record",
+            // Segundo módulo (demais elementos subsequentes):
+            "to_task", "quote", "callout", "details"
         )
     }
 }

@@ -10,10 +10,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -192,12 +196,12 @@ fun FinanceFirstTimeWizardDialog(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "3. Bloqueio por PIN ou biometria",
+                                    text = "3. Bloqueio por PIN",
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    text = "Opcional — protege a aba de Finanças",
+                                    text = "Opcional — protege a aba de Finanças com PIN",
                                     fontSize = 11.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -208,7 +212,6 @@ fun FinanceFirstTimeWizardDialog(
                                     enableLock = it
                                     if (!it) {
                                         pinText = ""
-                                        biometricEnabled = false
                                         pinError = null
                                     }
                                 }
@@ -240,20 +243,6 @@ fun FinanceFirstTimeWizardDialog(
                                     modifier = Modifier.padding(top = 4.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { biometricEnabled = !biometricEnabled },
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Permitir desbloqueio por biometria", fontSize = 13.sp)
-                                Checkbox(
-                                    checked = biometricEnabled,
-                                    onCheckedChange = { biometricEnabled = it }
-                                )
-                            }
                         }
                     }
                 }
@@ -272,8 +261,8 @@ fun FinanceFirstTimeWizardDialog(
                                 pinError = "O PIN deve ter entre 4 e 6 dígitos"
                                 return@Button
                             }
-                            if (enableLock && pinText.isEmpty() && !biometricEnabled) {
-                                pinError = "Defina um PIN ou ative a biometria"
+                            if (enableLock && pinText.isEmpty()) {
+                                pinError = "Defina um PIN para proteger as finanças"
                                 return@Button
                             }
                             val initialMinor = if (initialBalanceText.isBlank()) {
@@ -285,7 +274,7 @@ fun FinanceFirstTimeWizardDialog(
                                 selectedCurrency.code,
                                 initialMinor,
                                 if (enableLock) pinText.ifBlank { null } else null,
-                                enableLock && biometricEnabled
+                                false
                             )
                         },
                         shape = RoundedCornerShape(14.dp),
@@ -313,11 +302,26 @@ fun FinanceFirstTimeWizardDialog(
 @Composable
 fun FinanceLockOverlay(
     expectedPin: String?,
-    biometricEnabled: Boolean,
+    biometricEnabled: Boolean = false,
     onUnlocked: () -> Unit
 ) {
     var enteredPin by remember { mutableStateOf("") }
     var errorText by remember { mutableStateOf<String?>(null) }
+    val shakeOffset = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
+
+    fun triggerShakeAndFail() {
+        errorText = "PIN incorreto. Tente novamente."
+        enteredPin = ""
+        coroutineScope.launch {
+            shakeOffset.snapTo(0f)
+            for (i in 0 until 3) {
+                shakeOffset.animateTo(16f, animationSpec = tween(50, easing = LinearEasing))
+                shakeOffset.animateTo(-16f, animationSpec = tween(50, easing = LinearEasing))
+            }
+            shakeOffset.animateTo(0f, animationSpec = tween(50, easing = LinearEasing))
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -356,7 +360,7 @@ fun FinanceLockOverlay(
                 text = if (!expectedPin.isNullOrBlank()) {
                     "Introduza o seu PIN para aceder aos seus dados financeiros"
                 } else {
-                    "Confirme a sua identidade para continuar"
+                    "Confirme o seu PIN para continuar"
                 },
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -367,66 +371,60 @@ fun FinanceLockOverlay(
             Spacer(modifier = Modifier.height(24.dp))
 
             if (!expectedPin.isNullOrBlank()) {
-                OutlinedTextField(
-                    value = enteredPin,
-                    onValueChange = { input ->
-                        if (input.length <= 6 && input.all { it.isDigit() }) {
-                            enteredPin = input
-                            errorText = null
-                            if (input == expectedPin) {
-                                onUnlocked()
-                            }
-                        }
-                    },
-                    label = { Text("PIN") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth(0.75f)
-                )
-
-                if (errorText != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = errorText!!,
-                        color = RedAction,
-                        fontSize = 12.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = {
-                        if (enteredPin == expectedPin) {
-                            onUnlocked()
-                        } else {
-                            errorText = "PIN incorreto"
-                            enteredPin = ""
-                        }
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth(0.75f)
-                        .height(48.dp)
+                Box(
+                    modifier = Modifier.offset(x = shakeOffset.value.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Desbloquear", fontWeight = FontWeight.Bold)
-                }
-            }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        OutlinedTextField(
+                            value = enteredPin,
+                            onValueChange = { input ->
+                                if (input.length <= 6 && input.all { it.isDigit() }) {
+                                    enteredPin = input
+                                    errorText = null
+                                    if (input == expectedPin) {
+                                        onUnlocked()
+                                    } else if (input.length == (expectedPin.length)) {
+                                        triggerShakeAndFail()
+                                    }
+                                }
+                            },
+                            label = { Text("PIN") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth(0.75f)
+                        )
 
-            if (biometricEnabled) {
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = { onUnlocked() },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth(0.75f)
-                        .height(48.dp)
-                ) {
-                    Icon(Icons.Default.Fingerprint, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Usar Biometria", fontWeight = FontWeight.SemiBold)
+                        if (errorText != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = errorText!!,
+                                color = RedAction,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(
+                            onClick = {
+                                if (enteredPin == expectedPin) {
+                                    onUnlocked()
+                                } else {
+                                    triggerShakeAndFail()
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth(0.75f)
+                                .height(48.dp)
+                        ) {
+                            Text("Desbloquear", fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
@@ -440,9 +438,8 @@ fun FinanceLockSettingsDialog(
     onDismiss: () -> Unit,
     onSave: (pin: String?, biometric: Boolean) -> Unit
 ) {
-    var enableLock by remember { mutableStateOf(!currentPin.isNullOrBlank() || currentBiometric) }
+    var enableLock by remember { mutableStateOf(!currentPin.isNullOrBlank()) }
     var pinText by remember { mutableStateOf(currentPin ?: "") }
-    var biometricEnabled by remember { mutableStateOf(currentBiometric) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
@@ -456,14 +453,13 @@ fun FinanceLockSettingsDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Exigir PIN ou biometria", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text("Exigir PIN", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     Switch(
                         checked = enableLock,
                         onCheckedChange = {
                             enableLock = it
                             if (!it) {
                                 pinText = ""
-                                biometricEnabled = false
                                 errorMsg = null
                             }
                         }
@@ -487,17 +483,6 @@ fun FinanceLockSettingsDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { biometricEnabled = !biometricEnabled },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Desbloqueio por biometria", fontSize = 13.sp)
-                        Checkbox(checked = biometricEnabled, onCheckedChange = { biometricEnabled = it })
-                    }
-
                     if (errorMsg != null) {
                         Text(errorMsg!!, color = RedAction, fontSize = 12.sp)
                     }
@@ -511,13 +496,13 @@ fun FinanceLockSettingsDialog(
                         errorMsg = "O PIN deve ter entre 4 e 6 dígitos"
                         return@Button
                     }
-                    if (enableLock && pinText.isEmpty() && !biometricEnabled) {
-                        errorMsg = "Defina um PIN ou ative a biometria"
+                    if (enableLock && pinText.isEmpty()) {
+                        errorMsg = "Defina um PIN para proteger as finanças"
                         return@Button
                     }
                     onSave(
                         if (enableLock) pinText.ifBlank { null } else null,
-                        enableLock && biometricEnabled
+                        false
                     )
                     onDismiss()
                 }

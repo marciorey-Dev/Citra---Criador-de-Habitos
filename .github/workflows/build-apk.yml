@@ -2,14 +2,23 @@ name: Build Android APK (Citra)
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ "main", "master" ]
-  workflow_dispatch: # Permite disparar a compilação manualmente com 1 clique na aba Actions
+    branches: [ "**" ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Tipo de compilação'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
 
 jobs:
   build:
-    name: Compilar APK Debug
+    name: Compilar APK Android
     runs-on: ubuntu-latest
 
     steps:
@@ -43,16 +52,30 @@ jobs:
           fi
 
       - name: Compilar APK com Gradle
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          BUILD_CHOICE="${{ github.event.inputs.build_type }}"
+          if [ "$BUILD_CHOICE" = "release" ] && [ -n "${{ secrets.STORE_PASSWORD }}" ]; then
+            echo "Compilando APK Release assinado..."
+            ./gradlew assembleRelease --stacktrace
+          else
+            echo "Compilando APK Debug..."
+            ./gradlew assembleDebug --stacktrace
+          fi
 
-      - name: Renomear APK para fácil identificação
+      - name: Organizar APKs gerados
         run: |
           mkdir -p build-artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk "build-artifacts/Citra-v1.2.4-debug.apk"
+          if [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
+            cp app/build/outputs/apk/release/app-release.apk "build-artifacts/Citra-v1.2.4-release.apk"
+          fi
+          if [ -f "app/build/outputs/apk/debug/app-debug.apk" ]; then
+            cp app/build/outputs/apk/debug/app-debug.apk "build-artifacts/Citra-v1.2.4-debug.apk"
+          fi
+          ls -la build-artifacts/
 
-      - name: Disponibilizar APK para Download (Artifacts)
+      - name: Disponibilizar APK para Download (GitHub Artifacts)
         uses: actions/upload-artifact@v4
         with:
           name: Citra-v1.2.4-APK
-          path: build-artifacts/Citra-v1.2.4-debug.apk
-          retention-days: 14
+          path: build-artifacts/*.apk
+          retention-days: 30

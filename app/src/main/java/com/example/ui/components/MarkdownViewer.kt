@@ -511,54 +511,5 @@ private fun MarkdownImageView(alt: String, url: String) {
 /**
  * Parses bold (**text**), italic (*text*), link ([title](url)), and inline code (`code`)
  */
-private fun parseFormattedSpans(input: String) = buildAnnotatedString {
-    val boldPattern = Regex("\\*\\*(.*?)\\*\\*")
-    val italicPattern = Regex("(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)")
-    val linkPattern = Regex("\\[(.*?)\\]\\((.*?)\\)")
-    val inlineCodePattern = Regex("`(.*?)`")
-
-    var remaining = input
-    while (remaining.isNotEmpty()) {
-        val boldMatch = boldPattern.find(remaining)
-        val italicMatch = italicPattern.find(remaining)
-        val linkMatch = linkPattern.find(remaining)
-        val codeMatch = inlineCodePattern.find(remaining)
-
-        val firstMatch = listOfNotNull(boldMatch, italicMatch, linkMatch, codeMatch)
-            .minByOrNull { it.range.first }
-
-        if (firstMatch == null) {
-            append(remaining)
-            break
-        }
-
-        if (firstMatch.range.first > 0) {
-            append(remaining.substring(0, firstMatch.range.first))
-        }
-
-        when (firstMatch) {
-            boldMatch -> {
-                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
-                append(firstMatch.groupValues[1])
-                pop()
-            }
-            italicMatch -> {
-                pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
-                append(firstMatch.groupValues[1])
-                pop()
-            }
-            linkMatch -> {
-                pushStyle(SpanStyle(color = Color(0xFF1976D2), textDecoration = TextDecoration.Underline))
-                append(firstMatch.groupValues[1])
-                pop()
-            }
-            codeMatch -> {
-                pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x22808080)))
-                append(" ${firstMatch.groupValues[1]} ")
-                pop()
-            }
-        }
-
-        remaining = remaining.substring(firstMatch.range.last + 1)
-    }
-}
+private fun parseFormattedSpans(input: String) = 
+    com.example.util.InlineMarkdownHelper.parseInlineFormatting(input, isDark = false, linkColor = Color(0xFFF97316))

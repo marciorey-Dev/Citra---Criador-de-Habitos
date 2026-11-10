@@ -903,23 +903,33 @@ data class ToolbarItemDef(
 )
 
 val ALL_TOOLBAR_ITEMS: List<ToolbarItemDef> = listOf(
+    // 1º Módulo - Exatamente os 13 itens padrão no topo da barra:
     ToolbarItemDef("bold", "Negrito", Icons.Default.FormatBold),
     ToolbarItemDef("italic", "Itálico", Icons.Default.FormatItalic),
     ToolbarItemDef("inline_code", "Código em Linha", Icons.Default.Code),
     ToolbarItemDef("titles", "Títulos (H1 - H5)", Icons.Default.Title),
     ToolbarItemDef("checklist", "Checklist", Icons.Default.CheckBox),
-    ToolbarItemDef("to_task", "Converter para Tarefa", Icons.Default.AddTask),
-    ToolbarItemDef("list", "Lista com Marcadores", Icons.Default.FormatListBulleted),
-    ToolbarItemDef("quote", "Citação", Icons.Default.FormatQuote),
-    ToolbarItemDef("table", "Tabela Markdown", Icons.Default.TableChart),
+    ToolbarItemDef("list", "Lista com Marcadores", Icons.AutoMirrored.Filled.FormatListBulleted),
     ToolbarItemDef("code_block", "Bloco de Código", Icons.Default.Code),
     ToolbarItemDef("math", "Fórmula Matemática", Icons.Default.Functions),
+    ToolbarItemDef("table", "Tabela Markdown", Icons.Default.TableChart),
     ToolbarItemDef("divider", "Linha Divisória", Icons.Default.HorizontalRule),
     ToolbarItemDef("image", "Imagem", Icons.Default.Image),
     ToolbarItemDef("audio", "Áudio", Icons.Default.Audiotrack),
     ToolbarItemDef("record", "Gravação de Voz", Icons.Default.Mic),
+    // 2º Módulo - Itens subsequentes:
+    ToolbarItemDef("to_task", "Converter para Tarefa", Icons.Default.AddTask),
+    ToolbarItemDef("quote", "Citação", Icons.Default.FormatQuote),
     ToolbarItemDef("callout", "Destaque / Aviso", Icons.Default.Announcement),
-    ToolbarItemDef("details", "Bloco Recolhível", Icons.Default.UnfoldMore)
+    ToolbarItemDef("details", "Bloco Recolhível", Icons.Default.UnfoldMore),
+    ToolbarItemDef("strikethrough", "Tachado", Icons.Default.FormatStrikethrough),
+    ToolbarItemDef("underline", "Sublinhado", Icons.Default.FormatUnderlined),
+    ToolbarItemDef("highlight", "Destaque Marcador", Icons.Default.BorderColor),
+    ToolbarItemDef("pagebreak", "Quebra de Página", Icons.Default.HorizontalSplit),
+    ToolbarItemDef("find_replace", "Buscar / Substituir", Icons.Default.FindReplace),
+    ToolbarItemDef("link_entity", "Vincular", Icons.Default.Share),
+    ToolbarItemDef("pagination", "Paginação", Icons.Default.FormatListNumbered),
+    ToolbarItemDef("toc", "Índice Automático", Icons.AutoMirrored.Filled.Toc)
 )
 
 @Composable
@@ -950,24 +960,70 @@ fun ReorderToolbarDialog(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text("Organizar Menu Flutuante", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text("Reordene os botões da barra flutuante", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("1º Módulo: 13 símbolos no topo • 2º Módulo: restante", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
+                Text(
+                    text = "Arraste com o dedo para cima/baixo ou use as setas para mover itens entre o 1º módulo e o 2º módulo.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
                 LazyColumn(
                     modifier = Modifier.weight(1f, fill = false),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(currentList, key = { it }) { itemId ->
+                    itemsIndexed(currentList, key = { _, id -> id }) { index, itemId ->
                         val def = itemsMap[itemId] ?: ToolbarItemDef(itemId, itemId, Icons.Default.Build)
-                        val index = currentList.indexOf(itemId)
+                        val isFirstModule = index < 13
+
+                        if (index == 13) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "▼ 2º MÓDULO (SEGUNDA BARRA / MAIS FERRAMENTAS)",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth()
+                            color = if (isFirstModule) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f) else MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isFirstModule) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pointerInput(index, currentList) {
+                                    detectDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        if (dragAmount.y < -25 && index > 0) {
+                                            val mutable = currentList.toMutableList()
+                                            val item = mutable.removeAt(index)
+                                            mutable.add(index - 1, item)
+                                            currentList = mutable
+                                        } else if (dragAmount.y > 25 && index < currentList.lastIndex) {
+                                            val mutable = currentList.toMutableList()
+                                            val item = mutable.removeAt(index)
+                                            mutable.add(index + 1, item)
+                                            currentList = mutable
+                                        }
+                                    }
+                                }
                         ) {
                             Row(
                                 modifier = Modifier
@@ -977,24 +1033,30 @@ fun ReorderToolbarDialog(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.DragHandle,
-                                    contentDescription = "Mover",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    contentDescription = "Arraste para mover",
+                                    tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Icon(
                                     imageVector = def.icon,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = if (isFirstModule) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = def.title,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = def.title,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = if (isFirstModule) "1º Módulo (#${index + 1})" else "2º Módulo (#${index + 1})",
+                                        fontSize = 10.sp,
+                                        color = if (isFirstModule) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                    )
+                                }
                                 IconButton(
                                     onClick = {
                                         if (index > 0) {
@@ -1005,7 +1067,7 @@ fun ReorderToolbarDialog(
                                         }
                                     },
                                     enabled = index > 0,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.KeyboardArrowUp,
@@ -1024,7 +1086,7 @@ fun ReorderToolbarDialog(
                                         }
                                     },
                                     enabled = index < currentList.lastIndex,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.KeyboardArrowDown,
@@ -1035,7 +1097,6 @@ fun ReorderToolbarDialog(
                                 }
                             }
                         }
-                    }
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(

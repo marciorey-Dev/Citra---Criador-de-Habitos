@@ -162,52 +162,52 @@ object CitraTutorialData {
 
         CitraTutorialArea.FINANCES to listOf(
             CitraTutorialStep(
-                title = "1. Bem-vindo às Finanças do Citra",
-                text = "Aqui você controla receitas, despesas, transferências, orçamentos mensais, recorrências, lista de compras e notas vinculadas — tudo integrado ao seu fluxo diário.",
+                title = "1. Saldo Geral e Patrimônio",
+                text = "Tenha uma visão clara e consolidada do seu patrimônio convertido para sua moeda ativa, atualizado automaticamente a cada movimentação.",
                 targetKey = "finances_summary_card",
                 preferBelow = true
             ),
             CitraTutorialStep(
                 title = "2. Carteiras e Contas",
-                text = "Organize seu dinheiro por carteiras (Carteira, Banco, Poupança, Cartão) e registre transferências entre contas sem distorcer seus gastos.",
+                text = "Organize seus recursos por contas (Carteira, Banco, Cartão, Poupança). Toque no carrossel ou no ícone de carteira para gerenciar saldos e transferências.",
                 targetKey = "finances_wallets_bar",
                 preferBelow = true
             ),
             CitraTutorialStep(
-                title = "3. Registrar Lançamentos",
-                text = "Toque no botão '+' para adicionar uma receita, despesa ou transferência. Você pode escolher categoria, carteira, moeda, data, método de pagamento e anexar comprovante.",
+                title = "3. Ações Rápidas & Menu Avançado",
+                text = "Mude a moeda padrão (Kz, R$, $, €), oculte valores para privacidade com o ícone de olho e abra os três pontinhos para Orçamentos, Recorrências, Câmbio e Vínculo com Notas.",
+                targetKey = "finances_header_actions",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "4. Alternar Despesas e Rendas",
+                text = "Alterne instantaneamente entre o fluxo de Despesas e de Rendas. Toda a interface se adapta com gráficos e cores dedicadas para cada modalidade.",
+                targetKey = "finances_type_toggle",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "5. Navegador de Período e Dias",
+                text = "Filtre seus lançamentos por Dia, Semana, Mês, Ano ou Período personalizado, e use a faixa rápida de 5 dias para navegar pelas datas recentes.",
+                targetKey = "finances_period_nav",
+                preferBelow = true
+            ),
+            CitraTutorialStep(
+                title = "6. Distribuição por Categoria",
+                text = "O gráfico circular e a lista percentual mostram exatamente para onde seus recursos estão indo em cada categoria cadastrada no período.",
+                targetKey = "finances_distribution_card",
+                preferBelow = false
+            ),
+            CitraTutorialStep(
+                title = "7. Adicionar Lançamento",
+                text = "Toque no botão principal para cadastrar uma nova despesa ou receita, selecionando categoria, carteira, moeda, data, comprovante e notas.",
                 targetKey = "finances_add_button",
                 preferBelow = false
             ),
             CitraTutorialStep(
-                title = "4. Orçamentos e Alertas",
-                text = "Defina limites mensais por categoria na aba Orçamentos. O Citra avisa automaticamente quando você atingir 80% e 100% do limite definido.",
-                targetKey = "finances_tabs_row",
-                preferBelow = true
-            ),
-            CitraTutorialStep(
-                title = "5. Recorrências e Lembretes",
-                text = "Cadastre contas fixas ou salários recorrentes (diário, semanal, mensal ou anual) e receba lembretes antecipados antes do vencimento.",
-                targetKey = "finances_tabs_row",
-                preferBelow = true
-            ),
-            CitraTutorialStep(
-                title = "6. Lista de Compras (Planejado vs. Real)",
-                text = "Monte sua lista de compras com valor estimado. Ao marcar um item como comprado, informe o valor real pago e ele é lançado automaticamente nas suas despesas!",
-                targetKey = "finances_tabs_row",
-                preferBelow = true
-            ),
-            CitraTutorialStep(
-                title = "7. Notas Vinculadas",
-                text = "Vincule qualquer lançamento a uma nota Markdown! O Citra insere um resumo financeiro atualizado automaticamente na nota (em bloco protegido) sem apagar suas anotações pessoais.",
+                title = "8. Lançamentos e Vínculo com Notas",
+                text = "Consulte o histórico detalhado do período selecionado. Qualquer despesa ou renda pode alimentar blocos automáticos em suas anotações no Citra Docs!",
                 targetKey = "finances_list_area",
                 preferBelow = false
-            ),
-            CitraTutorialStep(
-                title = "8. Câmbio, Privacidade e Backup",
-                text = "Use o botão de olho para ocultar valores na tela, configure taxas de câmbio manuais e mantenha seus dados protegidos por PIN/biometria e backup na nuvem.",
-                targetKey = "finances_header_actions",
-                preferBelow = true
             )
         ),
 
