@@ -9,15 +9,6 @@ on:
     branches: [ "**" ]
 
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: "Tipo de compilação"
-        required: true
-        default: "debug"
-        type: choice
-        options:
-          - debug
-          - release
 
 permissions:
   contents: read
@@ -27,21 +18,18 @@ jobs:
     name: Compilar APK Android
     runs-on: ubuntu-latest
 
-    env:
-      BUILD_TYPE: ${{ inputs.build_type || 'debug' }}
-
     steps:
       # 1. Obter o código
       - name: Checkout
         uses: actions/checkout@v4
 
       # 2. Configurar Java 21
-      - name: Configurar Java 21 (Temurin)
+      - name: Configurar Java 21
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '21'
-          distribution: 'temurin'
-          cache: 'gradle'
+          cache: gradle
 
       # 3. Configurar Android SDK
       - name: Configurar Android SDK
@@ -50,22 +38,35 @@ jobs:
           packages: 'platform-tools'
           accept-android-sdk-licenses: true
 
-      # 4. Preparar Gradle Wrapper
+      # 4. Criar Debug Keystore
+      - name: Criar Debug Keystore
+        run: |
+          if [ ! -f "debug.keystore" ]; then
+            echo "Criando chave Debug..."
+
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+
+          else
+            echo "Debug Keystore já existe."
+          fi
+
+      # 5. Preparar Gradle
       - name: Preparar Gradle
         run: chmod +x ./gradlew
 
-      # 5. Compilar APK
+      # 6. Compilar APK Debug
       - name: Compilar Citra
-        run: |
-          echo "Tipo de compilação: $BUILD_TYPE"
+        run: ./gradlew --no-daemon assembleDebug --stacktrace
 
-          if [ "$BUILD_TYPE" = "release" ]; then
-            ./gradlew --no-daemon assembleRelease --stacktrace
-          else
-            ./gradlew --no-daemon assembleDebug --stacktrace
-          fi
-
-      # 6. Organizar APKs
+      # 7. Organizar APKs
       - name: Coletar APKs gerados
         shell: bash
         run: |
@@ -85,24 +86,22 @@ jobs:
             variant=$(basename "$(dirname "$apk")")
 
             cp "$apk" "build-artifacts/Citra-${variant}-${filename}"
-
             count=$((count + 1))
           done < <(find "$APK_DIR" -type f -name "*.apk" -print0)
 
           if [ "$count" -eq 0 ]; then
-            echo "Erro: nenhum APK foi gerado."
+            echo "Nenhum APK foi gerado!"
             exit 1
           fi
 
           echo "APKs gerados:"
           ls -lh build-artifacts/
 
-      # 7. Disponibilizar APKs para download
-      - name: Upload APK Artifacts
+      # 8. Disponibilizar APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Citra-${{ env.BUILD_TYPE }}-${{ github.run_number }}
+          name: Citra-Debug-${{ github.run_number }}
           path: build-artifacts/*.apk
           retention-days: 30
           if-no-files-found: error
-          
