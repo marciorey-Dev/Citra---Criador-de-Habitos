@@ -141,10 +141,11 @@ class FocusDistractionService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Modo Sem Perturbações (Citra)",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Mantém o Citra monitorando distrações durante o Pomodoro."
+                description = "Modo sem perturbações"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_SECRET
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
@@ -164,15 +165,18 @@ class FocusDistractionService : Service() {
         )
 
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Modo Sem Perturbações Ativo 🍊")
-            .setContentText("O Citra está bloqueando distrações até o fim do timer.")
+            .setContentTitle("Modo Sem Perturbações")
+            .setContentText("Citra")
             .setSmallIcon(R.drawable.app_icon_fg)
             .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(false)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     private fun isScreenOffOrLocked(): Boolean {

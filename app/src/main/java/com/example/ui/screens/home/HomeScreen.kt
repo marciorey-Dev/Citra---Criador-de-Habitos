@@ -82,7 +82,9 @@ fun HomeScreen(
     val dailyWelcomePhrase by viewModel.dailyWelcomePhrase.collectAsState()
     val todayStr = viewModel.todayString
 
-    val pendingTasks = remember(tasks) { tasks.filter { !it.isCompleted && it.isReadyForMainList() } }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+
+    val pendingTasks = remember(tasks) { tasks.filter { !it.isCompleted && !it.isWontDo && it.isReadyForMainList() } }
     val currentTask = pendingTasks.firstOrNull()
     val nextTasks = pendingTasks.drop(1).take(3)
 
@@ -386,6 +388,44 @@ fun HomeScreen(
                             Text(
                                 text = "Nova Tarefa",
                                 fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .squashBounceClickable { showAddCategoryDialog = true }
+                            .testTag("home_quick_add_category_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CreateNewFolder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Categoria",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
@@ -831,5 +871,15 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    if (showAddCategoryDialog) {
+        com.example.ui.components.AddCategoryDialog(
+            onDismiss = { showAddCategoryDialog = false },
+            onConfirm = { name, emoji ->
+                viewModel.addCustomCategory(name, emoji)
+                showAddCategoryDialog = false
+            }
+        )
     }
 }

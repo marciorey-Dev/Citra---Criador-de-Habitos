@@ -80,19 +80,23 @@ fun TasksSubTab(
     var taskToEdit by remember { mutableStateOf<Task?>(null) }
     var taskToDelete by remember { mutableStateOf<Task?>(null) }
 
-    val pendingCount = remember(tasks) { tasks.count { !it.isCompleted && it.isReadyForMainList() } }
+    val pendingCount = remember(tasks) { tasks.count { !it.isCompleted && !it.isWontDo && it.isReadyForMainList() } }
     val completedCount = remember(tasks) { tasks.count { it.isCompleted } }
-    val futureCount = remember(tasks) { tasks.count { !it.isCompleted && !it.isReadyForMainList() } }
+    val wontDoCount = remember(tasks) { tasks.count { it.isWontDo } }
+    val futureCount = remember(tasks) { tasks.count { !it.isCompleted && !it.isWontDo && !it.isReadyForMainList() } }
     val completionPercent = remember(tasks, completedCount) {
         val totalVisible = tasks.count { it.isReadyForMainList() || it.isCompleted }
         if (totalVisible == 0) 0 else (completedCount * 100) / totalVisible
     }
 
+    var taskForWontDo by remember { mutableStateOf<Task?>(null) }
+
     val filteredTasks = remember(tasks, filterMode) {
         when (filterMode) {
-            "PENDING" -> tasks.filter { !it.isCompleted && it.isReadyForMainList() }
+            "PENDING" -> tasks.filter { !it.isCompleted && !it.isWontDo && it.isReadyForMainList() }
             "COMPLETED" -> tasks.filter { it.isCompleted }
-            "FUTURE" -> tasks.filter { !it.isCompleted && !it.isReadyForMainList() }
+            "WONT_DO" -> tasks.filter { it.isWontDo }
+            "FUTURE" -> tasks.filter { !it.isCompleted && !it.isWontDo && !it.isReadyForMainList() }
             else -> tasks
         }
     }
@@ -139,6 +143,16 @@ fun TasksSubTab(
                             showActiveDot = false,
                             onClick = { filterMode = "COMPLETED" }
                         )
+                    }
+                    if (wontDoCount > 0) {
+                        item {
+                            TaskFilterPill(
+                                label = "Não vou fazer ($wontDoCount)",
+                                selected = filterMode == "WONT_DO",
+                                showActiveDot = false,
+                                onClick = { filterMode = "WONT_DO" }
+                            )
+                        }
                     }
                     item {
                         TaskFilterPill(
@@ -276,7 +290,9 @@ fun TasksSubTab(
                         onToggle = { viewModel.toggleTask(task) },
                         onEdit = { taskToEdit = task },
                         onPlay = { onStartPomodoroForTask(task) },
-                        onDelete = { taskToDelete = task }
+                        onDelete = { taskToDelete = task },
+                        onWontDo = { taskForWontDo = task },
+                        onReactivate = { viewModel.setTaskWontDo(task, false) }
                     )
                 }
             }
@@ -341,6 +357,59 @@ fun TasksSubTab(
             onDismiss = { taskToDelete = null }
         )
     }
+
+    // Sad confirmation dialog for "Não vou fazer"
+    if (taskForWontDo != null) {
+        AlertDialog(
+            onDismissRequest = { taskForWontDo = null },
+            icon = {
+                Text("😢", fontSize = 38.sp)
+            },
+            title = {
+                Text(
+                    text = "Não vai fazer esta tarefa?",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            },
+            text = {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "\"${taskForWontDo!!.title}\"",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFDC2626),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Text(
+                        text = "O Citra fica triste em ver você desistir desta tarefa, mas tudo bem mudar de ideia! A tarefa será riscada a vermelho.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.setTaskWontDo(taskForWontDo!!, true)
+                        taskForWontDo = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Sim, não vou fazer", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { taskForWontDo = null }) {
+                    Text("Continuar tentando 💪")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -397,7 +466,9 @@ fun TaskItemCard(
     onToggle: () -> Unit,
     onEdit: () -> Unit,
     onPlay: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onWontDo: () -> Unit = {},
+    onReactivate: () -> Unit = {}
 ) {
     val (priorityBg, priorityFg, priorityDot) = when (task.priority) {
         TaskPriority.ALTA -> Triple(
@@ -432,49 +503,58 @@ fun TaskItemCard(
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    val isWontDo = task.isWontDo
     val isMarked = task.isCompleted || isCompleting
 
     val cardBg by animateColorAsState(
-        targetValue = if (isMarked) {
+        targetValue = if (isWontDo) {
+            if (isDark) Color(0xFF2E1515) else Color(0xFFFEE8E8)
+        } else if (isMarked) {
             if (isDark) Color(0xFF1E3827) else Color(0xFFE8F7ED)
         } else if (task.isCompleted) {
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
         } else {
             MaterialTheme.colorScheme.surface
         },
-        animationSpec = tween(durationMillis = 250),
+        animationSpec = tween(durationMillis = 280),
         label = "taskCardBg"
     )
 
     val cardBorderColor by animateColorAsState(
-        targetValue = if (isMarked) {
+        targetValue = if (isWontDo) {
+            Color(0xFFEF4444).copy(alpha = 0.65f)
+        } else if (isMarked) {
             Color(0xFF4ADE80)
         } else {
             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
         },
-        animationSpec = tween(durationMillis = 250),
+        animationSpec = tween(durationMillis = 280),
         label = "taskCardBorder"
     )
 
     val chkBg by animateColorAsState(
-        targetValue = if (isMarked) {
+        targetValue = if (isWontDo) {
+            Color(0xFFDC2626)
+        } else if (isMarked) {
             Color(0xFF16A34A)
         } else {
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
         },
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 220),
         label = "taskChkBg"
     )
 
     val animatedTitleColor by animateColorAsState(
-        targetValue = if (isMarked) {
+        targetValue = if (isWontDo) {
+            if (isDark) Color(0xFFF87171) else Color(0xFFDC2626)
+        } else if (isMarked) {
             if (isDark) Color(0xFF4ADE80) else Color(0xFF1B5E20)
         } else if (task.isCompleted) {
             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
         } else {
             MaterialTheme.colorScheme.onSurface
         },
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 220),
         label = "taskTitleColor"
     )
 
@@ -534,29 +614,42 @@ fun TaskItemCard(
                             .background(chkBg)
                             .border(
                                 width = 1.dp,
-                                color = if (isMarked) {
+                                color = if (isWontDo) {
+                                    Color(0xFFDC2626)
+                                } else if (isMarked) {
                                     Color(0xFF16A34A)
                                 } else {
                                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                                 },
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .squashBounceClickable { triggerComplete() }
+                            .squashBounceClickable {
+                                if (isWontDo) onReactivate() else triggerComplete()
+                            }
                             .then(if (isFirst) Modifier.tutorialTarget("tasks_checkbox_area") else Modifier)
                             .testTag("task_checkbox_${task.id}"),
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = isMarked,
-                            enter = scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)) + fadeIn(),
-                            exit = scaleOut() + fadeOut()
-                        ) {
+                        if (isWontDo) {
                             Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Concluída",
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Não vou fazer",
                                 tint = Color.White,
                                 modifier = Modifier.size(16.dp)
                             )
+                        } else {
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = isMarked,
+                                enter = scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)) + fadeIn(),
+                                exit = scaleOut() + fadeOut()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Concluída",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
 
@@ -565,13 +658,21 @@ fun TaskItemCard(
                             text = task.title,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            textDecoration = if (isMarked) TextDecoration.LineThrough else TextDecoration.None,
+                            textDecoration = if (isMarked || isWontDo) TextDecoration.LineThrough else TextDecoration.None,
                             color = animatedTitleColor,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
 
-                        if (task.focusMinutesCompleted > 0) {
+                        if (isWontDo) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Não vou fazer 😢",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFDC2626)
+                            )
+                        } else if (task.focusMinutesCompleted > 0) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "${task.focusMinutesCompleted} min de foco registrados",
@@ -586,12 +687,30 @@ fun TaskItemCard(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Quick Actions: Circular Play + Delete
+                // Quick Actions: Circular Play + WontDo + Delete
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (!task.isCompleted) {
+                    if (isWontDo) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFDC2626).copy(alpha = 0.15f),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable { onReactivate() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reativar Tarefa",
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    } else if (!task.isCompleted) {
                         Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -610,6 +729,18 @@ fun TaskItemCard(
                                     modifier = Modifier.size(19.dp)
                                 )
                             }
+                        }
+
+                        IconButton(
+                            onClick = onWontDo,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.RemoveCircleOutline,
+                                contentDescription = "Não vou fazer",
+                                tint = Color(0xFFDC2626).copy(alpha = 0.85f),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
 

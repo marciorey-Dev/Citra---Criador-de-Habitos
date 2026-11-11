@@ -1145,6 +1145,7 @@ fun FullScreenNoteEditor(
                         }
                     }
                 }
+            }
             )
         }
     ) { paddingValues ->

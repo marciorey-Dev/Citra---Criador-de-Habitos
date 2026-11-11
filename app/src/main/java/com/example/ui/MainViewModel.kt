@@ -1218,6 +1218,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setTaskWontDo(task: Task, wontDo: Boolean) {
+        viewModelScope.launch {
+            vibrate(40)
+            val updated = task.copy(
+                isWontDo = wontDo,
+                isCompleted = if (wontDo) false else task.isCompleted
+            )
+            repository.updateTask(updated)
+            if (wontDo) {
+                _userMessage.emit("Tarefa marcada como 'Não vou fazer'")
+            } else {
+                _userMessage.emit("Tarefa reativada!")
+            }
+        }
+    }
+
+
     fun toggleTask(task: Task) {
         viewModelScope.launch {
             vibrate(35)

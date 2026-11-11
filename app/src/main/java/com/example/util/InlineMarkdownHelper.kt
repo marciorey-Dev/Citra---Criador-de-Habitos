@@ -456,7 +456,7 @@ object InlineMarkdownHelper {
                 context.isHighlight -> Color(0xFF713F12)
                 context.isStrikethrough -> baseTextColor.copy(alpha = 0.65f)
                 context.isQuote -> if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
-                else -> null
+                else -> Color.Unspecified
             },
             background = when {
                 context.isHighlight -> HighlightYellow

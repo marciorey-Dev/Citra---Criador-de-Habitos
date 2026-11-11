@@ -534,35 +534,6 @@ fun TimerScreen(
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Surface(
-                        shape = CircleShape,
-                        color = if (pomodoroState.isRunning) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
-                        }
-                    ) {
-                        Text(
-                            text = when {
-                                pomodoroState.isRunning && pomodoroState.isStopwatchMode -> "Contando..."
-                                pomodoroState.isRunning -> "Focando..."
-                                pomodoroState.isPaused -> "Pausado"
-                                pomodoroState.currentPhase == PomodoroPhase.BREAK -> "Pausa opcional"
-                                else -> "Pronto"
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (pomodoroState.isRunning) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
-                        )
-                    }
                 }
             }
 
@@ -1333,14 +1304,6 @@ fun FluidMinutesScrollPicker(
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Duração da Sessão • 10m a 120m",
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val horizontalPadding = (maxWidth / 2) - 34.dp
 

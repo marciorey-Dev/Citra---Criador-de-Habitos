@@ -223,12 +223,12 @@ fun FinanceFirstTimeWizardDialog(
                             OutlinedTextField(
                                 value = pinText,
                                 onValueChange = { input ->
-                                    if (input.length <= 6 && input.all { it.isDigit() }) {
+                                    if (input.length <= 4 && input.all { it.isDigit() }) {
                                         pinText = input
                                         pinError = null
                                     }
                                 },
-                                label = { Text("PIN (4 a 6 dígitos)") },
+                                label = { Text("PIN (4 dígitos)") },
                                 visualTransformation = PasswordVisualTransformation(),
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                 singleLine = true,
@@ -257,8 +257,8 @@ fun FinanceFirstTimeWizardDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            if (enableLock && pinText.isNotEmpty() && pinText.length < 4) {
-                                pinError = "O PIN deve ter entre 4 e 6 dígitos"
+                            if (enableLock && pinText.isNotEmpty() && pinText.length != 4) {
+                                pinError = "O PIN deve ter exatamente 4 dígitos"
                                 return@Button
                             }
                             if (enableLock && pinText.isEmpty()) {
@@ -379,17 +379,17 @@ fun FinanceLockOverlay(
                         OutlinedTextField(
                             value = enteredPin,
                             onValueChange = { input ->
-                                if (input.length <= 6 && input.all { it.isDigit() }) {
+                                if (input.length <= 4 && input.all { it.isDigit() }) {
                                     enteredPin = input
                                     errorText = null
                                     if (input == expectedPin) {
                                         onUnlocked()
-                                    } else if (input.length == (expectedPin.length)) {
+                                    } else if (input.length == 4) {
                                         triggerShakeAndFail()
                                     }
                                 }
                             },
-                            label = { Text("PIN") },
+                            label = { Text("PIN (4 dígitos)") },
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                             singleLine = true,
@@ -470,12 +470,12 @@ fun FinanceLockSettingsDialog(
                     OutlinedTextField(
                         value = pinText,
                         onValueChange = { input ->
-                            if (input.length <= 6 && input.all { it.isDigit() }) {
+                            if (input.length <= 4 && input.all { it.isDigit() }) {
                                 pinText = input
                                 errorMsg = null
                             }
                         },
-                        label = { Text("PIN (4 a 6 dígitos)") },
+                        label = { Text("PIN (4 dígitos)") },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         singleLine = true,
@@ -492,8 +492,8 @@ fun FinanceLockSettingsDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (enableLock && pinText.isNotEmpty() && pinText.length < 4) {
-                        errorMsg = "O PIN deve ter entre 4 e 6 dígitos"
+                    if (enableLock && pinText.isNotEmpty() && pinText.length != 4) {
+                        errorMsg = "O PIN deve ter exatamente 4 dígitos"
                         return@Button
                     }
                     if (enableLock && pinText.isEmpty()) {

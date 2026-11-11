@@ -698,7 +698,9 @@ class PreferencesManager(private val context: Context) {
             "bold", "italic", "inline_code", "titles", "checklist", "list",
             "code_block", "math", "table", "divider", "image", "audio", "record",
             // Segundo módulo (demais elementos subsequentes):
-            "to_task", "quote", "callout", "details"
+            "to_task", "quote", "callout", "details",
+            "strikethrough", "underline", "highlight", "pagebreak",
+            "find_replace", "link_entity", "pagination", "toc"
         )
     }
 }

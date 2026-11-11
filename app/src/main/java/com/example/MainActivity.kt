@@ -306,6 +306,7 @@ class MainActivity : ComponentActivity() {
                 var showBackupDialog by remember { mutableStateOf(false) }
                 var showCreditsDialog by remember { mutableStateOf(false) }
                 var showSettingsDialog by remember { mutableStateOf(false) }
+                var showAddCategoryDialog by remember { mutableStateOf(false) }
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
                 var showAuthDialog by remember { mutableStateOf(false) }
                 var showInboxDialog by remember { mutableStateOf(false) }
@@ -669,6 +670,18 @@ class MainActivity : ComponentActivity() {
                                             }
                                         )
 
+                                        // Nova Categoria
+                                        DropdownMenuItem(
+                                            text = { Text("Nova Categoria") },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                            },
+                                            onClick = {
+                                                showMenu = false
+                                                showAddCategoryDialog = true
+                                            }
+                                        )
+
                                         // Conquistas (Renamed per user request)
                                         DropdownMenuItem(
                                             text = { Text("Conquistas") },
@@ -944,6 +957,16 @@ class MainActivity : ComponentActivity() {
                     SettingsDialog(
                         viewModel = viewModel,
                         onDismiss = { showSettingsDialog = false }
+                    )
+                }
+
+                if (showAddCategoryDialog) {
+                    com.example.ui.components.AddCategoryDialog(
+                        onDismiss = { showAddCategoryDialog = false },
+                        onConfirm = { name, emoji ->
+                            viewModel.addCustomCategory(name, emoji)
+                            showAddCategoryDialog = false
+                        }
                     )
                 }
 

@@ -55,14 +55,22 @@ fun FocusDistractionDialog(
     var isLoadingApps by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
 
+    var showExceptionsView by remember { mutableStateOf(false) }
+
     // Recheck permissions on resume or when screen updates
     LaunchedEffect(Unit) {
         hasOverlayPerm = FocusPermissionHelper.hasOverlayPermission(context)
         hasUsagePerm = FocusPermissionHelper.hasUsageStatsPermission(context)
-        isLoadingApps = true
-        val apps = FocusPermissionHelper.getInstalledLauncherApps(context)
-        installedApps = apps
-        isLoadingApps = false
+    }
+
+    // Lazy-load apps only when opening the exceptions view
+    LaunchedEffect(showExceptionsView) {
+        if (showExceptionsView && installedApps.isEmpty()) {
+            isLoadingApps = true
+            val apps = FocusPermissionHelper.getInstalledLauncherApps(context)
+            installedApps = apps
+            isLoadingApps = false
+        }
     }
 
     val filteredApps = remember(installedApps, searchQuery) {
@@ -74,7 +82,13 @@ fun FocusDistractionDialog(
     }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (showExceptionsView) {
+                showExceptionsView = false
+            } else {
+                onDismiss()
+            }
+        },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
@@ -90,254 +104,341 @@ fun FocusDistractionDialog(
                     .fillMaxSize()
                     .padding(20.dp)
             ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (!showExceptionsView) {
+                    // INITIAL VIEW: Only Toggle, Permissions (if needed), and Add Exceptions button
+                    // Header
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = OrangePrimary.copy(alpha = 0.15f),
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("🛡️", fontSize = 22.sp)
-                            }
-                        }
-                        Column {
-                            Text(
-                                text = "Sem Perturbações",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Foco Cítrico Extremo",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = OrangePrimary,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Fechar")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Master Toggle Card
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isEnabled) OrangePrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    border = androidx.compose.foundation.BorderStroke(
-                        1.dp,
-                        if (isEnabled) OrangePrimary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                val nextState = !isEnabled
-                                preferencesManager.setFocusDistractionFreeEnabled(nextState)
-                            }
-                            .padding(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Ativar Modo Sem Perturbações",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (isEnabled)
-                                    "Outros apps serão sobrepostos com alerta cítrico durante o timer."
-                                else
-                                    "Toque para ativar o bloqueio de distrações enquanto o timer estiver tocando.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                lineHeight = 16.sp
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = OrangePrimary.copy(alpha = 0.15f),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("🛡️", fontSize = 22.sp)
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "Não Perturbe",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Foco Cítrico Sem Distrações",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OrangePrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
 
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        Switch(
-                            checked = isEnabled,
-                            onCheckedChange = { preferencesManager.setFocusDistractionFreeEnabled(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = OrangePrimary
-                            ),
-                            modifier = Modifier.testTag("focus_distraction_switch")
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Permissions Section (if any pending)
-                if (!hasOverlayPerm || !hasUsagePerm) {
-                    Text(
-                        text = "PERMISSÕES NECESSÁRIAS",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        letterSpacing = 0.8.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    if (!hasOverlayPerm) {
-                        PermissionWarningCard(
-                            title = "Aparecer sobre outros apps",
-                            description = "Necessário para desenhar o degradê de bloqueio quando você tentar abrir outro app.",
-                            onGrantClick = { FocusPermissionHelper.openOverlaySettings(context) }
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Fechar")
+                        }
                     }
 
-                    if (!hasUsagePerm) {
-                        PermissionWarningCard(
-                            title = "Acesso a dados de uso",
-                            description = "Permite identificar em tempo real quando um app distrator foi aberto.",
-                            onGrantClick = { FocusPermissionHelper.openUsageAccessSettings(context) }
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // Master Toggle Card
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isEnabled) OrangePrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isEnabled) OrangePrimary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val nextState = !isEnabled
+                                    preferencesManager.setFocusDistractionFreeEnabled(nextState)
+                                }
+                                .padding(18.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Ligar Modo Não Perturbe",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (isEnabled)
+                                        "Ativado! Bloqueia a abertura de outros apps durante o timer."
+                                    else
+                                        "Toque para ligar a proteção contra distrações durante o timer.",
+                                    fontSize = 12.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 16.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            Switch(
+                                checked = isEnabled,
+                                onCheckedChange = { preferencesManager.setFocusDistractionFreeEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = OrangePrimary
+                                ),
+                                modifier = Modifier.testTag("focus_distraction_switch")
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-                }
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Whitelist section header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
+                    // Permissions Section (shown if first launch or permissions missing)
+                    if (!hasOverlayPerm || !hasUsagePerm) {
                         Text(
-                            text = "APLICATIVOS PERMITIDOS (EXCEÇÕES)",
+                            text = "PERMISSÕES NECESSÁRIAS",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.primary,
                             letterSpacing = 0.8.sp
                         )
-                        Text(
-                            text = "${allowedPackages.size} aplicativo(s) liberados durante o foco",
-                            fontSize = 11.5.sp,
-                            color = OrangePrimary,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (!hasOverlayPerm) {
+                            PermissionWarningCard(
+                                title = "Permissão de sobreposição de tela",
+                                description = "Necessária para exibir a tela do Citra sobre apps distratores.",
+                                onGrantClick = { FocusPermissionHelper.openOverlaySettings(context) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        if (!hasUsagePerm) {
+                            PermissionWarningCard(
+                                title = "Acesso a dados de uso",
+                                description = "Permite detectar quando um app que não é permitido foi aberto.",
+                                onGrantClick = { FocusPermissionHelper.openUsageAccessSettings(context) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
 
+                    // Status and Info Card
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = OrangePrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = if (allowedPackages.isEmpty())
+                                    "Nenhuma exceção cadastrada. Todos os outros apps serão bloqueados."
+                                else
+                                    "${allowedPackages.size} app(s) permitido(s) como exceção durante o foco.",
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Test Overlay Button (if permission is granted)
                     if (hasOverlayPerm) {
                         OutlinedButton(
                             onClick = { FocusDistractionService.testOverlay(context) },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
                         ) {
-                            Text("Testar Tela 🍊", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Testar Tela de Bloqueio 🍊", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
-                }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Search field
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Buscar aplicativo...", fontSize = 13.sp) },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Installed Apps List
-                if (isLoadingApps) {
-                    Box(
+                    // Button: Adicionar Exceções
+                    OutlinedButton(
+                        onClick = { showExceptionsView = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = OrangePrimary),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
+                            .height(50.dp)
                     ) {
-                        CircularProgressIndicator(color = OrangePrimary, strokeWidth = 2.dp)
-                    }
-                } else if (filteredApps.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (searchQuery.isNotBlank()) "Nenhum aplicativo encontrado." else "Nenhum app listado.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "Adicionar Exceções (${allowedPackages.size})",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
                         )
                     }
-                } else {
-                    LazyColumn(
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Conclude Button
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                            .height(50.dp)
                     ) {
-                        items(filteredApps, key = { it.packageName }) { appItem ->
-                            val isAllowed = allowedPackages.contains(appItem.packageName)
-                            AppWhitelistRow(
-                                appItem = appItem,
-                                isAllowed = isAllowed,
-                                onToggle = {
-                                    preferencesManager.toggleFocusAllowedPackage(appItem.packageName)
-                                }
-                            )
+                        Text("Concluir", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                } else {
+                    // EXCEPTIONS VIEW: Search bar and Installed apps list
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = { showExceptionsView = false },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Voltar")
+                            }
+                            Column {
+                                Text(
+                                    text = "Adicionar Exceções",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "${allowedPackages.size} aplicativo(s) selecionados",
+                                    fontSize = 11.5.sp,
+                                    color = OrangePrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        TextButton(onClick = { showExceptionsView = false }) {
+                            Text("Pronto", fontWeight = FontWeight.Bold, color = OrangePrimary)
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                // Footer button
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Salvar e Concluir", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    // Search field
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Buscar aplicativo...", fontSize = 13.sp) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Installed Apps List
+                    if (isLoadingApps) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(color = OrangePrimary, strokeWidth = 2.dp)
+                                Text("Carregando aplicativos instalados...", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    } else if (filteredApps.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (searchQuery.isNotBlank()) "Nenhum aplicativo encontrado." else "Nenhum app listado.",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(filteredApps, key = { it.packageName }) { appItem ->
+                                val isAllowed = allowedPackages.contains(appItem.packageName)
+                                AppWhitelistRow(
+                                    appItem = appItem,
+                                    isAllowed = isAllowed,
+                                    onToggle = {
+                                        preferencesManager.toggleFocusAllowedPackage(appItem.packageName)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = { showExceptionsView = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Salvar Exceções", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
                 }
             }
         }
