@@ -50,6 +50,9 @@ import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteEditorMode
+import com.example.ui.screens.organization.notes.PaperNoteColors
+import com.example.ui.screens.organization.notes.PaperNotePalette
+import com.example.ui.screens.organization.notes.PaperNoteSurface
 import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
 import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
@@ -1149,7 +1152,7 @@ private fun QuickDraftTile(
 }
 
 /**
- * Warm Tactile 2-Column Card for Notes
+ * Warm Tactile 2-Column Card for Notes with Dog-Ear Paper Flap and 260.dp Height
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1160,6 +1163,10 @@ fun SquareNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val isDark = isAppDarkTheme()
+    val paperColors = remember(note.noteColor, isDark, note.isPinned) {
+        PaperNotePalette.resolvePaperColors(note.noteColor, isDark, note.isPinned)
+    }
     val dateText = remember(note.updatedAt) {
         SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt))
     }
@@ -1168,18 +1175,7 @@ fun SquareNoteCard(
     }
     val previewImageUri = extractFirstImageUri(note)
     val hasImage = previewImageUri != null
-    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 120)
-
-    val cardContainerColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
-    val cardBorderColor = if (note.isPinned) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-    }
+    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 140)
 
     val badgeBg = when (note.category.lowercase().trim()) {
         "criatividade", "ideias" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
@@ -1194,24 +1190,19 @@ fun SquareNoteCard(
         else -> MaterialTheme.colorScheme.onSurface
     }
 
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (note.isPinned) 3.dp else 1.5.dp),
+    PaperNoteSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 175.dp)
-            .border(
-                width = 1.dp,
-                color = cardBorderColor,
-                shape = RoundedCornerShape(20.dp)
-            )
-            .clip(RoundedCornerShape(20.dp))
+            .height(260.dp)
             .combinedClickable(
                 onClick = { onClick() },
                 onLongClick = { onLongClick?.invoke() }
             )
-            .testTag("note_square_card_${note.id}")
+            .testTag("note_square_card_${note.id}"),
+        cornerRadius = 20.dp,
+        foldSize = 26.dp,
+        paperColors = paperColors,
+        isPinned = note.isPinned
     ) {
         Column(
             modifier = Modifier
@@ -1219,10 +1210,15 @@ fun SquareNoteCard(
                 .padding(14.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Top row: Category Pill + Pin + More
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Top row: Category Pill + Pin + More (padding end 22.dp so buttons don't collide with flap)
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 22.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -1255,7 +1251,7 @@ fun SquareNoteCard(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
                         IconButton(
                             onClick = onTogglePin,
@@ -1264,7 +1260,7 @@ fun SquareNoteCard(
                             Icon(
                                 imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                 contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                tint = if (note.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
+                                tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -1283,7 +1279,7 @@ fun SquareNoteCard(
                     }
                 }
 
-                // Embedded Image Preview (like Card 5 in HTML)
+                // Embedded Image Preview (86.dp height)
                 if (previewImageUri != null) {
                     AsyncImage(
                         model = previewImageUri,
@@ -1291,12 +1287,12 @@ fun SquareNoteCard(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(64.dp)
+                            .height(86.dp)
                             .clip(RoundedCornerShape(12.dp))
                     )
                 }
 
-                // Note Title
+                // Note Title - high contrast according to app theme
                 Text(
                     text = note.title,
                     style = MaterialTheme.typography.titleSmall,
@@ -1308,7 +1304,7 @@ fun SquareNoteCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Note Excerpt
+                // Note Excerpt - high contrast according to app theme
                 if (cleanExcerpt.isNotBlank()) {
                     Text(
                         text = cleanExcerpt,
@@ -1316,7 +1312,7 @@ fun SquareNoteCard(
                         fontSize = 11.sp,
                         lineHeight = 15.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (previewImageUri != null) 2 else 3,
+                        maxLines = if (previewImageUri != null) 3 else 5,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -1326,7 +1322,7 @@ fun SquareNoteCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp),
+                    .padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -1356,7 +1352,7 @@ fun SquareNoteCard(
                         Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = "Contém Imagem",
-                            tint = MaterialTheme.colorScheme.tertiary,
+                            tint = Color(0xFFE53935),
                             modifier = Modifier.size(15.dp)
                         )
                     }
@@ -1368,11 +1364,17 @@ fun SquareNoteCard(
                             modifier = Modifier.size(15.dp)
                         )
                     }
-                    if (note.isPinned) {
+                    if (note.noteColor != null && note.noteColor != "DEFAULT") {
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .background(paperColors.accentColor, CircleShape)
+                        )
+                    } else if (note.isPinned) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .background(paperColors.accentColor, CircleShape)
                         )
                     }
                 }

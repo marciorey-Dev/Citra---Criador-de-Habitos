@@ -24,15 +24,36 @@ class InboxRepository(private val context: Context) {
     companion object {
         val DEVELOPER_EMAILS = setOf(
             "obitoinfamous@gmail.com",
+            "obitoinfamous5@gmail.com",
             "marcioafonsorey@gmail.com",
             "marcioreyakm@gmail.com",
             "marcioreyakm@gmail.co"
         )
 
-        fun isDeveloper(email: String?): Boolean {
-            if (email.isNullOrBlank()) return false
-            val clean = email.trim().lowercase()
-            return DEVELOPER_EMAILS.any { it.equals(clean, ignoreCase = true) }
+        private val dynamicPromotedEmails = mutableSetOf<String>()
+        private val dynamicPromotedUids = mutableSetOf<String>()
+
+        fun isDeveloper(email: String?, uid: String? = null): Boolean {
+            if (!email.isNullOrBlank()) {
+                val clean = email.trim().lowercase()
+                if (DEVELOPER_EMAILS.any { it.equals(clean, ignoreCase = true) } || dynamicPromotedEmails.contains(clean)) {
+                    return true
+                }
+            }
+            if (!uid.isNullOrBlank() && dynamicPromotedUids.contains(uid)) {
+                return true
+            }
+            return false
+        }
+
+        fun promoteDeveloper(email: String?, uid: String?) {
+            if (!email.isNullOrBlank()) dynamicPromotedEmails.add(email.trim().lowercase())
+            if (!uid.isNullOrBlank()) dynamicPromotedUids.add(uid)
+        }
+
+        fun demoteDeveloper(email: String?, uid: String?) {
+            if (!email.isNullOrBlank()) dynamicPromotedEmails.remove(email.trim().lowercase())
+            if (!uid.isNullOrBlank()) dynamicPromotedUids.remove(uid)
         }
 
         @Volatile

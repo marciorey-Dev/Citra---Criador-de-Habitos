@@ -10,34 +10,40 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // User profile: readable by authenticated users to allow @username search, writable only by owner
+    function isDeveloper() {
+      return isAuthenticated() && (
+        request.auth.token.email in ['obitoinfamous@gmail.com', 'obitoinfamous5@gmail.com', 'marcioafonsorey@gmail.com', 'marcioreyakm@gmail.com', 'marcioreyakm@gmail.co']
+      );
+    }
+
+    // User profile: readable by authenticated users to allow @username search, writable by owner or developer
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isOwner(userId);
+      allow write, delete: if isOwner(userId) || isDeveloper();
 
       // User private subcollections
       match /tasks/{taskId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isDeveloper();
       }
 
       match /habits/{habitId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isDeveloper();
       }
 
       match /notes/{noteId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isDeveloper();
       }
 
       match /settings/{settingId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isDeveloper();
       }
 
       match /cloudSync/{docId} {
-        allow read, write: if isOwner(userId);
+        allow read, write, delete: if isOwner(userId) || isDeveloper();
       }
 
       match /inbox/{messageId} {
-        allow read, update, delete: if isOwner(userId);
+        allow read, update, delete: if isOwner(userId) || isDeveloper();
         allow create: if isAuthenticated();
       }
     }
@@ -45,9 +51,7 @@ service cloud.firestore {
     // Global developer announcements / broadcasts
     match /broadcasts/{broadcastId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (
-        request.auth.token.email in ['obitoinfamous@gmail.com', 'marcioafonsorey@gmail.com', 'marcioreyakm@gmail.com', 'marcioreyakm@gmail.co']
-      );
+      allow write: if isDeveloper();
     }
   }
 }

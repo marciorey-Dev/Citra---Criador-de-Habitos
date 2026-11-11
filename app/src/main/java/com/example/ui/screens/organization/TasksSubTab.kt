@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1351,8 +1352,10 @@ fun QuickAddTaskDialog(
                             Surface(
                                 shape = RoundedCornerShape(18.dp),
                                 color = cardBg,
-                                border = BorderStroke(1.dp, cardBorder),
-                                modifier = Modifier.fillMaxWidth()
+                                border = BorderStroke(1.dp, if (loopAlarm) orangeCta else cardBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (isDisruptive) 0.45f else 1f)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1366,18 +1369,26 @@ fun QuickAddTaskDialog(
                                             text = "Toque em Loop Contínuo",
                                             fontSize = 13.5.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = textColor
+                                            color = if (loopAlarm) orangeCta else textColor
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "Toca som repetidamente até você dispensar",
+                                            text = if (isDisruptive) {
+                                                "Inerte: desative a Tarefa Perturbadora para usar"
+                                            } else {
+                                                "Toca som repetidamente até você dispensar"
+                                            },
                                             fontSize = 11.sp,
-                                            color = subTextColor
+                                            color = if (isDisruptive) subTextColor.copy(alpha = 0.7f) else subTextColor
                                         )
                                     }
                                     Switch(
                                         checked = loopAlarm,
-                                        onCheckedChange = { loopAlarm = it },
+                                        enabled = !isDisruptive,
+                                        onCheckedChange = { isChecked ->
+                                            loopAlarm = isChecked
+                                            if (isChecked) isDisruptive = false
+                                        },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = Color.White,
                                             checkedTrackColor = orangeCta
@@ -1391,7 +1402,9 @@ fun QuickAddTaskDialog(
                                 shape = RoundedCornerShape(18.dp),
                                 color = cardBg,
                                 border = BorderStroke(1.dp, if (isDisruptive) orangeCta else cardBorder),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (loopAlarm) 0.45f else 1f)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1411,14 +1424,22 @@ fun QuickAddTaskDialog(
                                         }
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "Ao vencer, exibe a tela cheia de sobreposição do Modo Não Perturbe sinalizando urgência",
+                                            text = if (loopAlarm) {
+                                                "Inerte: desative o Toque em Loop para usar"
+                                            } else {
+                                                "Ao vencer, exibe a tela cheia de sobreposição do Modo Não Perturbe sinalizando urgência"
+                                            },
                                             fontSize = 11.sp,
-                                            color = subTextColor
+                                            color = if (loopAlarm) subTextColor.copy(alpha = 0.7f) else subTextColor
                                         )
                                     }
                                     Switch(
                                         checked = isDisruptive,
-                                        onCheckedChange = { isDisruptive = it },
+                                        enabled = !loopAlarm,
+                                        onCheckedChange = { isChecked ->
+                                            isDisruptive = isChecked
+                                            if (isChecked) loopAlarm = false
+                                        },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = Color.White,
                                             checkedTrackColor = orangeCta
@@ -1834,8 +1855,10 @@ fun EditTaskDialog(
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = cardBg,
-                            border = BorderStroke(1.dp, cardBorder),
-                            modifier = Modifier.fillMaxWidth()
+                            border = BorderStroke(1.dp, if (loopAlarm) orangeCta else cardBorder),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (isDisruptive) 0.45f else 1f)
                         ) {
                             Row(
                                 modifier = Modifier
@@ -1849,18 +1872,26 @@ fun EditTaskDialog(
                                         text = "Toque em Loop Contínuo",
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = textColor
+                                        color = if (loopAlarm) orangeCta else textColor
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "Toca som repetidamente até você dispensar",
+                                        text = if (isDisruptive) {
+                                            "Inerte: desative a Tarefa Perturbadora para usar"
+                                        } else {
+                                            "Toca som repetidamente até você dispensar"
+                                        },
                                         fontSize = 11.sp,
-                                        color = subTextColor
+                                        color = if (isDisruptive) subTextColor.copy(alpha = 0.7f) else subTextColor
                                     )
                                 }
                                 Switch(
                                     checked = loopAlarm,
-                                    onCheckedChange = { loopAlarm = it },
+                                    enabled = !isDisruptive,
+                                    onCheckedChange = { isChecked ->
+                                        loopAlarm = isChecked
+                                        if (isChecked) isDisruptive = false
+                                    },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = orangeCta
@@ -1874,7 +1905,9 @@ fun EditTaskDialog(
                             shape = RoundedCornerShape(18.dp),
                             color = cardBg,
                             border = BorderStroke(1.dp, if (isDisruptive) orangeCta else cardBorder),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (loopAlarm) 0.45f else 1f)
                         ) {
                             Row(
                                 modifier = Modifier
@@ -1892,14 +1925,22 @@ fun EditTaskDialog(
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "Ao vencer, exibe a tela cheia de sobreposição do Modo Não Perturbe sinalizando urgência",
+                                        text = if (loopAlarm) {
+                                            "Inerte: desative o Toque em Loop para usar"
+                                        } else {
+                                            "Ao vencer, exibe a tela cheia de sobreposição do Modo Não Perturbe sinalizando urgência"
+                                        },
                                         fontSize = 11.sp,
-                                        color = subTextColor
+                                        color = if (loopAlarm) subTextColor.copy(alpha = 0.7f) else subTextColor
                                     )
                                 }
                                 Switch(
                                     checked = isDisruptive,
-                                    onCheckedChange = { isDisruptive = it },
+                                    enabled = !loopAlarm,
+                                    onCheckedChange = { isChecked ->
+                                        isDisruptive = isChecked
+                                        if (isChecked) loopAlarm = false
+                                    },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = orangeCta

@@ -39,8 +39,7 @@ import com.example.data.model.calculateWeeklyStreak
 import com.example.data.model.getFrequencyLabel
 import com.example.ui.MainViewModel
 import com.example.ui.components.ConfirmDeleteDialog
-import com.example.ui.theme.OrangeContainer
-import com.example.ui.theme.isAppDarkTheme
+import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
 import com.example.util.SoundEffectsManager
 import java.text.SimpleDateFormat
@@ -319,22 +318,23 @@ fun HabitItemCard(
         }
     }
 
+    val isDark = isAppDarkTheme()
     val cardContainer = when {
-        isDoneToday -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        isExpiredToday -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
+        isDoneToday -> if (isDark) Color(0xFF1E2F23) else MaterialTheme.colorScheme.surface
+        isExpiredToday -> if (isDark) Color(0xFF2E1C1D) else MaterialTheme.colorScheme.surface
         else -> MaterialTheme.colorScheme.surface
     }
 
     val cardBorder = when {
-        isDoneToday -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)
-        isExpiredToday -> MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+        isDoneToday -> if (isDark) Color(0xFF34D399).copy(alpha = 0.5f) else Color(0xFF86EFAC)
+        isExpiredToday -> if (isDark) Color(0xFFF87171).copy(alpha = 0.6f) else Color(0xFFFCA5A5)
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
     }
 
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardContainer),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isDoneToday) 0.dp else 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isDoneToday) 0.dp else 1.5.dp),
         modifier = Modifier
             .fillMaxWidth()
             .border(
@@ -473,9 +473,9 @@ fun HabitItemCard(
                         .size(54.dp)
                         .background(
                             color = when {
-                                isDoneToday -> MaterialTheme.colorScheme.secondaryContainer
-                                isExpiredToday -> MaterialTheme.colorScheme.errorContainer
-                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+                                isDoneToday -> if (isDark) Color(0xFF1E3827) else Color(0xFFE8F5E9)
+                                isExpiredToday -> if (isDark) Color(0xFF381E1E) else Color(0xFFFFEBEE)
+                                else -> if (isDark) DarkSurfaceContainerHigh else Color(0xFFF7F1E9)
                             },
                             shape = CircleShape
                         ),
@@ -549,9 +549,9 @@ fun HabitItemCard(
                         color = if (isDoneToday) {
                             MaterialTheme.colorScheme.secondary
                         } else {
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+                            if (isDark) DarkSurfaceContainerHigh else Color(0xFFF0E8DC)
                         },
-                        shadowElevation = if (isDoneToday) 3.dp else 1.dp,
+                        shadowElevation = if (isDoneToday) 2.dp else 0.dp,
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
@@ -622,7 +622,7 @@ fun HabitItemCard(
                         isCompleted -> MaterialTheme.colorScheme.secondary
                         isToday -> MaterialTheme.colorScheme.primary
                         isPast -> MaterialTheme.colorScheme.error // Vermelho para dia pulado sem apagar histórico
-                        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                        else -> if (isDark) DarkSurfaceContainerHigh else Color(0xFFF0E8DC)
                     }
                     val pillFg = when {
                         isCompleted -> MaterialTheme.colorScheme.onSecondary

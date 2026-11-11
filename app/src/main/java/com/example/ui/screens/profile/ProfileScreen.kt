@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.auth.AuthRepository
+import com.example.data.devtools.DevToolsRepository
+import com.example.data.inbox.InboxRepository
 import com.example.ui.MainViewModel
 import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.theme.GreenAccent
@@ -44,6 +46,7 @@ import com.example.ui.components.BackupDialog
 import com.example.ui.components.CloudSyncedDataDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.components.LatexManualDialog
+import androidx.compose.foundation.BorderStroke
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -70,7 +73,18 @@ fun ProfileScreen(
     val keepScreenOn by viewModel.keepScreenOn.collectAsState()
     val notificationSettings by viewModel.notificationSettings.collectAsState()
 
-    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: Dados
+    val devToolsRepository = remember { DevToolsRepository.getInstance(context) }
+    val isDeveloper = remember(user) {
+        user?.isDev == true || InboxRepository.isDeveloper(user?.email, user?.uid)
+    }
+
+    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: DevTools (se dev), 2: Dados
+
+    LaunchedEffect(isDeveloper) {
+        if (!isDeveloper && selectedSubTab > 1) {
+            selectedSubTab = 1
+        }
+    }
 
     // Modals
     var showEditNameDialog by remember { mutableStateOf(false) }
@@ -164,6 +178,23 @@ fun ProfileScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    if (isDeveloper) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFFFFB703).copy(alpha = 0.2f),
+                                            border = BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.5f))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Text("🛠️", fontSize = 10.sp)
+                                                Text("DEV", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
+                                            }
+                                        }
+                                    }
                                     Spacer(modifier = Modifier.width(6.dp))
                                     IconButton(
                                         onClick = { showEditNameDialog = true },
@@ -288,8 +319,23 @@ fun ProfileScreen(
                 }
             }
 
-            // 2. SEGMENTED SUB-TABS SELECTOR: [Estatísticas] [Dados]
+            // 2. SEGMENTED SUB-TABS SELECTOR: [Estatísticas] [DevTools (se dev)] [Dados]
             item {
+                val subTabsList = remember(isDeveloper) {
+                    if (isDeveloper) {
+                        listOf(
+                            0 to Pair("Estatísticas", Icons.Default.BarChart),
+                            1 to Pair("DevTools", Icons.Default.AdminPanelSettings),
+                            2 to Pair("Dados", Icons.Default.Storage)
+                        )
+                    } else {
+                        listOf(
+                            0 to Pair("Estatísticas", Icons.Default.BarChart),
+                            1 to Pair("Dados", Icons.Default.Storage)
+                        )
+                    }
+                }
+
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -301,10 +347,7 @@ fun ProfileScreen(
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        listOf(
-                            0 to Pair("Estatísticas", Icons.Default.BarChart),
-                            1 to Pair("Dados", Icons.Default.Storage)
-                        ).forEach { (index, pair) ->
+                        subTabsList.forEach { (index, pair) ->
                             val isSelected = selectedSubTab == index
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -324,7 +367,7 @@ fun ProfileScreen(
                                         imageVector = pair.second,
                                         contentDescription = null,
                                         tint = if (isSelected) {
-                                            MaterialTheme.colorScheme.primary
+                                            if (pair.first == "DevTools") Color(0xFFD97706) else MaterialTheme.colorScheme.primary
                                         } else {
                                             MaterialTheme.colorScheme.onSurfaceVariant
                                         },
@@ -333,13 +376,14 @@ fun ProfileScreen(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = pair.first,
-                                        fontSize = 13.5.sp,
+                                        fontSize = if (isDeveloper) 12.sp else 13.5.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                                         color = if (isSelected) {
-                                            MaterialTheme.colorScheme.primary
+                                            if (pair.first == "DevTools") Color(0xFFD97706) else MaterialTheme.colorScheme.primary
                                         } else {
                                             MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
+                                        },
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -349,7 +393,13 @@ fun ProfileScreen(
             }
 
             // 4. SUB-TAB CONTENT
-            when (selectedSubTab) {
+            val currentTab = if (isDeveloper) {
+                selectedSubTab
+            } else {
+                if (selectedSubTab == 1) 2 else 0
+            }
+
+            when (currentTab) {
                 0 -> {
                     // ESTATÍSTICAS
                     item {
@@ -358,6 +408,16 @@ fun ProfileScreen(
                 }
 
                 1 -> {
+                    // DEVTOOLS (Painel entre Estatísticas e Dados para contas de desenvolvedor)
+                    item {
+                        DevToolsPanel(
+                            currentUser = user,
+                            devToolsRepository = devToolsRepository
+                        )
+                    }
+                }
+
+                2 -> {
                     // DADOS (Technical info, storage usage, share app, tutorial, accessibility)
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

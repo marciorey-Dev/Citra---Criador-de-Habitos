@@ -31,6 +31,7 @@ import com.example.data.model.Achievement
 import com.example.data.model.Category
 import com.example.data.model.FocusSession
 import com.example.data.model.Habit
+import com.example.data.inbox.InboxRepository
 import com.example.data.model.Note
 import com.example.data.model.Task
 
@@ -39,8 +40,11 @@ data class UserProfile(
     val displayName: String,
     val username: String, // @username
     val photoUrl: String? = null,
+    val email: String? = null,
     val isPrivate: Boolean = false,
     val isGuest: Boolean = false,
+    val isDev: Boolean = false,
+    val isBanned: Boolean = false,
     val totalFocusMinutes: Int = 0,
     val completedTasksCount: Int = 0,
     val completedHabitsCount: Int = 0,
@@ -108,7 +112,8 @@ class AuthRepository(private val context: Context) {
             if (user != null) {
                 _isGuestMode.value = false
                 prefs.edit().putBoolean("is_guest_mode", false).apply()
-                loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
+                val email = user.email
+                loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString(), email)
             } else if (_isGuestMode.value) {
                 loadGuestProfile()
             } else {
@@ -137,22 +142,28 @@ class AuthRepository(private val context: Context) {
         val localAvatar = java.io.File(context.filesDir, "avatars/user_guest.jpg")
         val savedPhoto = if (localAvatar.exists()) localAvatar.absolutePath else prefs.getString("guest_photo", null)
         val isPrivate = prefs.getBoolean("guest_is_private", false)
+        val isDev = prefs.getBoolean("guest_is_dev", false) || InboxRepository.isDeveloper(null)
+        val isBanned = prefs.getBoolean("guest_is_banned", false)
 
         _currentUser.value = UserProfile(
             uid = "guest_local_user",
             displayName = savedName,
             username = savedUsername,
             photoUrl = savedPhoto,
+            email = null,
             isPrivate = isPrivate,
-            isGuest = true
+            isGuest = true,
+            isDev = isDev,
+            isBanned = isBanned
         )
         _isAuthReady.value = true
     }
 
-    private fun loadUserProfile(uid: String, authDisplayName: String?, authPhotoUrl: String?) {
+    private fun loadUserProfile(uid: String, authDisplayName: String?, authPhotoUrl: String?, authEmail: String? = null) {
         scope.launch {
             val localAvatar = java.io.File(context.filesDir, "avatars/user_${uid}.jpg")
             val defaultPhoto = if (localAvatar.exists()) localAvatar.absolutePath else authPhotoUrl
+            val isDevInitial = InboxRepository.isDeveloper(authEmail, uid)
             try {
                 val currentFirestore = firestore
                 if (currentFirestore == null) {
@@ -161,8 +172,11 @@ class AuthRepository(private val context: Context) {
                         displayName = authDisplayName ?: "Usuário Citra",
                         username = uid.take(6),
                         photoUrl = defaultPhoto,
+                        email = authEmail,
                         isPrivate = false,
-                        isGuest = false
+                        isGuest = false,
+                        isDev = isDevInitial,
+                        isBanned = false
                     )
                     _isAuthReady.value = true
                     return@launch
@@ -172,13 +186,19 @@ class AuthRepository(private val context: Context) {
                 if (doc.exists()) {
                     val firestorePhoto = doc.getString("photoUrl")
                     val effectivePhoto = if (localAvatar.exists()) localAvatar.absolutePath else (firestorePhoto ?: authPhotoUrl)
+                    val isDev = doc.getBoolean("isDev") ?: isDevInitial
+                    val isBanned = doc.getBoolean("isBanned") ?: false
+                    val mail = doc.getString("email") ?: authEmail
                     val profile = UserProfile(
                         uid = uid,
                         displayName = doc.getString("displayName") ?: authDisplayName ?: "Usuário Citra",
                         username = (doc.getString("username") ?: uid.take(6)).removePrefix("@"),
                         photoUrl = effectivePhoto,
+                        email = mail,
                         isPrivate = doc.getBoolean("isPrivate") ?: false,
                         isGuest = false,
+                        isDev = isDev,
+                        isBanned = isBanned,
                         totalFocusMinutes = (doc.getLong("totalFocusMinutes") ?: 0L).toInt(),
                         completedTasksCount = (doc.getLong("completedTasksCount") ?: 0L).toInt(),
                         completedHabitsCount = (doc.getLong("completedHabitsCount") ?: 0L).toInt(),
@@ -192,15 +212,21 @@ class AuthRepository(private val context: Context) {
                         displayName = authDisplayName ?: "Usuário Citra",
                         username = autoUsername,
                         photoUrl = defaultPhoto,
+                        email = authEmail,
                         isPrivate = false,
-                        isGuest = false
+                        isGuest = false,
+                        isDev = isDevInitial,
+                        isBanned = false
                     )
                     currentFirestore.collection("users").document(uid).set(
                         mapOf(
                             "displayName" to newProfile.displayName,
                             "username" to newProfile.username,
+                            "email" to (authEmail ?: ""),
                             "photoUrl" to newProfile.photoUrl,
                             "isPrivate" to newProfile.isPrivate,
+                            "isDev" to newProfile.isDev,
+                            "isBanned" to newProfile.isBanned,
                             "totalFocusMinutes" to 0,
                             "completedTasksCount" to 0,
                             "completedHabitsCount" to 0,
@@ -215,8 +241,11 @@ class AuthRepository(private val context: Context) {
                     displayName = authDisplayName ?: "Usuário Citra",
                     username = uid.take(6),
                     photoUrl = defaultPhoto,
+                    email = authEmail,
                     isPrivate = false,
-                    isGuest = false
+                    isGuest = false,
+                    isDev = isDevInitial,
+                    isBanned = false
                 )
             } finally {
                 _isAuthReady.value = true
