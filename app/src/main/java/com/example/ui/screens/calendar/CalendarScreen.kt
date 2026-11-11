@@ -55,6 +55,7 @@ fun CalendarScreen(
     val selectedDateStr by viewModel.selectedCalendarDate.collectAsState()
 
     var showAddTaskDialog by remember { mutableStateOf(false) }
+    var showAddMenuDialog by remember { mutableStateOf(false) }
     var activeNoteForEditor by remember { mutableStateOf<Note?>(null) }
     var isCreatingNoteForCalendar by remember { mutableStateOf(false) }
 
@@ -881,7 +882,7 @@ fun CalendarScreen(
 
         // Botão Flutuante de Ação (FAB Cítrico)
         FloatingActionButton(
-            onClick = { showAddTaskDialog = true },
+            onClick = { showAddMenuDialog = true },
             shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -898,6 +899,70 @@ fun CalendarScreen(
                 modifier = Modifier.size(30.dp)
             )
         }
+    }
+
+    if (showAddMenuDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddMenuDialog = false },
+            title = {
+                Text(text = "Novo Registro no Calendário", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showAddMenuDialog = false
+                                showAddTaskDialog = true
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Nova Tarefa", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Data fixada em $selectedDateStr (escolha só o horário)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showAddMenuDialog = false
+                                isCreatingNoteForCalendar = true
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.NoteAdd, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Nova Nota", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Nota vinculada ao dia $selectedDateStr", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAddMenuDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 
     if (showAddTaskDialog) {

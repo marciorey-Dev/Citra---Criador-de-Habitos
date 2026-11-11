@@ -71,7 +71,7 @@ fun BackupDialog(
             ) {
                 if (!isRestoreMode) {
                     Text(
-                        text = "Exporte todos os seus dados (Tarefas, Hábitos, Sessões Arancia, Categorias e Conquistas) em um arquivo JSON.",
+                        text = "Exporte todos os seus dados (Tarefas, Hábitos, Sessões de Foco/Estatísticas, Calendário e Notas, Finanças, Categorias e Conquistas) em um arquivo JSON completo.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

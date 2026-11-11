@@ -299,7 +299,7 @@ private fun DialogSoundRow(
     }
 
     val displaySoundName = remember(currentSound, customUri) {
-        if (customUri.isNotBlank()) "Música do Aparelho"
+        if (customUri.isNotBlank()) SoundEffectsManager.getAudioDisplayName(context, customUri)
         else SoundEffectsManager.getSoundName(currentSound)
     }
 

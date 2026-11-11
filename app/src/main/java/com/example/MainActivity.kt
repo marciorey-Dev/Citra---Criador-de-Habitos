@@ -181,7 +181,20 @@ class MainActivity : ComponentActivity() {
                 AmbientBreakMusicManager.onBreakStateChanged(this@MainActivity, isBreak)
             }
 
-            CitraTheme(darkTheme = effectiveDark, accent = themeAccent) {
+            val currentDensity = androidx.compose.ui.platform.LocalDensity.current
+            val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+            // 390dp reference screen anchor
+            val scaleFactor = (screenWidthDp.toFloat() / 390f).coerceIn(0.85f, 1.15f)
+            val clampedFontScale = currentDensity.fontScale.coerceIn(0.9f, 1.1f)
+            val normalizedDensity = androidx.compose.ui.unit.Density(
+                density = currentDensity.density * scaleFactor,
+                fontScale = clampedFontScale
+            )
+
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides normalizedDensity
+            ) {
+                CitraTheme(darkTheme = effectiveDark, accent = themeAccent) {
                 // Save any open note immediately before showing the 00:00 alarm screen
                 LaunchedEffect(activeAlarm) {
                     if (activeAlarm != null && isNoteEditorOpen) {
@@ -1045,6 +1058,7 @@ class MainActivity : ComponentActivity() {
                         onSkipAll = { viewModel.skipAllTutorials() }
                     )
                 }
+            }
             }
         }
     }

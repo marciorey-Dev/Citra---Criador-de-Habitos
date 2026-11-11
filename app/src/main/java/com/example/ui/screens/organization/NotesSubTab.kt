@@ -45,6 +45,7 @@ import coil.compose.AsyncImage
 import com.example.data.model.Note
 import com.example.data.model.NoteVersion
 import com.example.data.model.TaskPriority
+import com.example.data.model.isReadyForMainList
 import com.example.ui.MainViewModel
 import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
@@ -176,16 +177,17 @@ fun NotesSubTab(
         }
     }
 
-    // Filter notes by search query AND category
+    // Filter notes by search query AND category AND 72h rule
     val filteredNotes = remember(notes, searchQuery, selectedCategoryFilter) {
         notes.filter { note ->
+            val isReady = note.isReadyForMainList()
             val matchesCategory = (selectedCategoryFilter == "Todas" || note.category.equals(selectedCategoryFilter, ignoreCase = true))
             val matchesSearch = if (searchQuery.isBlank()) true else {
                 note.title.contains(searchQuery, ignoreCase = true) ||
                     note.content.contains(searchQuery, ignoreCase = true) ||
                     note.category.contains(searchQuery, ignoreCase = true)
             }
-            matchesCategory && matchesSearch
+            isReady && matchesCategory && matchesSearch
         }
     }
 
