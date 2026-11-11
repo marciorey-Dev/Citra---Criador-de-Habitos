@@ -55,20 +55,21 @@
 * **JSON Backups:** Export and import full app state through standard `.json` data files.
 * **Cloud Sync:** Firebase Firestore handles user preferences, notes, habits, tasks, and historical analytics when logged in.
 
-## 🚀 Como Compilar o APK pelo GitHub Actions
+## 🚀 Como Compilar o APK de Testes pelo GitHub Actions
 
-O repositório conta com integração contínua configurada em `.github/workflows/build-apk.yml`.
+O repositório conta com automação de build configurada em `.github/workflows/build-apk.yml`.
 
-### Passo a passo para gerar o APK:
-1. **Compilação Automática:** Todo `push` ou `pull request` em qualquer branch dispara automaticamente a compilação do APK.
+### Passo a passo para gerar o APK de Testes:
+1. **Compilação Automática:** Todo `git push` ou `pull request` dispara automaticamente a compilação do APK de testes.
 2. **Disparo Manual (1 clique):**
-   - Acesse o repositório no GitHub e clique na aba **Actions**.
-   - No menu lateral esquerdo, selecione **Build Android APK (Citra)**.
-   - Clique em **Run workflow**, escolha o branch e confirme.
+   - Acesse o seu repositório no GitHub e clique na aba **Actions**.
+   - No menu lateral esquerdo, selecione **Compilar APK Android (Citra)**.
+   - Clique em **Run workflow**, selecione o branch (geralmente `main`) e clique no botão verde **Run workflow**.
 3. **Download do APK:**
-   - Ao finalizar (ícone verde de sucesso), clique na execução realizada.
-   - Role até a seção **Artifacts** na parte inferior e baixe o arquivo **Citra-v1.2.4-APK**.
-   - O APK gerado estará pronto para instalação em qualquer dispositivo Android!
+   - Aguarde a conclusão do build (ícone verde de check ✔️).
+   - Clique no workflow concluído.
+   - Na seção **Artifacts** (na parte inferior da página), baixe o pacote **Citra-Test-APK**.
+   - Descompacte o arquivo `.zip` e instale o APK no seu aparelho Android para testar!
 
 ---
 

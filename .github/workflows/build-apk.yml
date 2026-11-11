@@ -3,6 +3,7 @@ name: Compilar APK Android (Citra)
 on:
   push:
     branches: [ "**" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "**" ]
   workflow_dispatch:
@@ -21,7 +22,7 @@ permissions:
 
 jobs:
   build:
-    name: Compilar APK Android
+    name: Compilar APK de Teste Android
     runs-on: ubuntu-latest
 
     steps:
@@ -37,21 +38,25 @@ jobs:
           java-version: '21'
           cache: 'gradle'
 
-      # 3. Configurar Android SDK para Android 36
+      # 3. Configurar Android SDK
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          packages: 'platform-tools'
           accept-android-sdk-licenses: true
 
-      # 4. Restaurar / Criar Debug Keystore
+      - name: Aceitar todas as licenças do Android SDK
+        run: |
+          yes | sdkmanager --licenses 2>/dev/null || true
+
+      # 4. Restaurar Debug Keystore para assinatura compatível com Firebase
       - name: Restaurar Debug Keystore
         run: |
           if [ -f "debug.keystore.base64" ]; then
-            echo "Restaurando debug.keystore existente a partir do arquivo base64..."
-            base64 -d debug.keystore.base64 > debug.keystore
+            echo "Restaurando debug.keystore a partir do arquivo base64..."
+            base64 -d debug.keystore.base64 > debug.keystore 2>/dev/null || base64 --decode debug.keystore.base64 > debug.keystore
           elif [ ! -f "debug.keystore" ]; then
-            echo "Criando chave debug.keystore padrao..."
+            echo "Criando debug.keystore padrao..."
             keytool -genkeypair -v \
               -keystore debug.keystore \
               -storepass android \
@@ -63,7 +68,7 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      # 5. Garantir arquivo de ambiente (.env) e google-services.json
+      # 5. Garantir arquivo de ambiente (.env) e credenciais do Firebase
       - name: Preparar ambiente e credenciais
         run: |
           if [ ! -f ".env" ]; then
@@ -71,13 +76,13 @@ jobs:
           fi
           if [ ! -f "app/google-services.json" ]; then
             if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
-              echo "Restaurando app/google-services.json a partir de secrets.GOOGLE_SERVICES_JSON..."
+              echo "Restaurando app/google-services.json a partir do segredo..."
               echo "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
             fi
           fi
 
-      # 6. Permissao de execucao no script do Gradle
-      - name: Dar permissao de execucao ao gradlew
+      # 6. Permissão de execução no script do Gradle
+      - name: Dar permissão de execução ao gradlew
         run: chmod +x ./gradlew
 
       # 7. Compilar APK com Gradle
@@ -87,7 +92,7 @@ jobs:
           echo "Compilando variante: $VARIANT"
           if [ "$VARIANT" = "release" ] && [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
             echo "Decodificando chave de release..."
-            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release-key.jks
+            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release-key.jks 2>/dev/null || echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > release-key.jks
             export KEYSTORE_PATH="$(pwd)/release-key.jks"
             export STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}"
             export KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
@@ -96,7 +101,7 @@ jobs:
             ./gradlew --no-daemon assembleDebug --stacktrace
           fi
 
-      # 8. Coletar e Renomear APKs gerados
+      # 8. Coletar e organizar APKs gerados
       - name: Organizar APKs gerados
         shell: bash
         run: |
@@ -121,11 +126,11 @@ jobs:
           echo "Conteudo da pasta build-artifacts:"
           ls -lh build-artifacts/
 
-      # 9. Disponibilizar APK nos Artifacts do GitHub para download
+      # 9. Disponibilizar APK nos Artifacts do GitHub para download imediato
       - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
         with:
-          name: Citra-APK-Build-${{ github.run_number }}
+          name: Citra-Test-APK
           path: build-artifacts/*.apk
           retention-days: 30
           if-no-files-found: error
