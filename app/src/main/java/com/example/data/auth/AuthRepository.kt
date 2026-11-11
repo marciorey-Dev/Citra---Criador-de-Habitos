@@ -14,6 +14,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
@@ -55,44 +56,43 @@ class AuthRepository(private val context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("citra_prefs", Context.MODE_PRIVATE)
 
-    private val auth: FirebaseAuth? by lazy {
-        try {
-            if (FirebaseApp.getApps(context).isEmpty()) {
-                FirebaseApp.initializeApp(context)
+    val auth: FirebaseAuth?
+        get() {
+            ensureFirebaseInitialized(context)
+            return try {
+                FirebaseAuth.getInstance()
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "Failed getting FirebaseAuth instance", e)
+                null
             }
-            FirebaseAuth.getInstance()
-        } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Firebase Auth could not be initialized", e)
-            null
         }
-    }
 
-    private val firestore: FirebaseFirestore? by lazy {
-        try {
-            val app = if (FirebaseApp.getApps(context).isEmpty()) {
-                FirebaseApp.initializeApp(context) ?: FirebaseApp.getInstance()
-            } else {
-                FirebaseApp.getInstance()
-            }
+    val firestore: FirebaseFirestore?
+        get() {
+            val app = ensureFirebaseInitialized(context) ?: return null
             val dbId = try {
-                context.getString(R.string.firestore_database_id)
-            } catch (_: Exception) { "" }
+                val str = context.getString(R.string.firestore_database_id)
+                if (str.isNotBlank() && str != "firestore_database_id") str else "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
+            } catch (_: Exception) {
+                "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
+            }
 
-            if (dbId.isNotBlank() && dbId != "default" && dbId != "(default)") {
-                try {
+            return try {
+                if (dbId.isNotBlank() && dbId != "default" && dbId != "(default)") {
                     FirebaseFirestore.getInstance(app, dbId)
-                } catch (e: Exception) {
-                    android.util.Log.w("AuthRepository", "Fallback to default db after error with $dbId", e)
+                } else {
                     FirebaseFirestore.getInstance(app)
                 }
-            } else {
-                FirebaseFirestore.getInstance(app)
+            } catch (e: Exception) {
+                android.util.Log.w("AuthRepository", "Fallback to default db after error with $dbId", e)
+                try {
+                    FirebaseFirestore.getInstance(app)
+                } catch (ex: Exception) {
+                    android.util.Log.e("AuthRepository", "Firestore completely failed to initialize", ex)
+                    null
+                }
             }
-        } catch (e: Exception) {
-            android.util.Log.e("AuthRepository", "Firebase Firestore could not be initialized", e)
-            null
         }
-    }
 
     private val credentialManager = CredentialManager.create(context)
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -107,6 +107,7 @@ class AuthRepository(private val context: Context) {
     val isAuthReady: StateFlow<Boolean> = _isAuthReady.asStateFlow()
 
     init {
+        ensureFirebaseInitialized(context)
         auth?.addAuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             if (user != null) {
@@ -121,7 +122,7 @@ class AuthRepository(private val context: Context) {
                 _isAuthReady.value = true
             }
         }
-        if (auth == null) {
+        if (auth?.currentUser == null) {
             if (_isGuestMode.value) {
                 loadGuestProfile()
             } else {
@@ -312,7 +313,7 @@ class AuthRepository(private val context: Context) {
                     }
                 }
                 else -> {
-                    return Result.failure(IllegalArgumentException("Unexpected credential type: ${credential.type}"))
+                    return Result.failure(IllegalArgumentException("Tipo de credencial inesperado: ${credential.type}"))
                 }
             }
 
@@ -322,18 +323,19 @@ class AuthRepository(private val context: Context) {
 
             val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
             val authResult = currentAuth.signInWithCredential(firebaseCredential).await()
-            val user = authResult.user ?: throw IllegalStateException("Firebase user was null")
+            val user = authResult.user ?: throw IllegalStateException("Usuário retornado pelo Firebase foi nulo.")
 
             _isGuestMode.value = false
             prefs.edit().putBoolean("is_guest_mode", false).apply()
 
-            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
+            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString(), user.email)
             Result.success(
                 _currentUser.value ?: UserProfile(
                     uid = user.uid,
                     displayName = user.displayName ?: "Usuário Citra",
                     username = user.uid.take(6),
                     photoUrl = user.photoUrl?.toString(),
+                    email = user.email,
                     isPrivate = false,
                     isGuest = false
                 )
@@ -341,13 +343,14 @@ class AuthRepository(private val context: Context) {
         } catch (e: GetCredentialCancellationException) {
             Result.failure(e)
         } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Erro no login Google", e)
             Result.failure(e)
         }
     }
 
     suspend fun signInWithEmailOrUsername(identifier: String, pass: String): Result<UserProfile> {
         val trimmedIdentifier = identifier.trim()
-        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não pôde ser inicializado. Verifique a conexão com a internet."))
         return try {
             val email = if (trimmedIdentifier.contains("@") && trimmedIdentifier.contains(".")) {
                 trimmedIdentifier
@@ -355,21 +358,33 @@ class AuthRepository(private val context: Context) {
                 "${trimmedIdentifier.removePrefix("@").lowercase()}@citra.app"
             }
             val authResult = currentAuth.signInWithEmailAndPassword(email, pass).await()
-            val user = authResult.user ?: throw IllegalStateException("User null")
+            val user = authResult.user ?: throw IllegalStateException("Usuário não encontrado.")
             _isGuestMode.value = false
             prefs.edit().apply {
                 putBoolean("is_guest_mode", false)
             }.apply()
-            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString())
+            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString(), user.email)
             Result.success(_currentUser.value ?: UserProfile(
                 uid = user.uid,
                 displayName = user.displayName ?: "Usuário Citra",
                 username = user.uid.take(6),
+                email = user.email,
                 isPrivate = false,
                 isGuest = false
             ))
         } catch (e: Exception) {
-            Result.failure(e)
+            val msg = e.localizedMessage ?: "Erro na autenticação"
+            if (msg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
+                msg.contains("not enabled", ignoreCase = true) ||
+                msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true)) {
+                Result.failure(IllegalStateException("Login com usuário/senha não habilitado no Firebase. Por favor, use 'Continuar com o Google'."))
+            } else if (msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
+                msg.contains("no user record", ignoreCase = true) ||
+                msg.contains("wrong password", ignoreCase = true)) {
+                Result.failure(IllegalStateException("Usuário ou senha incorretos."))
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
@@ -379,14 +394,14 @@ class AuthRepository(private val context: Context) {
         pass: String,
         isPrivate: Boolean = false
     ): Result<UserProfile> {
-        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não pôde ser inicializado. Verifique a conexão com a internet."))
         return try {
             val raw = username.trim()
             val isEmail = raw.contains("@") && raw.contains(".")
             val email = if (isEmail) raw else "${raw.removePrefix("@").lowercase()}@citra.app"
             val cleanUsername = if (isEmail) raw.substringBefore("@") else raw.removePrefix("@")
             val authResult = currentAuth.createUserWithEmailAndPassword(email, pass).await()
-            val user = authResult.user ?: throw IllegalStateException("User null")
+            val user = authResult.user ?: throw IllegalStateException("Usuário não retornado pelo Firebase.")
 
             try {
                 user.updateProfile(
@@ -401,6 +416,7 @@ class AuthRepository(private val context: Context) {
                 displayName = name,
                 username = cleanUsername,
                 photoUrl = null,
+                email = user.email,
                 isPrivate = isPrivate,
                 isGuest = false
             )
@@ -412,6 +428,7 @@ class AuthRepository(private val context: Context) {
                         mapOf(
                             "displayName" to name,
                             "username" to cleanUsername,
+                            "email" to (user.email ?: ""),
                             "photoUrl" to null,
                             "isPrivate" to isPrivate,
                             "totalFocusMinutes" to 0,
@@ -432,7 +449,16 @@ class AuthRepository(private val context: Context) {
             _currentUser.value = profile
             Result.success(profile)
         } catch (e: Exception) {
-            Result.failure(e)
+            val msg = e.localizedMessage ?: "Erro ao criar conta"
+            if (msg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
+                msg.contains("not enabled", ignoreCase = true) ||
+                msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true)) {
+                Result.failure(IllegalStateException("Criação com usuário/senha não habilitada no Firebase. Por favor, use 'Continuar com o Google'."))
+            } else if (msg.contains("email address is already in use", ignoreCase = true)) {
+                Result.failure(IllegalStateException("Este usuário ou e-mail já está em uso."))
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
@@ -656,6 +682,39 @@ class AuthRepository(private val context: Context) {
     companion object {
         @Volatile
         private var INSTANCE: AuthRepository? = null
+
+        fun ensureFirebaseInitialized(context: Context): FirebaseApp? {
+            val appContext = context.applicationContext ?: context
+            return try {
+                if (FirebaseApp.getApps(appContext).isNotEmpty()) {
+                    FirebaseApp.getInstance()
+                } else {
+                    val defaultApp = try {
+                        FirebaseApp.initializeApp(appContext)
+                    } catch (e: Exception) {
+                        android.util.Log.w("AuthRepository", "Default FirebaseApp.initializeApp failed", e)
+                        null
+                    }
+                    if (defaultApp != null) return defaultApp
+
+                    val options = FirebaseOptions.Builder()
+                        .setApplicationId("1:721033150754:android:c2627af6bbd6e41350e57b")
+                        .setApiKey("AIzaSyBXxoqm-2g9qxHv1sjvxoeYFSJb8uL8glc")
+                        .setProjectId("gen-lang-client-0656311562")
+                        .setStorageBucket("gen-lang-client-0656311562.firebasestorage.app")
+                        .setGcmSenderId("721033150754")
+                        .build()
+                    FirebaseApp.initializeApp(appContext, options)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("AuthRepository", "FirebaseApp initialization completely failed", e)
+                try {
+                    FirebaseApp.getInstance()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
 
         fun getInstance(context: Context): AuthRepository {
             return INSTANCE ?: synchronized(this) {

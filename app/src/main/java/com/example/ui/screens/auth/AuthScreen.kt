@@ -502,7 +502,13 @@ fun AuthScreen(
                                 } else {
                                     shakeTrigger++
                                     triggerTempHumor(MascotHumor.NAO, 1000L)
-                                    errorMessage = ex?.localizedMessage ?: "Falha ao entrar com o Google"
+                                    val rawMsg = ex?.localizedMessage ?: "Falha ao entrar com o Google"
+                                    errorMessage = if (rawMsg.contains("No credentials available", ignoreCase = true) ||
+                                        rawMsg.contains("NoCredentialException", ignoreCase = true)) {
+                                        "Nenhuma conta Google selecionada ou disponível no dispositivo."
+                                    } else {
+                                        rawMsg
+                                    }
                                 }
                             }
                         }

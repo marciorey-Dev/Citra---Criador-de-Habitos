@@ -66,31 +66,31 @@ class InboxRepository(private val context: Context) {
         }
     }
 
-    private val firestore: FirebaseFirestore? by lazy {
-        try {
-            val app = if (FirebaseApp.getApps(context).isEmpty()) {
-                FirebaseApp.initializeApp(context) ?: FirebaseApp.getInstance()
-            } else {
-                FirebaseApp.getInstance()
-            }
-            val dbId = try {
-                context.getString(R.string.firestore_database_id)
-            } catch (_: Exception) { "" }
+    private val firestore: FirebaseFirestore?
+        get() {
+            return try {
+                val app = com.example.data.auth.AuthRepository.ensureFirebaseInitialized(context) ?: return null
+                val dbId = try {
+                    val str = context.getString(R.string.firestore_database_id)
+                    if (str.isNotBlank() && str != "firestore_database_id") str else "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
+                } catch (_: Exception) {
+                    "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
+                }
 
-            if (dbId.isNotBlank() && dbId != "default" && dbId != "(default)") {
-                try {
-                    FirebaseFirestore.getInstance(app, dbId)
-                } catch (e: Exception) {
+                if (dbId.isNotBlank() && dbId != "default" && dbId != "(default)") {
+                    try {
+                        FirebaseFirestore.getInstance(app, dbId)
+                    } catch (e: Exception) {
+                        FirebaseFirestore.getInstance(app)
+                    }
+                } else {
                     FirebaseFirestore.getInstance(app)
                 }
-            } else {
-                FirebaseFirestore.getInstance(app)
+            } catch (e: Exception) {
+                Log.e("InboxRepository", "Firebase Firestore could not be initialized", e)
+                null
             }
-        } catch (e: Exception) {
-            Log.e("InboxRepository", "Firebase Firestore could not be initialized", e)
-            null
         }
-    }
 
     suspend fun searchRecipient(username: String): RecipientLookupState = withContext(Dispatchers.IO) {
         val clean = username.trim().removePrefix("@").lowercase()
