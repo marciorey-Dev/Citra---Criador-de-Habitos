@@ -1,13 +1,10 @@
-
-name: Compilar APK de Testes (Citra)
+name: Compilar APK Android (Citra)
 
 on:
   push:
     branches: [ "**" ]
-
   pull_request:
     branches: [ "**" ]
-
   workflow_dispatch:
 
 permissions:
@@ -15,21 +12,21 @@ permissions:
 
 jobs:
   build:
-    name: Compilar APK Android
+    name: Compilar APK Debug
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Obter o código
-      - name: Checkout
+      # 1. Obter o código-fonte
+      - name: Checkout do repositório
         uses: actions/checkout@v4
 
-      # 2. Configurar Java 21
+      # 2. Configurar Java 21 (Temurin)
       - name: Configurar Java 21
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '21'
-          cache: gradle
+          cache: 'gradle'
 
       # 3. Configurar Android SDK
       - name: Configurar Android SDK
@@ -38,12 +35,14 @@ jobs:
           packages: 'platform-tools'
           accept-android-sdk-licenses: true
 
-      # 4. Criar Debug Keystore
-      - name: Criar Debug Keystore
+      # 4. Restaurar / Criar Debug Keystore
+      - name: Restaurar Debug Keystore
         run: |
-          if [ ! -f "debug.keystore" ]; then
-            echo "Criando chave Debug..."
-
+          if [ -f "debug.keystore.base64" ]; then
+            echo "Restaurando debug.keystore existente a partir do arquivo base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f "debug.keystore" ]; then
+            echo "Criando chave debug.keystore padrao..."
             keytool -genkeypair -v \
               -keystore debug.keystore \
               -storepass android \
@@ -53,55 +52,53 @@ jobs:
               -keysize 2048 \
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
-
-          else
-            echo "Debug Keystore já existe."
           fi
 
-      # 5. Preparar Gradle
-      - name: Preparar Gradle
+      # 5. Garantir arquivo de ambiente (.env)
+      - name: Preparar arquivo .env
+        run: |
+          if [ ! -f ".env" ]; then
+            cp .env.example .env 2>/dev/null || touch .env
+          fi
+
+      # 6. Permissao de execucao no script do Gradle
+      - name: Dar permissao de execucao ao gradlew
         run: chmod +x ./gradlew
 
-      # 6. Compilar APK Debug
-      - name: Compilar Citra
+      # 7. Compilar APK Debug com Gradle
+      - name: Compilar Citra APK
         run: ./gradlew --no-daemon assembleDebug --stacktrace
 
-      # 7. Organizar APKs
-      - name: Coletar APKs gerados
+      # 8. Coletar e Renomear APKs gerados
+      - name: Organizar APKs gerados
         shell: bash
         run: |
           mkdir -p build-artifacts
-
           APK_DIR="app/build/outputs/apk"
-
           if [ ! -d "$APK_DIR" ]; then
-            echo "Erro: pasta de APKs não encontrada."
+            echo "Erro: pasta $APK_DIR nao encontrada!"
             exit 1
           fi
-
           count=0
-
           while IFS= read -r -d '' apk; do
             filename=$(basename "$apk")
             variant=$(basename "$(dirname "$apk")")
-
+            echo "Copiando APK: $apk"
             cp "$apk" "build-artifacts/Citra-${variant}-${filename}"
             count=$((count + 1))
           done < <(find "$APK_DIR" -type f -name "*.apk" -print0)
-
           if [ "$count" -eq 0 ]; then
             echo "Nenhum APK foi gerado!"
             exit 1
           fi
-
-          echo "APKs gerados:"
+          echo "Conteudo da pasta build-artifacts:"
           ls -lh build-artifacts/
 
-      # 8. Disponibilizar APK
-      - name: Upload APK
+      # 9. Disponibilizar APK nos Artifacts do GitHub para download
+      - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
         with:
-          name: Citra-Debug-${{ github.run_number }}
+          name: Citra-v1.2.4-Debug-APK
           path: build-artifacts/*.apk
           retention-days: 30
           if-no-files-found: error

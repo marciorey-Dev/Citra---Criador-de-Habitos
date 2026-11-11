@@ -1,5 +1,0 @@
-{
-  "summary":  "Atualizado com a correção lógica do Modo Sem Perturbações (agora a tela inicial/launcher e apps do sistema nunca disparam o bloqueio; apenas apps não autorizados acionam o aviso) e o novo visual de tela cheia laranja com o Mascote Citra animado piscando os olhos.",
-  "updatedAt":  "2026-11-08T14:57:36.844932871Z",
-  "userFacing":  true
-}
