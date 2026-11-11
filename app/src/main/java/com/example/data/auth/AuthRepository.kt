@@ -269,15 +269,10 @@ class AuthRepository(private val context: Context) {
 
             val targetContext: Context = activity ?: resolvedContext
             val serverClientId = try {
-                val resId = targetContext.resources.getIdentifier("default_web_client_id", "string", targetContext.packageName)
-                if (resId != 0) {
-                    val str = targetContext.getString(resId)
-                    if (str.isNotBlank() && str != "default_web_client_id") str else "281497817953-kq1higalts6knpb831l7ffrlmmfs9qeu.apps.googleusercontent.com"
-                } else {
-                    "281497817953-kq1higalts6knpb831l7ffrlmmfs9qeu.apps.googleusercontent.com"
-                }
+                val str = targetContext.getString(R.string.default_web_client_id)
+                if (str.isNotBlank() && str != "default_web_client_id") str else "721033150754-s5d0b8ole39a4g72ctpv9nnk0loa0qqq.apps.googleusercontent.com"
             } catch (_: Exception) {
-                "281497817953-kq1higalts6knpb831l7ffrlmmfs9qeu.apps.googleusercontent.com"
+                "721033150754-s5d0b8ole39a4g72ctpv9nnk0loa0qqq.apps.googleusercontent.com"
             }
             if (serverClientId.isBlank()) {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))
