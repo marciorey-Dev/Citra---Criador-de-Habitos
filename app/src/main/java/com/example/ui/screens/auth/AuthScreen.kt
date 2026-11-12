@@ -14,6 +14,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -65,16 +66,6 @@ fun AuthScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
-    var isSignUp by remember { mutableStateOf(false) }
-
-    var name by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var showPassword by remember { mutableStateOf(false) }
-    var isNameFocused by remember { mutableStateOf(false) }
-    var isUsernameFocused by remember { mutableStateOf(false) }
-    var isPasswordFocused by remember { mutableStateOf(false) }
-
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showGuestWarningDialog by remember { mutableStateOf(false) }
@@ -330,16 +321,6 @@ fun AuthScreen(
     val (mascotHumor, mascotOlharX, mascotOlharY) = when {
         tempHumor != null -> Triple(tempHumor!!, 0f, 0f)
         isAnyButtonPressed -> Triple(MascotHumor.FELIZ, 0f, 0f)
-        showPassword -> Triple(MascotHumor.DISCRETO, -1f, -0.75f)
-        isPasswordFocused -> Triple(MascotHumor.NEUTRO, 0.1f, 0.95f)
-        isNameFocused -> {
-            val trackX = (name.length.coerceAtMost(24) / 24f) * 0.6f - 0.3f
-            Triple(MascotHumor.NEUTRO, trackX, 0.58f)
-        }
-        isUsernameFocused -> {
-            val trackX = (username.length.coerceAtMost(24) / 24f) * 0.6f - 0.3f
-            Triple(MascotHumor.NEUTRO, trackX, if (isSignUp) 0.74f else 0.68f)
-        }
         isIdleSleepy -> Triple(MascotHumor.SONOLENTO, 0f, 0f)
         else -> Triple(MascotHumor.NEUTRO, touchOlharX, touchOlharY)
     }
@@ -437,53 +418,10 @@ fun AuthScreen(
 
                 Spacer(modifier = Modifier.height(28.dp))
 
-                // Toggle Entrar / Criar Conta
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .staggeredEntrance(toggleGoogleProgress.value)
-                ) {
-                    Row(modifier = Modifier.padding(4.dp)) {
-                        Button(
-                            onClick = {
-                                isSignUp = false
-                                errorMessage = null
-                                lastInteractionTime = System.currentTimeMillis()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (!isSignUp) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                contentColor = if (!isSignUp) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Entrar", fontWeight = FontWeight.Bold)
-                        }
+                Spacer(modifier = Modifier.height(18.dp))
 
-                        Button(
-                            onClick = {
-                                isSignUp = true
-                                errorMessage = null
-                                lastInteractionTime = System.currentTimeMillis()
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isSignUp) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                contentColor = if (isSignUp) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Criar Conta", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Google Sign-In Button
-                OutlinedButton(
+                // Hero Google Sign-In Button
+                Button(
                     onClick = {
                         jumpTrigger++
                         triggerTempHumor(MascotHumor.FELIZ, 1500L)
@@ -495,251 +433,135 @@ fun AuthScreen(
                             if (result.isSuccess) {
                                 onAuthSuccess()
                             } else {
+                                shakeTrigger++
+                                triggerTempHumor(MascotHumor.NAO, 1200L)
                                 val ex = result.exceptionOrNull()
-                                if (ex is GetCredentialCancellationException) {
-                                    Log.w("AuthScreen", "Google Sign-In cancelado ou fechado pelo usuário: ${ex.message}")
-                                    errorMessage = null
-                                } else {
-                                    shakeTrigger++
-                                    triggerTempHumor(MascotHumor.NAO, 1000L)
-                                    val rawMsg = ex?.localizedMessage ?: "Falha ao entrar com o Google"
-                                    errorMessage = if (rawMsg.contains("No credentials available", ignoreCase = true) ||
-                                        rawMsg.contains("NoCredentialException", ignoreCase = true)) {
-                                        "Nenhuma conta Google selecionada ou disponível no dispositivo."
-                                    } else {
+                                val rawMsg = ex?.localizedMessage ?: "Falha ao entrar com o Google"
+                                errorMessage = when {
+                                    ex is GetCredentialCancellationException || rawMsg.contains("cancel", ignoreCase = true) ->
+                                        "Seleção de conta Google cancelada. Toque no botão acima e escolha sua conta para entrar."
+                                    rawMsg.contains("No credentials available", ignoreCase = true) ||
+                                    rawMsg.contains("NoCredentialException", ignoreCase = true) ->
+                                        "Nenhuma conta Google ativa encontrada no aparelho. Certifique-se de estar conectado a uma conta Google no Android."
+                                    else ->
                                         rawMsg
-                                    }
                                 }
                             }
                         }
                     },
-                    interactionSource = googleInteractionSource,
-                    shape = RoundedCornerShape(14.dp),
+                    enabled = !isLoading,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp)
+                        .height(54.dp)
                         .testTag("google_signin_button")
                         .staggeredEntrance(toggleGoogleProgress.value),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("G", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text("Continuar com o Google", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Conectando com o Google...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("G", fontSize = 17.sp, fontWeight = FontWeight.Black, color = Color(0xFF4285F4))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Continuar com o Google", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .staggeredEntrance(emailProgress.value),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-                    Text(
-                        text = " ou com usuário e senha ",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 6.dp)
-                    )
-                    HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Form Fields
-                if (isSignUp) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = {
-                            name = it
-                            lastInteractionTime = System.currentTimeMillis()
-                            nodTrigger++
-                        },
-                        label = { Text("Seu Nome") },
-                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .staggeredEntrance(emailProgress.value)
-                            .onFocusChanged {
-                                isNameFocused = it.isFocused
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = {
-                            username = it
-                            lastInteractionTime = System.currentTimeMillis()
-                            nodTrigger++
-                        },
-                        label = { Text("Nome de Usuário (@usuario)") },
-                        placeholder = { Text("@exemplo") },
-                        leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .staggeredEntrance(emailProgress.value)
-                            .onFocusChanged {
-                                isUsernameFocused = it.isFocused
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                } else {
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = {
-                            username = it
-                            lastInteractionTime = System.currentTimeMillis()
-                            nodTrigger++
-                        },
-                        label = { Text("Usuário (@) ou E-mail") },
-                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .staggeredEntrance(emailProgress.value)
-                            .onFocusChanged {
-                                isUsernameFocused = it.isFocused
-                                lastInteractionTime = System.currentTimeMillis()
-                            }
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = {
-                        password = it
-                        lastInteractionTime = System.currentTimeMillis()
-                    },
-                    label = { Text("Senha") },
-                    leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            showPassword = !showPassword
-                            lastInteractionTime = System.currentTimeMillis()
-                        }) {
-                            Icon(if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = null)
-                        }
-                    },
-                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .staggeredEntrance(passwordProgress.value)
-                        .onFocusChanged {
-                            isPasswordFocused = it.isFocused
-                            lastInteractionTime = System.currentTimeMillis()
-                        }
-                )
-
                 if (errorMessage != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = errorMessage!!,
-                        color = RedAction,
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = {
-                        if (password.length < 6) {
-                            shakeTrigger++
-                            triggerTempHumor(MascotHumor.NAO, 1000L)
-                            errorMessage = "A senha deve ter pelo menos 6 caracteres"
-                            return@Button
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = RedAction.copy(alpha = 0.12f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = RedAction, modifier = Modifier.size(22.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = errorMessage!!,
+                                color = RedAction,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
                         }
-                        isLoading = true
-                        errorMessage = null
-                        coroutineScope.launch {
-                            val result = if (isSignUp) {
-                                if (name.isBlank() || username.isBlank()) {
-                                    isLoading = false
-                                    shakeTrigger++
-                                    triggerTempHumor(MascotHumor.NAO, 1000L)
-                                    errorMessage = "Preencha todos os campos"
-                                    return@launch
-                                }
-                                authRepository.createAccountWithEmailOrUsername(
-                                    name = name.trim(),
-                                    username = username.trim(),
-                                    pass = password
-                                )
-                            } else {
-                                if (username.isBlank()) {
-                                    isLoading = false
-                                    shakeTrigger++
-                                    triggerTempHumor(MascotHumor.NAO, 1000L)
-                                    errorMessage = "Informe seu usuário ou e-mail"
-                                    return@launch
-                                }
-                                authRepository.signInWithEmailOrUsername(username.trim(), password)
-                            }
-                            isLoading = false
-                            if (result.isSuccess) {
-                                jumpTrigger++
-                                triggerTempHumor(MascotHumor.FELIZ, 1500L)
-                                onAuthSuccess()
-                            } else {
-                                shakeTrigger++
-                                triggerTempHumor(MascotHumor.NAO, 1000L)
-                                errorMessage = result.exceptionOrNull()?.localizedMessage ?: "Erro na autenticação"
-                            }
-                        }
-                    },
-                    interactionSource = primaryInteractionSource,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .staggeredEntrance(loginBtnProgress.value),
-                    enabled = !isLoading
-                ) {
-                    if (isLoading) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text(if (isSignUp) "Criar Minha Conta" else "Entrar no Citra", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                // Feature Highlights Card
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .staggeredEntrance(emailProgress.value)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Sincronização na nuvem com Firebase Firestore", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Shield, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Login seguro em 1 toque sem criar senhas", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Backup de tarefas, hábitos, notas e finanças", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
                 // Start Without Account (Guest Mode) with Notice
-                TextButton(
+                OutlinedButton(
                     onClick = {
                         jumpTrigger++
                         triggerTempHumor(MascotHumor.FELIZ, 1400L)
                         showGuestWarningDialog = true
                     },
                     interactionSource = guestInteractionSource,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(48.dp)
                         .staggeredEntrance(guestProgress.value)
                 ) {
+                    Icon(Icons.Default.VpnKeyOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Começar sem conta (Modo Local)",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        text = "Começar sem conta (Modo Local Offline)",
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp
                     )
                 }
 

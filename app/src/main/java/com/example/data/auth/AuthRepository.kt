@@ -10,6 +10,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -278,9 +279,16 @@ class AuthRepository(private val context: Context) {
             if (serverClientId.isBlank()) {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (Client ID não configurado)."))
             }
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setServerClientId(serverClientId)
+                .setFilterByAuthorizedAccounts(false)
+                .setAutoSelectEnabled(false)
+                .build()
+
             val signInOption = GetSignInWithGoogleOption.Builder(serverClientId).build()
 
             val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
                 .addCredentialOption(signInOption)
                 .build()
 
@@ -345,120 +353,6 @@ class AuthRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Erro no login Google", e)
             Result.failure(e)
-        }
-    }
-
-    suspend fun signInWithEmailOrUsername(identifier: String, pass: String): Result<UserProfile> {
-        val trimmedIdentifier = identifier.trim()
-        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não pôde ser inicializado. Verifique a conexão com a internet."))
-        return try {
-            val email = if (trimmedIdentifier.contains("@") && trimmedIdentifier.contains(".")) {
-                trimmedIdentifier
-            } else {
-                "${trimmedIdentifier.removePrefix("@").lowercase()}@citra.app"
-            }
-            val authResult = currentAuth.signInWithEmailAndPassword(email, pass).await()
-            val user = authResult.user ?: throw IllegalStateException("Usuário não encontrado.")
-            _isGuestMode.value = false
-            prefs.edit().apply {
-                putBoolean("is_guest_mode", false)
-            }.apply()
-            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString(), user.email)
-            Result.success(_currentUser.value ?: UserProfile(
-                uid = user.uid,
-                displayName = user.displayName ?: "Usuário Citra",
-                username = user.uid.take(6),
-                email = user.email,
-                isPrivate = false,
-                isGuest = false
-            ))
-        } catch (e: Exception) {
-            val msg = e.localizedMessage ?: "Erro na autenticação"
-            if (msg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
-                msg.contains("not enabled", ignoreCase = true) ||
-                msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true)) {
-                Result.failure(IllegalStateException("Login com usuário/senha não habilitado no Firebase. Por favor, use 'Continuar com o Google'."))
-            } else if (msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
-                msg.contains("no user record", ignoreCase = true) ||
-                msg.contains("wrong password", ignoreCase = true)) {
-                Result.failure(IllegalStateException("Usuário ou senha incorretos."))
-            } else {
-                Result.failure(e)
-            }
-        }
-    }
-
-    suspend fun createAccountWithEmailOrUsername(
-        name: String,
-        username: String,
-        pass: String,
-        isPrivate: Boolean = false
-    ): Result<UserProfile> {
-        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não pôde ser inicializado. Verifique a conexão com a internet."))
-        return try {
-            val raw = username.trim()
-            val isEmail = raw.contains("@") && raw.contains(".")
-            val email = if (isEmail) raw else "${raw.removePrefix("@").lowercase()}@citra.app"
-            val cleanUsername = if (isEmail) raw.substringBefore("@") else raw.removePrefix("@")
-            val authResult = currentAuth.createUserWithEmailAndPassword(email, pass).await()
-            val user = authResult.user ?: throw IllegalStateException("Usuário não retornado pelo Firebase.")
-
-            try {
-                user.updateProfile(
-                    UserProfileChangeRequest.Builder()
-                        .setDisplayName(name)
-                        .build()
-                ).await()
-            } catch (_: Exception) {}
-
-            val profile = UserProfile(
-                uid = user.uid,
-                displayName = name,
-                username = cleanUsername,
-                photoUrl = null,
-                email = user.email,
-                isPrivate = isPrivate,
-                isGuest = false
-            )
-
-            val currentFirestore = firestore
-            if (currentFirestore != null) {
-                try {
-                    currentFirestore.collection("users").document(user.uid).set(
-                        mapOf(
-                            "displayName" to name,
-                            "username" to cleanUsername,
-                            "email" to (user.email ?: ""),
-                            "photoUrl" to null,
-                            "isPrivate" to isPrivate,
-                            "totalFocusMinutes" to 0,
-                            "completedTasksCount" to 0,
-                            "completedHabitsCount" to 0,
-                            "achievementsCount" to 0
-                        )
-                    ).await()
-                } catch (e: Exception) {
-                    android.util.Log.w("AuthRepository", "Failed saving user document to Firestore", e)
-                }
-            }
-
-            _isGuestMode.value = false
-            prefs.edit().apply {
-                putBoolean("is_guest_mode", false)
-            }.apply()
-            _currentUser.value = profile
-            Result.success(profile)
-        } catch (e: Exception) {
-            val msg = e.localizedMessage ?: "Erro ao criar conta"
-            if (msg.contains("CONFIGURATION_NOT_FOUND", ignoreCase = true) ||
-                msg.contains("not enabled", ignoreCase = true) ||
-                msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true)) {
-                Result.failure(IllegalStateException("Criação com usuário/senha não habilitada no Firebase. Por favor, use 'Continuar com o Google'."))
-            } else if (msg.contains("email address is already in use", ignoreCase = true)) {
-                Result.failure(IllegalStateException("Este usuário ou e-mail já está em uso."))
-            } else {
-                Result.failure(e)
-            }
         }
     }
 
