@@ -18,7 +18,8 @@ on:
           - release
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 jobs:
   build:
@@ -36,20 +37,28 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle'
 
-      # 3. Configurar Android SDK
+      # 3. Configurar Gradle oficial
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # 4. Configurar Android SDK e Build Tools
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
           accept-android-sdk-licenses: true
 
+      # 5. Aceitar todas as licenças do Android SDK
       - name: Aceitar todas as licenças do Android SDK
         run: |
-          yes | sdkmanager --licenses 2>/dev/null || true
+          if command -v sdkmanager >/dev/null 2>&1; then
+            yes | sdkmanager --licenses 2>/dev/null || true
+          elif [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
+          fi
 
-      # 4. Restaurar Debug Keystore para assinatura compatível com Firebase
+      # 6. Restaurar Debug Keystore para assinatura compatível com Firebase
       - name: Restaurar Debug Keystore
         run: |
           if [ -f "debug.keystore.base64" ]; then
@@ -68,11 +77,14 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      # 5. Garantir arquivo de ambiente (.env) e credenciais do Firebase
+      # 7. Garantir arquivo de ambiente (.env), local.properties e credenciais do Firebase
       - name: Preparar ambiente e credenciais
         run: |
           if [ ! -f ".env" ]; then
             cp .env.example .env 2>/dev/null || touch .env
+          fi
+          if [ -n "$ANDROID_HOME" ]; then
+            echo "sdk.dir=$ANDROID_HOME" > local.properties
           fi
           if [ ! -f "app/google-services.json" ]; then
             if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
@@ -81,11 +93,13 @@ jobs:
             fi
           fi
 
-      # 6. Permissão de execução no script do Gradle
-      - name: Dar permissão de execução ao gradlew
-        run: chmod +x ./gradlew
+      # 8. Normalizar finais de linha e permissão de execução no script do Gradle
+      - name: Preparar gradlew
+        run: |
+          sed -i 's/\r$//' ./gradlew 2>/dev/null || true
+          chmod +x ./gradlew
 
-      # 7. Compilar APK com Gradle
+      # 9. Compilar APK com Gradle
       - name: Compilar Citra APK
         run: |
           VARIANT="${{ github.event.inputs.build_variant || 'debug' }}"
@@ -96,12 +110,12 @@ jobs:
             export KEYSTORE_PATH="$(pwd)/release-key.jks"
             export STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}"
             export KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
-            ./gradlew --no-daemon assembleRelease --stacktrace
+            ./gradlew --no-daemon --no-configuration-cache assembleRelease --stacktrace
           else
-            ./gradlew --no-daemon assembleDebug --stacktrace
+            ./gradlew --no-daemon --no-configuration-cache assembleDebug --stacktrace
           fi
 
-      # 8. Coletar e organizar APKs gerados
+      # 10. Coletar e organizar APKs gerados
       - name: Organizar APKs gerados
         shell: bash
         run: |
@@ -126,7 +140,7 @@ jobs:
           echo "Conteudo da pasta build-artifacts:"
           ls -lh build-artifacts/
 
-      # 9. Disponibilizar APK nos Artifacts do GitHub para download imediato
+      # 11. Disponibilizar APK nos Artifacts do GitHub para download imediato
       - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
         with:
@@ -134,3 +148,13 @@ jobs:
           path: build-artifacts/*.apk
           retention-days: 30
           if-no-files-found: error
+
+      # 12. Se for uma tag (ex: v1.2.4), criar Release no GitHub com o APK anexado
+      - name: Publicar Release no GitHub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-artifacts/*.apk
+          draft: false
+          prerelease: false
+          generate_release_notes: true
