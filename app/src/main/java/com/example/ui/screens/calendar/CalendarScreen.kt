@@ -131,29 +131,38 @@ fun CalendarScreen(
         list
     }
 
+    var showNotesInCalendar by remember { mutableStateOf(true) }
+    var showHabitsInCalendar by remember { mutableStateOf(true) }
+    var showTasksInCalendar by remember { mutableStateOf(true) }
+
     // Filter tasks, habits, and notes for the selected date
-    val tasksForDay = remember(tasks, selectedDateStr) {
-        tasks.filter { task ->
+    val tasksForDay = remember(tasks, selectedDateStr, showTasksInCalendar) {
+        if (!showTasksInCalendar) emptyList()
+        else tasks.filter { task ->
             task.dueDateText.startsWith(selectedDateStr) ||
                 task.dueDateText.contains(selectedDateStr) ||
                 (task.dueDateTimestamp != null && dayFormat.format(Date(task.dueDateTimestamp)) == selectedDateStr)
         }
     }
 
-    val habitsForDay = remember(habits, selectedDateStr) {
-        val parts = selectedDateStr.split("-")
-        val cal = Calendar.getInstance().apply {
-            if (parts.size == 3) {
-                set(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt())
+    val habitsForDay = remember(habits, selectedDateStr, showHabitsInCalendar) {
+        if (!showHabitsInCalendar) emptyList()
+        else {
+            val parts = selectedDateStr.split("-")
+            val cal = Calendar.getInstance().apply {
+                if (parts.size == 3) {
+                    set(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt())
+                }
             }
-        }
-        habits.filter { habit ->
-            habit.isScheduledForDate(selectedDateStr, cal)
+            habits.filter { habit ->
+                habit.isScheduledForDate(selectedDateStr, cal)
+            }
         }
     }
 
-    val notesForDay = remember(notes, selectedDateStr) {
-        notes.filter { it.associatedDate == selectedDateStr }
+    val notesForDay = remember(notes, selectedDateStr, showNotesInCalendar) {
+        if (!showNotesInCalendar) emptyList()
+        else notes.filter { it.associatedDate == selectedDateStr }
     }
 
     // Build chronological "Fluxo do Dia" entries
@@ -209,6 +218,7 @@ fun CalendarScreen(
                 allNotes = notes,
                 tasks = tasks,
                 habits = habits,
+                viewModel = viewModel,
                 onClose = {
                     isCreatingNoteForCalendar = false
                     activeNoteForEditor = null
@@ -570,7 +580,7 @@ fun CalendarScreen(
                                                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                                                         verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        if (hasNotes) {
+                                                        if (hasNotes && showNotesInCalendar) {
                                                             Box(
                                                                 modifier = Modifier
                                                                     .size(5.dp)
@@ -580,7 +590,7 @@ fun CalendarScreen(
                                                                     )
                                                             )
                                                         }
-                                                        if (hasHabits) {
+                                                        if (hasHabits && showHabitsInCalendar) {
                                                             Box(
                                                                 modifier = Modifier
                                                                     .size(5.dp)
@@ -590,7 +600,7 @@ fun CalendarScreen(
                                                                     )
                                                             )
                                                         }
-                                                        if (hasTasks) {
+                                                        if (hasTasks && showTasksInCalendar) {
                                                             Box(
                                                                 modifier = Modifier
                                                                     .size(5.dp)
@@ -625,12 +635,27 @@ fun CalendarScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    LegendDotItem(color = MaterialTheme.colorScheme.primary, label = "Notas")
-                                    LegendDotItem(color = MaterialTheme.colorScheme.secondary, label = "Hábitos")
-                                    LegendDotItem(color = MaterialTheme.colorScheme.tertiary, label = "Tarefas")
+                                    LegendDotItem(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        label = "Notas",
+                                        enabled = showNotesInCalendar,
+                                        onClick = { showNotesInCalendar = !showNotesInCalendar }
+                                    )
+                                    LegendDotItem(
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        label = "Hábitos",
+                                        enabled = showHabitsInCalendar,
+                                        onClick = { showHabitsInCalendar = !showHabitsInCalendar }
+                                    )
+                                    LegendDotItem(
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        label = "Tarefas",
+                                        enabled = showTasksInCalendar,
+                                        onClick = { showTasksInCalendar = !showTasksInCalendar }
+                                    )
                                 }
 
                                 Text(
@@ -980,20 +1005,33 @@ fun CalendarScreen(
 }
 
 @Composable
-private fun LegendDotItem(color: Color, label: String) {
+private fun LegendDotItem(
+    color: Color,
+    label: String,
+    enabled: Boolean = true,
+    onClick: (() -> Unit)? = null
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        modifier = if (onClick != null) {
+            Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onClick() }
+                .padding(horizontal = 4.dp, vertical = 3.dp)
+        } else Modifier
     ) {
         Box(
             modifier = Modifier
                 .size(8.dp)
-                .background(color, CircleShape)
+                .background(if (enabled) color else color.copy(alpha = 0.25f), CircleShape)
         )
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontWeight = if (enabled) FontWeight.Bold else FontWeight.Normal,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            textDecoration = if (enabled) null else androidx.compose.ui.text.style.TextDecoration.LineThrough
         )
     }
 }

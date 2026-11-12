@@ -69,6 +69,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _inboxMessages = MutableStateFlow<List<InboxMessage>>(emptyList())
     val inboxMessages: StateFlow<List<InboxMessage>> = _inboxMessages.asStateFlow()
 
+    private val _sentMessages = MutableStateFlow<List<InboxMessage>>(emptyList())
+    val sentMessages: StateFlow<List<InboxMessage>> = _sentMessages.asStateFlow()
+
     private val _unreadInboxCount = MutableStateFlow(0)
     val unreadInboxCount: StateFlow<Int> = _unreadInboxCount.asStateFlow()
 
@@ -229,8 +232,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.clearCitraTimerBalls()
     }
 
-    private fun spawnTimerCitraBall(durationMinutes: Int) {
-        preferencesManager.addCitraTimerBall(durationMinutes)
+    private fun spawnTimerCitraBall(durationMinutes: Int, sessionKeyMillis: Long = 0L) {
+        preferencesManager.addCitraTimerBall(durationMinutes, sessionKeyMillis)
     }
 
     // Database Flows
@@ -416,6 +419,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             authRepository.currentUser.collect { user ->
                 if (user != null && !user.isGuest) {
                     refreshInbox()
+                } else {
+                    _inboxMessages.value = emptyList()
+                    _sentMessages.value = emptyList()
+                    _unreadInboxCount.value = 0
                 }
             }
         }
@@ -423,17 +430,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- Inbox & Direct Note Messaging Methods ---
-    fun searchRecipient(query: String) {
+    fun searchRecipient(query: String, preferUsernameLookup: Boolean = false) {
         recipientSearchJob?.cancel()
-        val clean = query.trim().removePrefix("@")
-        if (clean.isBlank()) {
+        val trimmed = query.trim()
+        if (trimmed.removePrefix("@").isBlank()) {
             _recipientLookupState.value = RecipientLookupState.Idle
             return
         }
         _recipientLookupState.value = RecipientLookupState.Loading
         recipientSearchJob = viewModelScope.launch {
             delay(350L) // debounce
-            val result = inboxRepository.searchRecipient(clean)
+            val result = inboxRepository.searchRecipient(trimmed, preferUsernameLookup)
             _recipientLookupState.value = result
         }
     }
@@ -448,6 +455,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val uid = if (user != null && !user.isGuest) user.uid else ""
         if (uid.isBlank()) {
             _inboxMessages.value = emptyList()
+            _sentMessages.value = emptyList()
             _unreadInboxCount.value = 0
             return
         }
@@ -459,10 +467,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isInboxRefreshing.value = false
             }
         }
+        viewModelScope.launch {
+            inboxRepository.fetchSentMessages(uid).collect { list ->
+                _sentMessages.value = list
+            }
+        }
     }
 
     fun markInboxMessageRead(message: InboxMessage) {
         val user = authRepository.currentUser.value ?: return
+        if (user.isGuest) return
         if (message.isRead) return
         _inboxMessages.update { list ->
             list.map { if (it.id == message.id) it.copy(isRead = true) else it }
@@ -474,7 +488,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadInboxNote(message: InboxMessage, onSuccess: () -> Unit = {}) {
-        val user = authRepository.currentUser.value ?: return
+        val user = authRepository.currentUser.value
+        if (user == null || user.isGuest) {
+            viewModelScope.launch {
+                _userMessage.emit("Entre com uma conta para baixar notas da caixa de entrada.")
+            }
+            return
+        }
         if (message.isOfficialDev || message.isBroadcast) {
             viewModelScope.launch {
                 _userMessage.emit("Comunicados oficiais da equipe são apenas para leitura.")
@@ -501,6 +521,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteInboxMessage(message: InboxMessage) {
         val user = authRepository.currentUser.value ?: return
+        if (user.isGuest) return
         _inboxMessages.update { list -> list.filter { it.id != message.id } }
         if (!message.isRead) {
             _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
@@ -511,8 +532,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteSelectedInboxMessages(selected: List<InboxMessage>) {
+        val user = authRepository.currentUser.value ?: return
+        if (user.isGuest || selected.isEmpty()) return
+        val idsToRemove = selected.map { it.id }.toSet()
+        _inboxMessages.update { list ->
+            val remaining = list.filter { it.id !in idsToRemove }
+            _unreadInboxCount.value = remaining.count { !it.isRead }
+            remaining
+        }
+        viewModelScope.launch {
+            inboxRepository.deleteMessages(user.uid, selected)
+            _userMessage.emit("${selected.size} mensagem(ns) removida(s).")
+        }
+    }
+
     fun clearInbox() {
         val user = authRepository.currentUser.value ?: return
+        if (user.isGuest) return
         val currentList = _inboxMessages.value
         _inboxMessages.value = emptyList()
         _unreadInboxCount.value = 0
@@ -522,8 +559,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteSentMessage(message: InboxMessage) {
+        val user = authRepository.currentUser.value ?: return
+        if (user.isGuest) return
+        _sentMessages.update { list -> list.filter { it.id != message.id } }
+        viewModelScope.launch {
+            inboxRepository.deleteSentMessage(user.uid, message.id)
+            _userMessage.emit("Envio removido do histórico.")
+        }
+    }
+
+    fun deleteSelectedSentMessages(selected: List<InboxMessage>) {
+        val user = authRepository.currentUser.value ?: return
+        if (user.isGuest || selected.isEmpty()) return
+        val ids = selected.map { it.id }.toSet()
+        _sentMessages.update { list -> list.filter { it.id !in ids } }
+        viewModelScope.launch {
+            inboxRepository.deleteSentMessages(user.uid, ids.toList())
+            _userMessage.emit("${selected.size} envio(s) removido(s).")
+        }
+    }
+
+    fun clearSentMessages() {
+        val user = authRepository.currentUser.value ?: return
+        if (user.isGuest) return
+        val ids = _sentMessages.value.map { it.id }
+        _sentMessages.value = emptyList()
+        viewModelScope.launch {
+            inboxRepository.deleteSentMessages(user.uid, ids)
+            _userMessage.emit("Mensagens enviadas esvaziadas.")
+        }
+    }
+
     fun sendNoteMessage(
         recipientUid: String?,
+        recipientInfo: RecipientInfo? = null,
         isBroadcast: Boolean,
         title: String,
         content: String,
@@ -548,6 +618,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             senderUsername = user.username,
             senderPhotoUrl = user.photoUrl,
             senderEmail = email,
+            recipientUid = recipientUid.orEmpty(),
+            recipientDisplayName = recipientInfo?.displayName.orEmpty(),
+            recipientUsername = recipientInfo?.username.orEmpty(),
+            recipientPhotoUrl = recipientInfo?.photoUrl,
             isOfficialDev = isDev,
             title = title.ifBlank { "Sem título" },
             contentMarkdown = content,
@@ -566,6 +640,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val res = inboxRepository.sendBroadcastMessage(message)
                 if (res.isSuccess) {
+                    refreshInbox()
                     _userMessage.emit("Comunicado global enviado com sucesso!")
                     onSuccess()
                 } else {
@@ -576,13 +651,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     onError("Destinatário não especificado")
                     return@launch
                 }
-                val res = inboxRepository.sendDirectMessage(recipientUid, message)
+                val res = inboxRepository.sendDirectMessage(recipientUid, message, recipientInfo)
                 if (res.isSuccess) {
+                    refreshInbox()
                     _userMessage.emit("Nota enviada com sucesso!")
                     onSuccess()
                 } else {
                     onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar nota")
                 }
+            }
+        }
+    }
+
+    fun sendBugReport(
+        title: String,
+        description: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val user = authRepository.currentUser.value
+        if (user == null || user.isGuest) {
+            onError("Você precisa entrar com uma conta para relatar bugs.")
+            return
+        }
+        val authUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        viewModelScope.launch {
+            val res = inboxRepository.sendBugReport(
+                reporterUid = user.uid,
+                reporterDisplayName = user.displayName,
+                reporterUsername = user.username,
+                reporterPhotoUrl = user.photoUrl,
+                reporterEmail = authUser?.email ?: user.email,
+                title = title,
+                description = description
+            )
+            if (res.isSuccess) {
+                refreshInbox()
+                _userMessage.emit("Relato de bug enviado aos desenvolvedores! Obrigado.")
+                onSuccess()
+            } else {
+                onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar relato de bug")
             }
         }
     }
@@ -685,9 +793,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             isPaused = false,
                             selectedCategory = snapshot.selectedCategory
                         )
-                    }
-                    if (phase == PomodoroPhase.FOCUS) {
-                        spawnTimerCitraBall(snapshot.focusMinutes)
                     }
                     onPhaseCompleted()
                 }
@@ -1049,6 +1154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             com.example.service.FocusDistractionService.stop(getApplication())
         } catch (_: Exception) {}
+        val completedSessionKey = timerTargetEndTimeMillis
         timerTargetEndTimeMillis = 0L
         stopwatchStartTimeMillis = 0L
         val state = _pomodoroState.value
@@ -1065,7 +1171,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     linkedTaskTitle = state.linkedTask?.title
                 )
                 repository.recordFocusSession(session)
-                spawnTimerCitraBall(state.focusMinutes)
+                spawnTimerCitraBall(state.focusMinutes, completedSessionKey)
 
                 val awardMessage = when {
                     state.focusMinutes >= 120 -> "🌟 Incrível! Você ganhou o Citra Dourado (120 min)!"
@@ -2014,27 +2120,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     listOf(
                         FinanceWallet(
                             id = "def_wallet_cash",
-                            name = "Carteira Principal",
+                            name = "Principal",
                             type = FinanceWalletType.CASH.id,
                             currencyCode = preferencesManager.financeDefaultCurrency.value,
                             colorHex = 0xFFFF8B1F,
                             isDefault = true
-                        ),
-                        FinanceWallet(
-                            id = "def_wallet_bank",
-                            name = "Conta Bancária",
-                            type = FinanceWalletType.BANK.id,
-                            currencyCode = preferencesManager.financeDefaultCurrency.value,
-                            colorHex = 0xFF2196F3,
-                            isDefault = false
-                        ),
-                        FinanceWallet(
-                            id = "def_wallet_mobile",
-                            name = "Carteira Móvel",
-                            type = FinanceWalletType.MOBILE.id,
-                            currencyCode = preferencesManager.financeDefaultCurrency.value,
-                            colorHex = 0xFF3FA34D,
-                            isDefault = false
                         )
                     )
                 )

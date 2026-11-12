@@ -615,13 +615,14 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 // Notification Bell Button with Unread Badge
+                                val isInboxAccountLoggedIn = currentUser != null && currentUser?.isGuest == false
                                 IconButton(
                                     onClick = { showInboxDialog = true },
                                     modifier = Modifier.testTag("top_inbox_bell_button")
                                 ) {
                                     BadgedBox(
                                         badge = {
-                                            if (unreadInboxCount > 0) {
+                                            if (isInboxAccountLoggedIn && unreadInboxCount > 0) {
                                                 Badge(
                                                     containerColor = MaterialTheme.colorScheme.primary,
                                                     contentColor = androidx.compose.ui.graphics.Color.White
@@ -638,7 +639,11 @@ class MainActivity : ComponentActivity() {
                                         Icon(
                                             imageVector = Icons.Default.Notifications,
                                             contentDescription = "Caixa de Entrada",
-                                            tint = if (unreadInboxCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            tint = when {
+                                                !isInboxAccountLoggedIn -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                                                unreadInboxCount > 0 -> MaterialTheme.colorScheme.primary
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
                                         )
                                     }
                                 }
@@ -646,12 +651,8 @@ class MainActivity : ComponentActivity() {
                                 // 3-Dots Menu Button
                                 Box {
                                     IconButton(
-                                        onClick = {
-                                            showMenu = true
-                                            viewModel.startTutorial(CitraTutorialArea.MENU)
-                                        },
+                                        onClick = { showMenu = true },
                                         modifier = Modifier
-                                            .tutorialTarget("top_menu_button")
                                             .testTag("top_menu_button")
                                     ) {
                                         Icon(
@@ -662,13 +663,8 @@ class MainActivity : ComponentActivity() {
                                     }
 
                                     DropdownMenu(
-                                        expanded = showMenu || (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU),
-                                        onDismissRequest = {
-                                            showMenu = false
-                                            if (viewModel.activeTutorial.value?.area == CitraTutorialArea.MENU) {
-                                                viewModel.skipCurrentTutorialArea()
-                                            }
-                                        }
+                                        expanded = showMenu,
+                                        onDismissRequest = { showMenu = false }
                                     ) {
                                         // Configurações
                                         DropdownMenuItem(
@@ -887,7 +883,7 @@ class MainActivity : ComponentActivity() {
                     // HorizontalPager: instant tab navigation on button clicks while preserving smooth user manual swiping
                     HorizontalPager(
                         state = pagerState,
-                        userScrollEnabled = !isNoteEditorOpen,
+                        userScrollEnabled = !isNoteEditorOpen && !(pomodoroState.isRunning && screens.getOrNull(pagerState.currentPage) == Screen.Timer),
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
                         when (screens[page]) {
@@ -1007,6 +1003,10 @@ class MainActivity : ComponentActivity() {
                 if (showInboxDialog) {
                     com.example.ui.screens.inbox.InboxDialog(
                         viewModel = viewModel,
+                        onOpenAuthGate = {
+                            showInboxDialog = false
+                            showAuthDialog = true
+                        },
                         onDismiss = { showInboxDialog = false }
                     )
                 }

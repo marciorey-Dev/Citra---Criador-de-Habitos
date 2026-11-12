@@ -68,7 +68,10 @@ android {
       isIncludeAndroidResources = true
       all {
         it.systemProperty("robolectric.usePreinstrumentedJars", "true")
-        it.systemProperty("robolectric.dependency.repo.url", "file:///home/appuser/.m2/repository")
+        val localM2Repo = file("/home/appuser/.m2/repository")
+        if (localM2Repo.exists()) {
+          it.systemProperty("robolectric.dependency.repo.url", localM2Repo.toURI().toString())
+        }
       }
     }
   }

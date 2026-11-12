@@ -171,40 +171,6 @@ fun FinancesScreen(
         }
     }
 
-    // 5-day strip centered around anchorMillis (-2..+2 days)
-    val fiveDayStrip = remember(anchorMillis, realEntries, selectedType, activeCurrency, exchangeRates) {
-        val locale = Locale("pt", "AO")
-        val dayNameFmt = SimpleDateFormat("EEE", locale)
-        val dayNumFmt = SimpleDateFormat("dd", locale)
-        (-2..2).map { offset ->
-            val cal = Calendar.getInstance().apply {
-                timeInMillis = anchorMillis
-                add(Calendar.DAY_OF_YEAR, offset)
-                set(Calendar.HOUR_OF_DAY, 0)
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-            val start = cal.timeInMillis
-            cal.set(Calendar.HOUR_OF_DAY, 23)
-            cal.set(Calendar.MINUTE, 59)
-            cal.set(Calendar.SECOND, 59)
-            cal.set(Calendar.MILLISECOND, 999)
-            val end = cal.timeInMillis
-            val dayTotal = realEntries
-                .filter { it.type == selectedType.id && it.dateMillis in start..end }
-                .sumOf { convertFinanceMinorUnits(it.totalAmountMinor, it.currencyCode, activeCurrency.code, exchangeRates) }
-            val rawDow = dayNameFmt.format(Date(start)).replace(".", "")
-                .replaceFirstChar { it.titlecase(locale) }
-            FinanceDayStripItem(
-                dayMillis = start,
-                label = "$rawDow ${dayNumFmt.format(Date(start))}",
-                totalMinor = dayTotal,
-                isSelected = offset == 0
-            )
-        }
-    }
-
     val incomeCategoriesWithTotals = remember(allCategories, periodEntries, activeCurrency, exchangeRates) {
         allCategories
             .filter { it.type == FinanceEntryType.INCOME.id && !it.isArchived }
@@ -687,68 +653,6 @@ fun FinancesScreen(
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 5-Day Strip
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        fiveDayStrip.forEach { dayItem ->
-                            val cellBg = when {
-                                dayItem.isSelected && isExpenseMode -> MaterialTheme.colorScheme.primary
-                                dayItem.isSelected && !isExpenseMode -> GreenAccent.copy(alpha = 0.18f)
-                                else -> MaterialTheme.colorScheme.surfaceContainerLow
-                            }
-                            val cellBorder = when {
-                                dayItem.isSelected && isExpenseMode -> null
-                                dayItem.isSelected && !isExpenseMode -> androidx.compose.foundation.BorderStroke(1.5.dp, GreenAccent)
-                                else -> androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                            }
-                            val topTextColor = when {
-                                dayItem.isSelected && isExpenseMode -> Color.White.copy(alpha = 0.9f)
-                                dayItem.isSelected && !isExpenseMode -> GreenAccent
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                            val valTextColor = when {
-                                dayItem.isSelected && isExpenseMode -> Color.White
-                                dayItem.isSelected && !isExpenseMode -> GreenAccent
-                                dayItem.totalMinor > 0L -> MaterialTheme.colorScheme.onSurface
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = cellBg,
-                                border = cellBorder,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable { anchorMillis = dayItem.dayMillis }
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = dayItem.label,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = topTextColor,
-                                        maxLines = 1
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = formatFinanceAmount(dayItem.totalMinor, activeCurrency, hideValues),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = valTextColor,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )

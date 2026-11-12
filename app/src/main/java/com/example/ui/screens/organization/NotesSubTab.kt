@@ -132,6 +132,8 @@ fun NotesSubTab(
     viewModel: MainViewModel
 ) {
     val context = LocalContext.current
+    val currentUser by viewModel.authRepository.currentUser.collectAsState()
+    val isUserLoggedIn = currentUser != null && currentUser?.isGuest == false
     val notes by viewModel.notes.collectAsState()
     val trashNotes by viewModel.trashNotes.collectAsState()
     val categories by viewModel.categories.collectAsState()
@@ -283,9 +285,7 @@ fun NotesSubTab(
                 onInsertFinanceBlock = {
                     showInsertFinanceBlockDialog = true
                 },
-                onShareViaCitra = { t, c, cat ->
-                    noteToShareViaCitra = Note(title = t, content = c, category = cat)
-                },
+                viewModel = viewModel,
                 onClose = {
                     isCreatingNew = false
                     activeNoteToEdit = null
@@ -996,8 +996,17 @@ fun NotesSubTab(
                     backgroundBrightness = note.backgroundBrightness
                 )
             },
+            canShareViaCitra = isUserLoggedIn,
             onShareViaCitra = {
-                noteToShareViaCitra = it
+                if (isUserLoggedIn) {
+                    noteToShareViaCitra = it
+                } else {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Entre com uma conta para compartilhar notas via Citra.",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         )
     }
@@ -1923,6 +1932,7 @@ fun NoteSubmenuDialog(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
+    canShareViaCitra: Boolean = true,
     onShareViaCitra: (Note) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -1993,19 +2003,20 @@ fun NoteSubmenuDialog(
                         }
                         .padding(vertical = 8.dp, horizontal = 4.dp)
                 ) {
+                    val shareTint = if (canShareViaCitra) Color(0xFF2563EB) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Public,
                             contentDescription = null,
-                            tint = Color(0xFF2563EB),
+                            tint = shareTint,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Compartilhar via Citra",
+                            text = if (canShareViaCitra) "Compartilhar via Citra" else "Compartilhar via Citra (Requer conta)",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF2563EB)
+                            color = shareTint
                         )
                     }
                 }

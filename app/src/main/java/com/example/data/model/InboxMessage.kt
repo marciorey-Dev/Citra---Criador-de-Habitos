@@ -9,6 +9,10 @@ data class InboxMessage(
     val senderUsername: String = "",
     val senderPhotoUrl: String? = null,
     val senderEmail: String? = null,
+    val recipientUid: String = "",
+    val recipientDisplayName: String = "",
+    val recipientUsername: String = "",
+    val recipientPhotoUrl: String? = null,
     val isOfficialDev: Boolean = false,
     val title: String = "",
     val contentMarkdown: String = "",
@@ -16,7 +20,8 @@ data class InboxMessage(
     val sentAtMillis: Long = System.currentTimeMillis(),
     val isRead: Boolean = false,
     val isDownloaded: Boolean = false,
-    val isBroadcast: Boolean = false
+    val isBroadcast: Boolean = false,
+    val isBugReport: Boolean = false
 ) {
     fun toFirestoreMap(): Map<String, Any?> {
         return mapOf(
@@ -26,6 +31,10 @@ data class InboxMessage(
             "senderUsername" to senderUsername,
             "senderPhotoUrl" to senderPhotoUrl,
             "senderEmail" to senderEmail,
+            "recipientUid" to recipientUid,
+            "recipientDisplayName" to recipientDisplayName,
+            "recipientUsername" to recipientUsername,
+            "recipientPhotoUrl" to recipientPhotoUrl,
             "isOfficialDev" to isOfficialDev,
             "title" to title,
             "contentMarkdown" to contentMarkdown,
@@ -33,7 +42,8 @@ data class InboxMessage(
             "sentAtMillis" to sentAtMillis,
             "isRead" to isRead,
             "isDownloaded" to isDownloaded,
-            "isBroadcast" to isBroadcast
+            "isBroadcast" to isBroadcast,
+            "isBugReport" to isBugReport
         )
     }
 
@@ -46,6 +56,10 @@ data class InboxMessage(
                 senderUsername = (map["senderUsername"] as? String).orEmpty(),
                 senderPhotoUrl = map["senderPhotoUrl"] as? String,
                 senderEmail = map["senderEmail"] as? String,
+                recipientUid = (map["recipientUid"] as? String).orEmpty(),
+                recipientDisplayName = (map["recipientDisplayName"] as? String).orEmpty(),
+                recipientUsername = (map["recipientUsername"] as? String).orEmpty(),
+                recipientPhotoUrl = map["recipientPhotoUrl"] as? String,
                 isOfficialDev = (map["isOfficialDev"] as? Boolean) ?: false,
                 title = (map["title"] as? String) ?: "Nota sem título",
                 contentMarkdown = (map["contentMarkdown"] as? String).orEmpty(),
@@ -53,7 +67,8 @@ data class InboxMessage(
                 sentAtMillis = (map["sentAtMillis"] as? Number)?.toLong() ?: System.currentTimeMillis(),
                 isRead = (map["isRead"] as? Boolean) ?: false,
                 isDownloaded = (map["isDownloaded"] as? Boolean) ?: false,
-                isBroadcast = (map["isBroadcast"] as? Boolean) ?: false
+                isBroadcast = (map["isBroadcast"] as? Boolean) ?: false,
+                isBugReport = (map["isBugReport"] as? Boolean) ?: false
             )
         }
     }
@@ -63,7 +78,8 @@ data class RecipientInfo(
     val uid: String,
     val displayName: String,
     val username: String,
-    val photoUrl: String? = null
+    val photoUrl: String? = null,
+    val email: String? = null
 )
 
 sealed class RecipientLookupState {

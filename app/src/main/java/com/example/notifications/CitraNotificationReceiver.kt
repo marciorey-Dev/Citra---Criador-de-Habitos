@@ -68,7 +68,7 @@ class CitraNotificationReceiver : BroadcastReceiver() {
                                     timestamp = System.currentTimeMillis()
                                 )
                                 db.focusSessionDao().insertSession(session)
-                                prefs.addCitraTimerBall(snapshot.focusMinutes)
+                                prefs.addCitraTimerBall(snapshot.focusMinutes, snapshot.targetEndTimeMillis)
 
                                 val breakSec = snapshot.breakMinutes * 60
                                 prefs.saveTimerSnapshot(

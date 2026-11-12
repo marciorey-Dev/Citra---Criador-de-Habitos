@@ -40,12 +40,11 @@
 
 ## 🛠️ Tech Stack & Architecture
 
-* **Framework:** React Native (TypeScript)
-* **Target Platform:** Android (Native execution)
-* **Backend & Cloud:** Firebase (Authentication, Firestore, Storage)
-* **Design System:** Material-inspired clean UI (Themeable: Light/Dark modes, custom accent palettes)
-* **Code Highlighting:** Prism.js
-* **Development Methodology:** AI-assisted development via **Google AI Studio** (*Vibe Code* process)
+* **Language & UI:** Kotlin + Jetpack Compose (Material Design 3)
+* **Target Platform:** Android (Native execution, `minSdk 24`, `targetSdk 36`, `compileSdk 36.1`)
+* **Backend & Cloud:** Firebase (Authentication, Firestore, App Check, Google Credential Manager)
+* **Local Persistence:** Room Database + WorkManager + App Widgets
+* **Development Methodology:** AI-assisted development via **Google AI Studio**
 
 ---
 
@@ -53,18 +52,18 @@
 
 * **Local Storage First:** Offline-first architecture ensures full app functionality without an active internet connection.
 * **JSON Backups:** Export and import full app state through standard `.json` data files.
-* **Cloud Sync:** Firebase Firestore handles user preferences, notes, habits, tasks, and historical analytics when logged in.
+* **Cloud Sync:** Firebase Firestore handles user preferences, notes, habits, tasks, inbox messages, and historical analytics when logged in.
 
-## 🚀 Como Compilar o APK de Testes pelo GitHub Actions
+## 🚀 Como Compilar o APK pelo GitHub Actions
 
-O repositório conta com automação de build configurada em `.github/workflows/build-apk.yml`.
+O repositório conta com automação de build configurada em `.github/workflows/build-apk.yml` (veja mais detalhes em [`GITHUB_ACTIONS.md`](GITHUB_ACTIONS.md)).
 
 ### Passo a passo para gerar o APK de Testes:
-1. **Compilação Automática:** Todo `git push` ou `pull request` dispara automaticamente a compilação do APK de testes.
+1. **Compilação Automática:** Todo `git push` ou `pull request` dispara automaticamente a compilação do APK de testes com a `debug.keystore` compatível com Firebase/Google Sign-In.
 2. **Disparo Manual (1 clique):**
    - Acesse o seu repositório no GitHub e clique na aba **Actions**.
    - No menu lateral esquerdo, selecione **Compilar APK Android (Citra)**.
-   - Clique em **Run workflow**, selecione o branch (geralmente `main`) e clique no botão verde **Run workflow**.
+   - Clique em **Run workflow**, selecione a variante (`debug` ou `release`) e clique no botão verde **Run workflow**.
 3. **Download do APK:**
    - Aguarde a conclusão do build (ícone verde de check ✔️).
    - Clique no workflow concluído.

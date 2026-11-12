@@ -208,6 +208,40 @@ fun ProfileScreen(
                                         )
                                     }
                                 }
+                                val displayHandle = "@${(user?.username ?: "viajante").removePrefix("@")}"
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra Usuario", displayHandle))
+                                            Toast.makeText(context, "$displayHandle copiado! Use para receber notas.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .testTag("profile_username_badge")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = displayHandle,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copiar @usuário",
+                                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                }
                             }
 
                             Spacer(modifier = Modifier.width(12.dp))
@@ -947,26 +981,43 @@ fun ProfileScreen(
         }
     }
 
-    // Edit Name Dialog
+    // Edit Name & Username Dialog
     if (showEditNameDialog) {
         var newName by remember { mutableStateOf(user?.displayName ?: "") }
+        var newUsername by remember { mutableStateOf((user?.username ?: "").removePrefix("@")) }
         AlertDialog(
             onDismissRequest = { showEditNameDialog = false },
-            title = { Text("Alterar Nome do Perfil", fontWeight = FontWeight.Bold) },
+            title = { Text("Editar Perfil", fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it },
-                    label = { Text("Nome de Exibição") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Nome de Exibição") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newUsername,
+                        onValueChange = { input ->
+                            newUsername = input.removePrefix("@").lowercase().filter { it.isLetterOrDigit() || it == '.' || it == '_' }
+                        },
+                        label = { Text("Usuário (@usuario)") },
+                        prefix = { Text("@") },
+                        supportingText = { Text("Usado como método secundário para receber notas.", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (newName.isNotBlank()) {
-                            authRepository.updateProfile(displayName = newName.trim())
+                            authRepository.updateProfile(
+                                displayName = newName.trim(),
+                                username = newUsername.trim().takeIf { it.isNotBlank() }
+                            )
                             showEditNameDialog = false
                         }
                     }

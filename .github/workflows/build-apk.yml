@@ -16,14 +16,22 @@ on:
         options:
           - debug
           - release
+      run_tests:
+        description: 'Executar testes unitários antes de gerar o APK'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
   build:
-    name: Compilar APK de Teste Android
+    name: Compilar APK Android (Citra)
     runs-on: ubuntu-latest
 
     steps:
@@ -38,34 +46,36 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # 3. Configurar Gradle oficial
-      - name: Configurar Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      # 4. Configurar Android SDK e Build Tools
+      # 3. Configurar Android SDK, API 36.1 (compileSdk) e Build Tools
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-          accept-android-sdk-licenses: true
+          packages: 'platform-tools platforms;android-36.1 platforms;android-36 build-tools;36.0.0'
+          accept-android-sdk-licenses: 'yes'
 
-      # 5. Aceitar todas as licenças do Android SDK
-      - name: Aceitar todas as licenças do Android SDK
+      # 4. Garantir pacotes e licenças do Android SDK (incluindo android-36.1)
+      - name: Garantir pacotes e licenças do Android SDK
         run: |
-          if command -v sdkmanager >/dev/null 2>&1; then
-            yes | sdkmanager --licenses 2>/dev/null || true
-          elif [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses 2>/dev/null || true
+          SDKMANAGER="$(command -v sdkmanager || echo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager")"
+          if [ -x "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" --install "platform-tools" "platforms;android-36.1" "platforms;android-36" "build-tools;36.0.0"
+          else
+            echo "::warning::sdkmanager não encontrado; usando pacotes pré-configurados no runner."
           fi
 
-      # 6. Restaurar Debug Keystore para assinatura compatível com Firebase
+      # 5. Configurar cache oficial do Gradle
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # 6. Restaurar Debug Keystore para assinatura compatível com Firebase / Google Sign-In
       - name: Restaurar Debug Keystore
         run: |
           if [ -f "debug.keystore.base64" ]; then
-            echo "Restaurando debug.keystore a partir do arquivo base64..."
-            base64 -d debug.keystore.base64 > debug.keystore 2>/dev/null || base64 --decode debug.keystore.base64 > debug.keystore
+            echo "Restaurando debug.keystore a partir de debug.keystore.base64..."
+            tr -d '\r\n ' < debug.keystore.base64 | base64 -d > debug.keystore
           elif [ ! -f "debug.keystore" ]; then
-            echo "Criando debug.keystore padrao..."
+            echo "Criando debug.keystore padrão..."
             keytool -genkeypair -v \
               -keystore debug.keystore \
               -storepass android \
@@ -76,71 +86,121 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey
 
-      # 7. Garantir arquivo de ambiente (.env), local.properties e credenciais do Firebase
+      # 7. Garantir .env, local.properties e google-services.json
       - name: Preparar ambiente e credenciais
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           if [ ! -f ".env" ]; then
-            cp .env.example .env 2>/dev/null || touch .env
+            if [ -f ".env.example" ]; then
+              cp .env.example .env
+            else
+              touch .env
+            fi
           fi
           if [ -n "$ANDROID_HOME" ]; then
-            echo "sdk.dir=$ANDROID_HOME" > local.properties
+            printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+          elif [ -n "$ANDROID_SDK_ROOT" ]; then
+            printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
           fi
           if [ ! -f "app/google-services.json" ]; then
-            if [ -n "${{ secrets.GOOGLE_SERVICES_JSON }}" ]; then
+            if [ -n "$GOOGLE_SERVICES_JSON" ]; then
               echo "Restaurando app/google-services.json a partir do segredo..."
-              echo "${{ secrets.GOOGLE_SERVICES_JSON }}" > app/google-services.json
+              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            else
+              echo "::warning::app/google-services.json ausente e secret GOOGLE_SERVICES_JSON não configurado."
             fi
           fi
 
       # 8. Normalizar finais de linha e permissão de execução no script do Gradle
-      - name: Preparar gradlew
+      - name: Preparar Gradle Wrapper
         run: |
-          sed -i 's/\r$//' ./gradlew 2>/dev/null || true
+          sed -i 's/\r$//' ./gradlew
           chmod +x ./gradlew
 
-      # 9. Compilar APK com Gradle
-      - name: Compilar Citra APK
+      # 9. Executar testes unitários (quando habilitado no disparo manual)
+      - name: Executar testes unitários
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_tests == true }}
         run: |
-          VARIANT="${{ github.event.inputs.build_variant || 'debug' }}"
-          echo "Compilando variante: $VARIANT"
-          if [ "$VARIANT" = "release" ] && [ -n "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" ]; then
-            echo "Decodificando chave de release..."
-            echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release-key.jks 2>/dev/null || echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > release-key.jks
+          ./gradlew --no-daemon --no-configuration-cache --max-workers=2 \
+            "-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" \
+            testDebugUnitTest --stacktrace
+
+      # 10. Compilar APK com Gradle
+      - name: Compilar Citra APK
+        id: build_apk
+        env:
+          BUILD_VARIANT: ${{ github.event.inputs.build_variant || 'debug' }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          GRADLE_OPTS_CI=("-Dorg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8")
+          COMMON_FLAGS=(--no-daemon --no-configuration-cache --max-workers=2 --stacktrace)
+
+          if [ "$BUILD_VARIANT" = "release" ] && [ -n "$RELEASE_KEYSTORE_BASE64" ] && [ -n "$RELEASE_STORE_PASSWORD" ] && [ -n "$RELEASE_KEY_PASSWORD" ]; then
+            echo "Decodificando keystore de release (alias esperado: upload)..."
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > release-key.jks
             export KEYSTORE_PATH="$(pwd)/release-key.jks"
-            export STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}"
-            export KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
-            ./gradlew --no-daemon --no-configuration-cache assembleRelease --stacktrace
+            export STORE_PASSWORD="$RELEASE_STORE_PASSWORD"
+            export KEY_PASSWORD="$RELEASE_KEY_PASSWORD"
+            ./gradlew "${COMMON_FLAGS[@]}" "${GRADLE_OPTS_CI[@]}" assembleRelease
+            echo "actual_variant=release" >> "$GITHUB_OUTPUT"
           else
-            ./gradlew --no-daemon --no-configuration-cache assembleDebug --stacktrace
+            if [ "$BUILD_VARIANT" = "release" ]; then
+              echo "::warning::Secrets RELEASE_KEYSTORE_BASE64, RELEASE_STORE_PASSWORD ou RELEASE_KEY_PASSWORD ausentes. Gerando Debug APK como fallback."
+            fi
+            ./gradlew "${COMMON_FLAGS[@]}" "${GRADLE_OPTS_CI[@]}" assembleDebug
+            echo "actual_variant=debug" >> "$GITHUB_OUTPUT"
           fi
 
-      # 10. Coletar e organizar APKs gerados
+      # 11. Limpar keystore temporária de release
+      - name: Limpar arquivos temporários de assinatura
+        if: always()
+        run: rm -f release-key.jks
+
+      # 12. Coletar, organizar APKs gerados e escrever resumo
       - name: Organizar APKs gerados
         shell: bash
         run: |
           mkdir -p build-artifacts
           APK_DIR="app/build/outputs/apk"
           if [ ! -d "$APK_DIR" ]; then
-            echo "Erro: pasta $APK_DIR nao encontrada!"
+            echo "Erro: pasta $APK_DIR não encontrada!"
             exit 1
           fi
           count=0
           while IFS= read -r -d '' apk; do
             filename=$(basename "$apk")
             variant=$(basename "$(dirname "$apk")")
-            echo "Copiando APK: $apk"
-            cp "$apk" "build-artifacts/Citra-${variant}-${filename}"
+            target="build-artifacts/Citra-${variant}-${filename}"
+            echo "Copiando APK: $apk -> $target"
+            cp "$apk" "$target"
             count=$((count + 1))
           done < <(find "$APK_DIR" -type f -name "*.apk" -print0)
           if [ "$count" -eq 0 ]; then
             echo "Nenhum APK foi gerado!"
             exit 1
           fi
-          echo "Conteudo da pasta build-artifacts:"
           ls -lh build-artifacts/
 
-      # 11. Disponibilizar APK nos Artifacts do GitHub para download imediato
+          {
+            echo "## 📦 Compilação do Citra Concluída"
+            echo "- **Variante gerada:** \`${{ steps.build_apk.outputs.actual_variant }}\`"
+            echo "- **Branch / Ref:** \`${{ github.ref_name }}\`"
+            echo ""
+            echo "### Arquivos gerados"
+            for f in build-artifacts/*.apk; do
+              size=$(du -h "$f" | cut -f1)
+              echo "- \`$(basename "$f")\` ($size)"
+            done
+            echo ""
+            echo "Baixe o pacote **Citra-Test-APK** na seção **Artifacts** abaixo."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 13. Disponibilizar APK nos Artifacts do GitHub
       - name: Disponibilizar APK para Download
         uses: actions/upload-artifact@v4
         with:
@@ -149,7 +209,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # 12. Se for uma tag (ex: v1.2.4), criar Release no GitHub com o APK anexado
+      # 14. Publicar Release no GitHub quando houver tag v*
       - name: Publicar Release no GitHub
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

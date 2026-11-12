@@ -144,7 +144,8 @@ fun FullScreenNoteEditor(
     onCreateLocalCopy: ((NoteVersion) -> Unit)? = null,
     financesEnabled: Boolean = false,
     onInsertFinanceBlock: (() -> Unit)? = null,
-    onShareViaCitra: ((title: String, content: String, category: String) -> Unit)? = null
+    onShareViaCitra: ((title: String, content: String, category: String) -> Unit)? = null,
+    viewModel: com.example.ui.MainViewModel? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -154,13 +155,15 @@ fun FullScreenNoteEditor(
     // Floating toolbar is persistent: it stays visible and accompanies the user on scroll with drag mobility
     val isToolbarVisible = true
     val preferencesManager = remember { PreferencesManager(context) }
-    val initialFloatingOffset = remember { preferencesManager.getToolbarFloatingOffset() }
-    var toolbarOffsetX by rememberSaveable { mutableFloatStateOf(initialFloatingOffset.first) }
-    var toolbarOffsetY by rememberSaveable { mutableFloatStateOf(initialFloatingOffset.second) }
-    var isToolbarPinnedToBottom by rememberSaveable { mutableStateOf(initialFloatingOffset.first == 0f && initialFloatingOffset.second == 0f) }
+    // By default, the floating menu is pinned (fixado) and rests flush right above the keyboard
+    var isToolbarPinnedToBottom by rememberSaveable { mutableStateOf(true) }
+    var toolbarOffsetX by rememberSaveable { mutableFloatStateOf(0f) }
+    var toolbarOffsetY by rememberSaveable { mutableFloatStateOf(0f) }
     var isToolbarMinimized by remember { mutableStateOf(false) }
-    var showReorderToolbarDialog by remember { mutableStateOf(false) }
     var toolbarItemsOrder by remember { mutableStateOf(preferencesManager.getToolbarOrder()) }
+    var showShareViaCitraDialog by remember { mutableStateOf(false) }
+    val currentUser by (viewModel?.authRepository?.currentUser ?: remember { kotlinx.coroutines.flow.MutableStateFlow(null) }).collectAsState()
+    val canShareViaCitra = currentUser != null && currentUser?.isGuest == false
 
     var title by remember { mutableStateOf(initialNote?.title ?: "") }
     var currentSavedTitle by remember { mutableStateOf(initialNote?.title) }
@@ -871,17 +874,17 @@ fun FullScreenNoteEditor(
                 actions = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy((-6).dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         IconButton(
                             onClick = { undo() },
                             enabled = undoStack.isNotEmpty(),
-                            modifier = Modifier.size(34.dp).testTag("note_editor_undo_btn")
+                            modifier = Modifier.size(42.dp).testTag("note_editor_undo_btn")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Undo,
                                 contentDescription = "Desfazer",
-                                modifier = Modifier.size(19.dp),
+                                modifier = Modifier.size(23.dp),
                                 tint = if (undoStack.isNotEmpty()) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                             )
                         }
@@ -889,12 +892,12 @@ fun FullScreenNoteEditor(
                         IconButton(
                             onClick = { redo() },
                             enabled = redoStack.isNotEmpty(),
-                            modifier = Modifier.size(34.dp).testTag("note_editor_redo_btn")
+                            modifier = Modifier.size(42.dp).testTag("note_editor_redo_btn")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Redo,
                                 contentDescription = "Refazer",
-                                modifier = Modifier.size(19.dp),
+                                modifier = Modifier.size(23.dp),
                                 tint = if (redoStack.isNotEmpty()) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)
                             )
                         }
@@ -902,20 +905,20 @@ fun FullScreenNoteEditor(
                         // Note Color Button
                         IconButton(
                             onClick = { showColorPickerDialog = true },
-                            modifier = Modifier.size(34.dp).testTag("note_editor_color_btn")
+                            modifier = Modifier.size(42.dp).testTag("note_editor_color_btn")
                         ) {
                             val activeColorOpt = PaperNotePalette.findColorOption(noteColor)
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Palette,
                                     contentDescription = "Cor da Nota",
-                                    modifier = Modifier.size(19.dp),
+                                    modifier = Modifier.size(23.dp),
                                     tint = textColor
                                 )
                                 if (noteColor != null) {
                                     Box(
                                         modifier = Modifier
-                                            .size(7.dp)
+                                            .size(9.dp)
                                             .align(Alignment.BottomEnd)
                                             .background(activeColorOpt.primaryColor, CircleShape)
                                             .border(1.dp, Color.White, CircleShape)
@@ -926,20 +929,20 @@ fun FullScreenNoteEditor(
 
                         IconButton(
                             onClick = { saveCurrent(close = false) },
-                            modifier = Modifier.size(34.dp).testTag("note_editor_save_btn")
+                            modifier = Modifier.size(42.dp).testTag("note_editor_save_btn")
                         ) {
                             if (showSaveFeedback) {
                                 Icon(
                                     imageVector = Icons.Default.CheckCircle,
                                     contentDescription = "Salvo!",
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(24.dp),
                                     tint = Color(0xFF2E7D32)
                                 )
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.Save,
                                     contentDescription = "Salvar",
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(24.dp),
                                     tint = if (isDirty) primaryColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
                                 )
                             }
@@ -948,12 +951,12 @@ fun FullScreenNoteEditor(
                         Box {
                             IconButton(
                                 onClick = { showMenu = true },
-                                modifier = Modifier.size(34.dp)
+                                modifier = Modifier.size(42.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.MoreVert,
                                     contentDescription = "Mais Opções",
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(23.dp),
                                     tint = textColor
                                 )
                             }
@@ -976,19 +979,25 @@ fun FullScreenNoteEditor(
                                     Text(
                                         "Compartilhar via Citra",
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF2563EB)
+                                        color = if (canShareViaCitra) Color(0xFF2563EB) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
                                         Icons.Default.Public,
                                         contentDescription = null,
-                                        tint = Color(0xFF2563EB)
+                                        tint = if (canShareViaCitra) Color(0xFF2563EB) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                                     )
                                 },
                                 onClick = {
                                     showMenu = false
-                                    onShareViaCitra?.invoke(title, editorValue.text, category)
+                                    if (!canShareViaCitra && viewModel != null) {
+                                        Toast.makeText(context, "Entre com uma conta para compartilhar notas via Citra.", Toast.LENGTH_SHORT).show()
+                                    } else if (viewModel != null) {
+                                        showShareViaCitraDialog = true
+                                    } else {
+                                        onShareViaCitra?.invoke(title, editorValue.text, category)
+                                    }
                                 }
                             )
 
@@ -1897,18 +1906,18 @@ fun FullScreenNoteEditor(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .imePadding()
-                    .navigationBarsPadding()
                     .padding(
-                        bottom = if (isRecordingAudio) 72.dp else if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) 0.dp else 12.dp,
-                        start = if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) 0.dp else 8.dp,
-                        end = if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) 0.dp else 8.dp
+                        bottom = if (isRecordingAudio) 72.dp else if (isToolbarPinnedToBottom) 0.dp else 12.dp,
+                        start = if (isToolbarPinnedToBottom) 0.dp else 8.dp,
+                        end = if (isToolbarPinnedToBottom) 0.dp else 8.dp
                     )
                     .offset {
-                        IntOffset(toolbarOffsetX.roundToInt(), toolbarOffsetY.roundToInt())
+                        if (isToolbarPinnedToBottom) IntOffset.Zero
+                        else IntOffset(toolbarOffsetX.roundToInt(), toolbarOffsetY.roundToInt())
                     }
             ) {
-                val toolbarShape = if (isToolbarPinnedToBottom && toolbarOffsetX == 0f && toolbarOffsetY == 0f) {
-                    RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                val toolbarShape = if (isToolbarPinnedToBottom) {
+                    RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
                 } else {
                     RoundedCornerShape(26.dp)
                 }
@@ -2246,8 +2255,9 @@ fun FullScreenNoteEditor(
                             // MÓDULO 1: Barra Principal (máximo 13 itens + mobilidade + expandir)
                             Row(
                                 modifier = Modifier
+                                    .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState())
-                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
@@ -2355,22 +2365,11 @@ fun FullScreenNoteEditor(
                                             if (isToolbarPinnedToBottom) {
                                                 isToolbarPinnedToBottom = false
                                             } else {
-                                                preferencesManager.saveToolbarFloatingOffset(toolbarOffsetX, toolbarOffsetY)
+                                                toolbarOffsetX = 0f
+                                                toolbarOffsetY = 0f
+                                                preferencesManager.saveToolbarFloatingOffset(0f, 0f)
                                                 isToolbarPinnedToBottom = true
                                             }
-                                        }
-
-                                        // Botão de configurações para organizar menu flutuante (móvel para o final do 2º módulo)
-                                        IconButton(
-                                            onClick = { showReorderToolbarDialog = true },
-                                            modifier = Modifier.size(30.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Settings,
-                                                contentDescription = "Organizar menu flutuante",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
                                         }
                                     }
                                 }
@@ -2736,15 +2735,18 @@ fun FullScreenNoteEditor(
         )
     }
 
-    // Modal de organização / reordenação do menu flutuante
-    if (showReorderToolbarDialog) {
-        ReorderToolbarDialog(
-            initialOrder = toolbarItemsOrder,
-            onDismiss = { showReorderToolbarDialog = false },
-            onSave = { newOrder ->
-                toolbarItemsOrder = newOrder
-                preferencesManager.saveToolbarOrder(newOrder)
-            }
+    // Diálogo de envio / compartilhamento via Citra aberto diretamente dentro da nota
+    if (showShareViaCitraDialog && viewModel != null) {
+        com.example.ui.screens.inbox.SendNoteDialog(
+            viewModel = viewModel,
+            initialNote = Note(
+                id = initialNote?.id ?: 0L,
+                title = title.ifBlank { "Sem título" },
+                content = editorValue.text,
+                category = category,
+                noteColor = noteColor
+            ),
+            onDismiss = { showShareViaCitraDialog = false }
         )
     }
 }

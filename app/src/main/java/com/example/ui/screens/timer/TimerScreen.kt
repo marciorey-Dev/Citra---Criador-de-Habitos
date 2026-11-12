@@ -129,10 +129,12 @@ fun TimerScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Os Citras só aparecem no modo timer quando estão em pausa (pausa do pomodoro ou sessão pausada)
-        val isTimerInPause = !pomodoroState.isStopwatchMode && (pomodoroState.currentPhase == PomodoroPhase.BREAK || pomodoroState.isPaused)
+        // Os Citras surgem exclusivamente quando o timer DE PAUSA estiver contando ativamente
+        val isTimerInBreakCounting = !pomodoroState.isStopwatchMode &&
+            pomodoroState.currentPhase == PomodoroPhase.BREAK &&
+            pomodoroState.isRunning
         AnimatedVisibility(
-            visible = isTimerInPause && citraTimerBallsJson.isNotBlank() && citraTimerBallsJson != "[]",
+            visible = isTimerInBreakCounting && citraTimerBallsJson.isNotBlank() && citraTimerBallsJson != "[]",
             enter = fadeIn(tween(350)),
             exit = fadeOut(tween(280))
         ) {

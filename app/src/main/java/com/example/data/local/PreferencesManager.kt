@@ -232,20 +232,39 @@ class PreferencesManager(private val context: Context) {
         _citraTimerBallsJson.value = json
     }
 
-    fun addCitraTimerBall(durationMinutes: Int) {
+    fun addCitraTimerBall(durationMinutes: Int, sessionKeyMillis: Long = 0L) {
         val safeMins = durationMinutes.coerceIn(1, 180)
-        try {
-            val current = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
-            val arr = org.json.JSONArray(current)
-            arr.put(safeMins)
-            val updated = arr.toString()
-            prefs.edit().putString("citra_timer_balls_json", updated).commit()
-            _citraTimerBallsJson.value = updated
-        } catch (_: Exception) {
-            val arr = org.json.JSONArray().apply { put(safeMins) }
-            val updated = arr.toString()
-            prefs.edit().putString("citra_timer_balls_json", updated).commit()
-            _citraTimerBallsJson.value = updated
+        synchronized(citraBallLock) {
+            val now = System.currentTimeMillis()
+            val lastSessionKey = prefs.getLong("last_citra_ball_session_key", 0L)
+            val lastAddedAt = prefs.getLong("last_citra_ball_added_at", 0L)
+            if (sessionKeyMillis > 0L && lastSessionKey == sessionKeyMillis) {
+                return
+            }
+            if (now - lastAddedAt in 0L until 20_000L) {
+                return
+            }
+            try {
+                val current = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
+                val arr = org.json.JSONArray(current)
+                arr.put(safeMins)
+                val updated = arr.toString()
+                prefs.edit()
+                    .putString("citra_timer_balls_json", updated)
+                    .putLong("last_citra_ball_session_key", sessionKeyMillis)
+                    .putLong("last_citra_ball_added_at", now)
+                    .commit()
+                _citraTimerBallsJson.value = updated
+            } catch (_: Exception) {
+                val arr = org.json.JSONArray().apply { put(safeMins) }
+                val updated = arr.toString()
+                prefs.edit()
+                    .putString("citra_timer_balls_json", updated)
+                    .putLong("last_citra_ball_session_key", sessionKeyMillis)
+                    .putLong("last_citra_ball_added_at", now)
+                    .commit()
+                _citraTimerBallsJson.value = updated
+            }
         }
     }
 
@@ -693,6 +712,7 @@ class PreferencesManager(private val context: Context) {
     }
 
     companion object {
+        private val citraBallLock = Any()
         val DEFAULT_TOOLBAR_ORDER = listOf(
             // Primeiro módulo (exatamente os 13 símbolos permitidos no topo por padrão):
             "bold", "italic", "inline_code", "titles", "checklist", "list",

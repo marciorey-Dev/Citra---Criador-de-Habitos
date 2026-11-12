@@ -16,9 +16,12 @@
 local.properties
 .env
 debug.keystore
+release-key.jks
+my-upload-key.jks
+*.jks
+*.keystore
 *-debug.log
 *.apk
 *.aab
 *.zip
 build-artifacts/
-

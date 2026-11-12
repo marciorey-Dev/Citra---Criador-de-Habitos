@@ -39,13 +39,16 @@ fun SendNoteDialog(
 ) {
     val notes by viewModel.notes.collectAsState()
     val recipientState by viewModel.recipientLookupState.collectAsState()
+    val currentUser by viewModel.authRepository.currentUser.collectAsState()
+    val isUserLoggedIn = currentUser != null && currentUser?.isGuest == false
 
     val currentAuthUser = FirebaseAuth.getInstance().currentUser
-    val isDeveloper = remember(currentAuthUser) {
-        InboxRepository.isDeveloper(currentAuthUser?.email)
+    val isDeveloper = remember(currentAuthUser, currentUser) {
+        isUserLoggedIn && (currentUser?.isDev == true || InboxRepository.isDeveloper(currentAuthUser?.email ?: currentUser?.email))
     }
 
     var isBroadcast by remember { mutableStateOf(false) }
+    var useUsernameSecondary by remember { mutableStateOf(false) }
     var usernameInput by remember { mutableStateOf("") }
     var selectedRecipient by remember { mutableStateOf<RecipientInfo?>(null) }
 
@@ -61,9 +64,11 @@ fun SendNoteDialog(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // Synchronize recipient search with input
-    LaunchedEffect(usernameInput) {
-        if (!isBroadcast) {
-            viewModel.searchRecipient(usernameInput)
+    LaunchedEffect(usernameInput, useUsernameSecondary, isUserLoggedIn) {
+        if (isUserLoggedIn && !isBroadcast) {
+            viewModel.searchRecipient(usernameInput, preferUsernameLookup = useUsernameSecondary)
+        } else {
+            viewModel.resetRecipientLookup()
         }
     }
 
@@ -81,7 +86,7 @@ fun SendNoteDialog(
     ) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+            color = if (isUserLoggedIn) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
             tonalElevation = 6.dp,
             modifier = Modifier
                 .fillMaxWidth(0.94f)
@@ -101,14 +106,14 @@ fun SendNoteDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             shape = CircleShape,
-                            color = Color(0xFF2563EB).copy(alpha = 0.12f),
+                            color = if (isUserLoggedIn) Color(0xFF2563EB).copy(alpha = 0.12f) else Color.Gray.copy(alpha = 0.18f),
                             modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Public,
                                     contentDescription = null,
-                                    tint = Color(0xFF2563EB),
+                                    tint = if (isUserLoggedIn) Color(0xFF2563EB) else Color.Gray,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -119,10 +124,10 @@ fun SendNoteDialog(
                                 text = "Compartilhar Nota",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (isUserLoggedIn) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "Envio direto via Citra",
+                                text = if (isUserLoggedIn) "Envio direto via Citra" else "Requer conta logada",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -134,6 +139,30 @@ fun SendNoteDialog(
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                if (!isUserLoggedIn) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color.Gray)
+                            Text(
+                                text = "Você está sem conta logada. Entre com sua conta Google no Perfil para enviar notas.",
+                                fontSize = 12.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
 
                 // Scrollable Form
                 Column(
@@ -188,13 +217,33 @@ fun SendNoteDialog(
 
                     // Recipient Section (Hidden if broadcast)
                     AnimatedVisibility(visible = !isBroadcast) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                text = "Nome de Usuário de Destino",
+                                text = "Método de Envio para Destinatário",
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilterChip(
+                                    selected = !useUsernameSecondary,
+                                    enabled = isUserLoggedIn,
+                                    onClick = { useUsernameSecondary = false },
+                                    label = { Text("Nome / E-mail", fontSize = 12.sp) },
+                                    leadingIcon = { Icon(Icons.Default.PersonSearch, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                )
+                                FilterChip(
+                                    selected = useUsernameSecondary,
+                                    enabled = isUserLoggedIn,
+                                    onClick = { useUsernameSecondary = true },
+                                    label = { Text("@usuario (Secundário)", fontSize = 12.sp) },
+                                    leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                )
+                            }
 
                             OutlinedTextField(
                                 value = usernameInput,
@@ -202,9 +251,19 @@ fun SendNoteDialog(
                                     usernameInput = it
                                     errorMessage = null
                                 },
-                                placeholder = { Text("@exemplo ou nome do usuário") },
+                                enabled = isUserLoggedIn,
+                                placeholder = {
+                                    Text(
+                                        if (useUsernameSecondary) "@usuario do destinatário"
+                                        else "Nome completo ou e-mail do usuário"
+                                    )
+                                },
                                 leadingIcon = {
-                                    Icon(Icons.Default.AlternateEmail, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Icon(
+                                        if (useUsernameSecondary) Icons.Default.AlternateEmail else Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = if (isUserLoggedIn) MaterialTheme.colorScheme.primary else Color.Gray
+                                    )
                                 },
                                 trailingIcon = {
                                     when (recipientState) {
@@ -311,12 +370,14 @@ fun SendNoteDialog(
                     ) {
                         FilterChip(
                             selected = useExistingNote,
+                            enabled = isUserLoggedIn,
                             onClick = { useExistingNote = true },
                             label = { Text("Nota Existente") },
                             leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(16.dp)) }
                         )
                         FilterChip(
                             selected = !useExistingNote,
+                            enabled = isUserLoggedIn,
                             onClick = { useExistingNote = false },
                             label = { Text("Escrever Agora") },
                             leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp)) }
@@ -327,7 +388,8 @@ fun SendNoteDialog(
                         // Note selector dropdown
                         Box {
                             OutlinedCard(
-                                onClick = { noteDropdownExpanded = true },
+                                onClick = { if (isUserLoggedIn) noteDropdownExpanded = true },
+                                enabled = isUserLoggedIn,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -393,6 +455,7 @@ fun SendNoteDialog(
                         OutlinedTextField(
                             value = customTitle,
                             onValueChange = { customTitle = it },
+                            enabled = isUserLoggedIn,
                             label = { Text("Título da Nota") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
@@ -402,6 +465,7 @@ fun SendNoteDialog(
                         OutlinedTextField(
                             value = customCategory,
                             onValueChange = { customCategory = it },
+                            enabled = isUserLoggedIn,
                             label = { Text("Categoria") },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
@@ -411,6 +475,7 @@ fun SendNoteDialog(
                         OutlinedTextField(
                             value = customContent,
                             onValueChange = { customContent = it },
+                            enabled = isUserLoggedIn,
                             label = { Text("Conteúdo em Markdown (.md)") },
                             minLines = 5,
                             maxLines = 10,
@@ -443,11 +508,16 @@ fun SendNoteDialog(
                         Text("Cancelar")
                     }
 
-                    val canSend = (isBroadcast || selectedRecipient != null) &&
+                    val canSend = isUserLoggedIn &&
+                            (isBroadcast || selectedRecipient != null) &&
                             ((useExistingNote && selectedExistingNote != null) || (!useExistingNote && customContent.isNotBlank()))
 
                     Button(
                         onClick = {
+                            if (!isUserLoggedIn) {
+                                errorMessage = "Entre com uma conta para enviar notas."
+                                return@Button
+                            }
                             val finalTitle = if (useExistingNote) selectedExistingNote?.title.orEmpty() else customTitle
                             val finalContent = if (useExistingNote) selectedExistingNote?.content.orEmpty() else customContent
                             val finalCategory = if (useExistingNote) selectedExistingNote?.category.orEmpty() else customCategory
@@ -461,6 +531,7 @@ fun SendNoteDialog(
                             errorMessage = null
                             viewModel.sendNoteMessage(
                                 recipientUid = if (isBroadcast) null else selectedRecipient?.uid,
+                                recipientInfo = if (isBroadcast) null else selectedRecipient,
                                 isBroadcast = isBroadcast,
                                 title = finalTitle,
                                 content = finalContent,

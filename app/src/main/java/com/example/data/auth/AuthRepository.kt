@@ -369,10 +369,18 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    fun updateProfile(displayName: String? = null, photoUrl: String? = null, isPrivate: Boolean? = null) {
+    fun updateProfile(
+        displayName: String? = null,
+        username: String? = null,
+        photoUrl: String? = null,
+        isPrivate: Boolean? = null
+    ) {
         val cur = _currentUser.value ?: return
+        val cleanUsername = username?.trim()?.removePrefix("@")?.lowercase()?.replace(Regex("[^a-z0-9._]"), "")
+            ?.takeIf { it.isNotBlank() }
         val updated = cur.copy(
             displayName = displayName ?: cur.displayName,
+            username = cleanUsername ?: cur.username,
             photoUrl = photoUrl ?: cur.photoUrl,
             isPrivate = isPrivate ?: cur.isPrivate
         )
@@ -381,6 +389,7 @@ class AuthRepository(private val context: Context) {
         if (cur.isGuest) {
             prefs.edit().apply {
                 if (displayName != null) putString("guest_name", displayName)
+                if (cleanUsername != null) putString("guest_username", cleanUsername)
                 if (photoUrl != null) putString("guest_photo", photoUrl)
                 if (isPrivate != null) putBoolean("guest_is_private", isPrivate)
             }.apply()
@@ -390,6 +399,7 @@ class AuthRepository(private val context: Context) {
                 try {
                     val map = mutableMapOf<String, Any>()
                     if (displayName != null) map["displayName"] = displayName
+                    if (cleanUsername != null) map["username"] = cleanUsername
                     if (photoUrl != null) map["photoUrl"] = photoUrl
                     if (isPrivate != null) map["isPrivate"] = isPrivate
                     currentFirestore.collection("users").document(cur.uid).set(map, SetOptions.merge())
