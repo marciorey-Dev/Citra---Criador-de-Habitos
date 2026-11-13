@@ -26,6 +26,14 @@ Gere o texto em Base64 no seu computador e cole no valor do secret `GOOGLE_SERVI
 - Nome do secret: `GOOGLE_SERVICES_JSON`
 - Valor: cole o conteúdo inteiro do arquivo `app/google-services.json`.
 
+### Opção C — Secrets individuais do Firebase *(Geração dinâmica)*
+Se preferir que o GitHub Actions monte `app/google-services.json` dinamicamente antes do build, cadastre estes secrets:
+- `FIREBASE_PROJECT_ID` (ex.: `gen-lang-client-0656311562`)
+- `FIREBASE_APP_ID` (ID do app Android no Firebase, ex.: `1:...:android:...`)
+- `FIREBASE_API_KEY` (Chave Web/Android do projeto Firebase)
+- `FIREBASE_WEB_CLIENT_ID` (Client ID OAuth 2.0 Web `client_type: 3`, usado no `default_web_client_id`)
+- *(Opcionais)* `FIREBASE_PROJECT_NUMBER`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_ANDROID_CLIENT_ID`
+
 ---
 
 ## 📱 Como gerar e baixar o APK de Testes (Debug)

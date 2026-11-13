@@ -54,7 +54,7 @@ jobs:
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools platforms;android-36.1 platforms;android-36 build-tools;36.0.0'
 
-      # 4. Verificar pacotes e licenças do Android SDK (incluindo android-36.1)
+      # 4. Garantir pacotes e licenças do Android SDK (incluindo android-36.1)
       - name: Garantir pacotes e licenças do Android SDK
         run: |
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
@@ -93,13 +93,19 @@ jobs:
           fi
           keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey
 
-      # 7. Garantir .env.example, .env, local.properties e google-services.json via GitHub Secrets
+      # 7. Garantir .env.example, .env, local.properties e criar/restaurar app/google-services.json
       - name: Preparar ambiente e credenciais do Firebase
         id: prep_env
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true }}
+          FIREBASE_PROJECT_NUMBER: ${{ secrets.FIREBASE_PROJECT_NUMBER }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_WEB_CLIENT_ID: ${{ secrets.FIREBASE_WEB_CLIENT_ID }}
+          FIREBASE_ANDROID_CLIENT_ID: ${{ secrets.FIREBASE_ANDROID_CLIENT_ID }}
         run: |
           if [ ! -f ".env.example" ]; then
             printf 'GEMINI_API_KEY=\n' > .env.example
@@ -115,28 +121,96 @@ jobs:
 
           CREATED_GS_FROM_SECRET="false"
           if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "Restaurando app/google-services.json a partir do secret GOOGLE_SERVICES_JSON_BASE64..."
+            echo "Restaurando app/google-services.json a partir de GOOGLE_SERVICES_JSON_BASE64..."
             printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '\r\n ' | base64 -d > app/google-services.json
             CREATED_GS_FROM_SECRET="true"
           elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            echo "Restaurando app/google-services.json a partir do secret GOOGLE_SERVICES_JSON..."
+            echo "Restaurando app/google-services.json a partir de GOOGLE_SERVICES_JSON..."
             printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            CREATED_GS_FROM_SECRET="true"
+          elif [ -n "$FIREBASE_PROJECT_ID" ] && [ -n "$FIREBASE_APP_ID" ] && [ -n "$FIREBASE_API_KEY" ] && [ -n "$FIREBASE_WEB_CLIENT_ID" ]; then
+            echo "Gerando app/google-services.json dinamicamente a partir dos Secrets individuais do Firebase..."
+            SHA1_HEX="$(keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | sed -n 's/.*SHA1:[[:space:]]*//p' | tr -d ':' | tr '[:upper:]' '[:lower:]' | head -n 1)"
+            export SHA1_HEX
+            python3 - <<'PY'
+          import json, os
+
+          project_number = os.environ.get("FIREBASE_PROJECT_NUMBER") or os.environ["FIREBASE_APP_ID"].split(":")[1]
+          project_id = os.environ["FIREBASE_PROJECT_ID"]
+          storage_bucket = os.environ.get("FIREBASE_STORAGE_BUCKET") or f"{project_id}.firebasestorage.app"
+          app_id = os.environ["FIREBASE_APP_ID"]
+          api_key = os.environ["FIREBASE_API_KEY"]
+          web_client_id = os.environ["FIREBASE_WEB_CLIENT_ID"]
+          android_client_id = os.environ.get("FIREBASE_ANDROID_CLIENT_ID", "")
+          sha1_hex = os.environ["SHA1_HEX"]
+          package_name = "com.aistudio.habitcraft.krqpmv"
+
+          oauth_clients = []
+          if android_client_id:
+              oauth_clients.append({
+                  "client_id": android_client_id,
+                  "client_type": 1,
+                  "android_info": {
+                      "package_name": package_name,
+                      "certificate_hash": sha1_hex
+                  }
+              })
+          oauth_clients.append({
+              "client_id": web_client_id,
+              "client_type": 3
+          })
+
+          data = {
+              "project_info": {
+                  "project_number": project_number,
+                  "project_id": project_id,
+                  "storage_bucket": storage_bucket
+              },
+              "client": [
+                  {
+                      "client_info": {
+                          "mobilesdk_app_id": app_id,
+                          "android_client_info": {
+                              "package_name": package_name
+                          }
+                      },
+                      "oauth_client": oauth_clients,
+                      "api_key": [
+                          {
+                              "current_key": api_key
+                          }
+                      ],
+                      "services": {
+                          "appinvite_service": {
+                              "other_platform_oauth_client": [
+                                  {
+                                      "client_id": web_client_id,
+                                      "client_type": 3
+                                  }
+                              ]
+                          }
+                      }
+                  }
+              ],
+              "configuration_version": "1"
+          }
+          with open("app/google-services.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2)
+          PY
             CREATED_GS_FROM_SECRET="true"
           fi
           echo "created_gs_from_secret=$CREATED_GS_FROM_SECRET" >> "$GITHUB_OUTPUT"
 
-          if [ -f "app/google-services.json" ]; then
-            if ! python3 -m json.tool app/google-services.json >/dev/null 2>&1; then
-              echo "::error::app/google-services.json existe, mas não é um JSON válido. Verifique o conteúdo do secret GOOGLE_SERVICES_JSON / GOOGLE_SERVICES_JSON_BASE64."
-              exit 1
-            fi
-            echo "app/google-services.json validado com sucesso."
-          elif [ "$IS_FORK_PR" = "true" ]; then
-            echo "::warning::Pull request de fork sem acesso a Secrets; compilando sem google-services.json."
-          else
-            echo "::error::app/google-services.json não encontrado! Cadastre o secret GOOGLE_SERVICES_JSON (ou GOOGLE_SERVICES_JSON_BASE64) em Settings -> Secrets and variables -> Actions para gerar um APK com Firebase e Google Sign-In funcionais."
+          if [ ! -f "app/google-services.json" ]; then
+            echo "::error::app/google-services.json não encontrado! Cadastre o secret GOOGLE_SERVICES_JSON_BASE64 (ou GOOGLE_SERVICES_JSON) em Settings -> Secrets and variables -> Actions, ou remova app/google-services.json do .gitignore em repositório privado."
             exit 1
           fi
+
+          if ! python3 -m json.tool app/google-services.json >/dev/null 2>&1; then
+            echo "::error::app/google-services.json não é um JSON válido. Verifique o valor configurado no GitHub Secret."
+            exit 1
+          fi
+          echo "app/google-services.json pronto e validado com sucesso."
 
       # 8. Verificar e preparar Gradle Wrapper (gradlew)
       - name: Preparar Gradle Wrapper

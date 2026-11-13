@@ -271,13 +271,7 @@ class AuthRepository(private val context: Context) {
 
             val targetContext: Context = activity ?: resolvedContext
             val serverClientId = try {
-                @Suppress("DiscouragedApi")
-                val resId = targetContext.resources.getIdentifier(
-                    "default_web_client_id",
-                    "string",
-                    targetContext.packageName
-                )
-                if (resId != 0) targetContext.getString(resId) else ""
+                targetContext.getString(R.string.default_web_client_id)
             } catch (e: Exception) {
                 android.util.Log.e("AuthRepository", "Falha ao obter default_web_client_id", e)
                 ""
