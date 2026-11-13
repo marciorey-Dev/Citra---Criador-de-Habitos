@@ -443,6 +443,9 @@ fun AuthScreen(
                                     rawMsg.contains("No credentials available", ignoreCase = true) ||
                                     rawMsg.contains("NoCredentialException", ignoreCase = true) ->
                                         "Nenhuma conta Google ativa encontrada no aparelho. Certifique-se de estar conectado a uma conta Google no Android."
+                                    rawMsg.contains("28444", ignoreCase = true) ||
+                                    rawMsg.contains("Developer console is not set up correctly", ignoreCase = true) ->
+                                        "Erro de configuração OAuth (28444): verifique se o APK foi assinado com a keystore cadastrada no Firebase (SHA-1) e se seu e-mail está liberado na Tela de Permissão OAuth do Google Cloud."
                                     else ->
                                         rawMsg
                                 }

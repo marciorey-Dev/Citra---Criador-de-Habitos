@@ -10,7 +10,6 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -280,33 +279,13 @@ class AuthRepository(private val context: Context) {
                 return Result.failure(IllegalStateException("Configuração do Google Sign-In pendente (default_web_client_id não encontrado)."))
             }
 
-            val googleIdOption = GetGoogleIdOption.Builder()
-                .setServerClientId(serverClientId)
-                .setFilterByAuthorizedAccounts(false)
-                .setAutoSelectEnabled(false)
-                .build()
-
+            val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = serverClientId).build()
             val request = GetCredentialRequest.Builder()
-                .addCredentialOption(googleIdOption)
+                .addCredentialOption(signInOption)
                 .build()
 
             val cm = CredentialManager.create(targetContext)
-            val result = try {
-                cm.getCredential(targetContext, request)
-            } catch (e: Exception) {
-                if (e is GetCredentialCancellationException || e.message?.contains("cancel", ignoreCase = true) == true) {
-                    throw e
-                }
-                try {
-                    val fallbackOption = GetSignInWithGoogleOption.Builder(serverClientId).build()
-                    val fallbackRequest = GetCredentialRequest.Builder()
-                        .addCredentialOption(fallbackOption)
-                        .build()
-                    cm.getCredential(targetContext, fallbackRequest)
-                } catch (_: Exception) {
-                    throw e
-                }
-            }
+            val result = cm.getCredential(targetContext, request)
             val credential = result.credential
 
             val idToken: String = when {
@@ -362,6 +341,7 @@ class AuthRepository(private val context: Context) {
                 )
             )
         } catch (e: GetCredentialCancellationException) {
+            android.util.Log.w("AuthRepository", "Google Sign-In cancelado ou dispensado: ${e.message}", e)
             Result.failure(e)
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Erro no login Google", e)
