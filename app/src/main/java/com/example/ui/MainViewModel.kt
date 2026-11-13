@@ -607,9 +607,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val authUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-        val email = authUser?.email
-        val isDev = InboxRepository.isDeveloper(email)
+        val authUser = authRepository.auth?.currentUser
+        val email = authUser?.email ?: user.email
+        val isDev = InboxRepository.isDeveloper(email, user.uid)
 
         val message = InboxMessage(
             id = java.util.UUID.randomUUID().toString(),
@@ -674,7 +674,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             onError("Você precisa entrar com uma conta para relatar bugs.")
             return
         }
-        val authUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        val authUser = authRepository.auth?.currentUser
         viewModelScope.launch {
             val res = inboxRepository.sendBugReport(
                 reporterUid = user.uid,

@@ -28,7 +28,6 @@ import com.example.data.model.Note
 import com.example.data.model.RecipientInfo
 import com.example.data.model.RecipientLookupState
 import com.example.ui.MainViewModel
-import com.google.firebase.auth.FirebaseAuth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,9 +41,9 @@ fun SendNoteDialog(
     val currentUser by viewModel.authRepository.currentUser.collectAsState()
     val isUserLoggedIn = currentUser != null && currentUser?.isGuest == false
 
-    val currentAuthUser = FirebaseAuth.getInstance().currentUser
+    val currentAuthUser = viewModel.authRepository.auth?.currentUser
     val isDeveloper = remember(currentAuthUser, currentUser) {
-        isUserLoggedIn && (currentUser?.isDev == true || InboxRepository.isDeveloper(currentAuthUser?.email ?: currentUser?.email))
+        isUserLoggedIn && (currentUser?.isDev == true || InboxRepository.isDeveloper(currentAuthUser?.email ?: currentUser?.email, currentUser?.uid))
     }
 
     var isBroadcast by remember { mutableStateOf(false) }

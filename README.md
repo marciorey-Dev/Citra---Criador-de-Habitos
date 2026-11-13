@@ -54,21 +54,19 @@
 * **JSON Backups:** Export and import full app state through standard `.json` data files.
 * **Cloud Sync:** Firebase Firestore handles user preferences, notes, habits, tasks, inbox messages, and historical analytics when logged in.
 
-## 🚀 Como Compilar o APK pelo GitHub Actions
+## 🚀 Compilação do APK via GitHub Actions
 
-O repositório conta com automação de build configurada em `.github/workflows/build-apk.yml` (veja instruções completas em [`GITHUB_ACTIONS.md`](GITHUB_ACTIONS.md)).
+O repositório conta com pipeline de build configurada em [`.github/workflows/android-apk-ci.yml`](.github/workflows/android-apk-ci.yml) (veja o guia completo em [`WORKFLOW_ACTIONS.md`](WORKFLOW_ACTIONS.md)).
 
-### Passo a passo para gerar o APK de Testes:
-1. **Compilação Automática:** Todo `git push` ou `pull request` dispara automaticamente a compilação do APK de testes usando `app/google-services.json` e a `debug.keystore` compatível com Firebase/Google Sign-In.
-2. **Disparo Manual (1 clique):**
-   - Acesse o seu repositório no GitHub e clique na aba **Actions**.
-   - No menu lateral esquerdo, selecione **Compilar APK Android (Citra)**.
-   - Clique em **Run workflow**, selecione a variante (`debug` ou `release`) e clique no botão verde **Run workflow**.
+### Passo a passo para gerar o APK:
+1. **Compilação Automática:** Todo `git push` ou `pull_request` dispara o workflow **Citra Android APK Workflow**, restaurando a `debug.keystore` compatível com Firebase/Google Sign-In.
+2. **Disparo Manual:**
+   - Acesse seu repositório no GitHub e abra a aba **Actions**.
+   - Selecione **Citra Android APK Workflow** no menu lateral esquerdo.
+   - Clique em **Run workflow**, escolha a variante (`debug` ou `release`) e confirme em **Run workflow**.
 3. **Download do APK:**
-   - Aguarde a conclusão do build (ícone verde de check ✔️).
-   - Clique no workflow concluído.
-   - Na seção **Artifacts** (na parte inferior da página), baixe o pacote **Citra-Test-APK**.
-   - Descompacte o arquivo `.zip` e instale o APK no seu aparelho Android para testar!
+   - Aguarde a conclusão do workflow (✔️).
+   - Na seção **Artifacts**, baixe **Citra-APK-debug** (ou **Citra-APK-release**), descompacte o `.zip` e instale o `.apk` no seu aparelho Android.
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "firestore": [
     {
-      "database": "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74",
+      "database": "ai-studio-android-citracri-1b640eb0-8bf4-45fb-994e-c615ecbe0b43",
       "rules": "firestore.rules"
     }
   ],

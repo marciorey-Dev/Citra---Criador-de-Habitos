@@ -573,7 +573,7 @@ fun ProfileScreen(
                                                     coroutineScope.launch {
                                                         val settingsMap = viewModel.getSettingsMapForCloud()
                                                         val financesJson = viewModel.exportFinancesJson()
-                                                        authRepository.syncAllUserDataToCloud(
+                                                        val syncRes = authRepository.syncAllUserDataToCloud(
                                                             tasks = tasks,
                                                             habits = habits,
                                                             notes = notes,
@@ -583,8 +583,16 @@ fun ProfileScreen(
                                                             settingsMap = settingsMap,
                                                             financesJson = financesJson
                                                         )
+                                                        if (syncRes.isSuccess && financesJson.isNotBlank()) {
+                                                            authRepository.syncFinancesToCloud(financesJson)
+                                                        }
                                                         isSyncingNow = false
-                                                        Toast.makeText(context, "Dados, estatísticas e finanças sincronizados!", Toast.LENGTH_SHORT).show()
+                                                        if (syncRes.isSuccess) {
+                                                            viewModel.updateLastSyncTimestamp(System.currentTimeMillis())
+                                                            Toast.makeText(context, "Dados, estatísticas e finanças sincronizados!", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            Toast.makeText(context, "Falha ao sincronizar com a nuvem. Verifique sua conexão.", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 },
                                                 shape = RoundedCornerShape(10.dp),
@@ -601,12 +609,19 @@ fun ProfileScreen(
                                                     isSyncingNow = true
                                                     coroutineScope.launch {
                                                         val cloudData = authRepository.fetchCloudUserData()
+                                                        val cloudFinancesFallback = if (cloudData?.financesJson.isNullOrBlank()) {
+                                                            authRepository.fetchCloudFinances()
+                                                        } else null
                                                         isSyncingNow = false
-                                                        if (cloudData != null) {
-                                                            viewModel.applyCloudSettings(cloudData.settings)
-                                                            cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
-                                                            cloudData.notesJson?.let { viewModel.importNotesJson(it) }
-                                                            cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
+                                                        if (cloudData != null || !cloudFinancesFallback.isNullOrBlank()) {
+                                                            if (cloudData != null) {
+                                                                viewModel.applyCloudSettings(cloudData.settings)
+                                                                cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
+                                                                cloudData.notesJson?.let { viewModel.importNotesJson(it) }
+                                                                (cloudData.financesJson ?: cloudFinancesFallback)?.let { viewModel.restoreFinancesJson(it) }
+                                                            } else {
+                                                                cloudFinancesFallback?.let { viewModel.restoreFinancesJson(it) }
+                                                            }
                                                             Toast.makeText(context, "Dados, estatísticas e finanças restaurados da nuvem!", Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             Toast.makeText(context, "Nenhum backup em nuvem encontrado.", Toast.LENGTH_SHORT).show()

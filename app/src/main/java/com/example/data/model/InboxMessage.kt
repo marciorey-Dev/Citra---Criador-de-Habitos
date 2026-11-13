@@ -23,28 +23,26 @@ data class InboxMessage(
     val isBroadcast: Boolean = false,
     val isBugReport: Boolean = false
 ) {
-    fun toFirestoreMap(): Map<String, Any?> {
-        return mapOf(
-            "id" to id,
-            "senderUid" to senderUid,
-            "senderDisplayName" to senderDisplayName,
-            "senderUsername" to senderUsername,
-            "senderPhotoUrl" to senderPhotoUrl,
-            "senderEmail" to senderEmail,
-            "recipientUid" to recipientUid,
-            "recipientDisplayName" to recipientDisplayName,
-            "recipientUsername" to recipientUsername,
-            "recipientPhotoUrl" to recipientPhotoUrl,
-            "isOfficialDev" to isOfficialDev,
-            "title" to title,
-            "contentMarkdown" to contentMarkdown,
-            "category" to category,
-            "sentAtMillis" to sentAtMillis,
-            "isRead" to isRead,
-            "isDownloaded" to isDownloaded,
-            "isBroadcast" to isBroadcast,
-            "isBugReport" to isBugReport
-        )
+    fun toFirestoreMap(): Map<String, Any> = buildMap {
+        put("id", id)
+        put("senderUid", senderUid)
+        put("senderDisplayName", senderDisplayName)
+        put("senderUsername", senderUsername)
+        if (!senderPhotoUrl.isNullOrBlank()) put("senderPhotoUrl", senderPhotoUrl)
+        if (!senderEmail.isNullOrBlank()) put("senderEmail", senderEmail)
+        put("recipientUid", recipientUid)
+        put("recipientDisplayName", recipientDisplayName)
+        put("recipientUsername", recipientUsername)
+        if (!recipientPhotoUrl.isNullOrBlank()) put("recipientPhotoUrl", recipientPhotoUrl)
+        put("isOfficialDev", isOfficialDev)
+        put("title", title)
+        put("contentMarkdown", contentMarkdown)
+        put("category", category)
+        put("sentAtMillis", sentAtMillis)
+        put("isRead", isRead)
+        put("isDownloaded", isDownloaded)
+        put("isBroadcast", isBroadcast)
+        put("isBugReport", isBugReport)
     }
 
     companion object {

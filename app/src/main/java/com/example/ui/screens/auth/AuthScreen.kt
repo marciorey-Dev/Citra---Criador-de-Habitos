@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.data.auth.AuthRepository
 import com.example.ui.components.CitraMascote
 import com.example.ui.components.MascotHumor
@@ -69,6 +70,15 @@ fun AuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showGuestWarningDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (!authRepository.isGuestMode.value) {
+            val signedIn = authRepository.attemptAutoSignIn(context)
+            if (signedIn) {
+                onAuthSuccess()
+            }
+        }
+    }
 
     // Always play full-screen mascot intro on entering AuthScreen
     val isFirstLaunch = true
@@ -437,18 +447,17 @@ fun AuthScreen(
                                 triggerTempHumor(MascotHumor.NAO, 1200L)
                                 val ex = result.exceptionOrNull()
                                 val rawMsg = ex?.localizedMessage ?: "Falha ao entrar com o Google"
-                                val exType = ex?.javaClass?.simpleName ?: "Erro"
                                 errorMessage = when {
                                     ex is GetCredentialCancellationException ->
-                                        "Seleção de conta cancelada ($exType: $rawMsg). Toque acima para tentar de novo ou entre pelo navegador abaixo."
-                                    rawMsg.contains("No credentials available", ignoreCase = true) ||
-                                    rawMsg.contains("NoCredentialException", ignoreCase = true) ->
-                                        "Nenhuma conta Google ativa encontrada no Credential Manager ($rawMsg). Tente entrar pelo navegador abaixo."
+                                        "Seleção de conta cancelada. Toque no botão acima para entrar com o Google."
+                                    ex is NoCredentialException ||
+                                    rawMsg.contains("No credentials available", ignoreCase = true) ->
+                                        "Nenhuma conta Google ativa encontrada neste dispositivo. Adicione uma conta Google nas configurações do Android e tente novamente."
                                     rawMsg.contains("28444", ignoreCase = true) ||
                                     rawMsg.contains("Developer console is not set up correctly", ignoreCase = true) ->
-                                        "Erro OAuth 28444 ($rawMsg). Tente entrar pelo navegador abaixo."
+                                        "Erro de configuração OAuth (28444). Verifique o SHA-1 e as credenciais no Firebase Console."
                                     else ->
-                                        "$exType: $rawMsg"
+                                        rawMsg
                                 }
                             }
                         }
@@ -511,35 +520,6 @@ fun AuthScreen(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    FilledTonalButton(
-                        onClick = {
-                            isLoading = true
-                            errorMessage = null
-                            coroutineScope.launch {
-                                val result = authRepository.signInWithGoogleViaBrowser(context)
-                                isLoading = false
-                                if (result.isSuccess) {
-                                    onAuthSuccess()
-                                } else {
-                                    shakeTrigger++
-                                    triggerTempHumor(MascotHumor.NAO, 1200L)
-                                    val ex = result.exceptionOrNull()
-                                    errorMessage = "${ex?.javaClass?.simpleName ?: "Erro"}: ${ex?.localizedMessage ?: "Falha no login pelo navegador."}"
-                                }
-                            }
-                        },
-                        enabled = !isLoading,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("google_browser_signin_button")
-                    ) {
-                        Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Entrar com Google pelo navegador", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(28.dp))
@@ -556,6 +536,7 @@ fun AuthScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
+                        .testTag("guest_mode_button")
                         .staggeredEntrance(guestProgress.value)
                 ) {
                     Icon(Icons.Default.VpnKeyOff, contentDescription = null, modifier = Modifier.size(18.dp))

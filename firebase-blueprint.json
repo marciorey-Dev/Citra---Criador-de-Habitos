@@ -2,90 +2,136 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile with gamification stats",
+      "description": "User profile with gamification stats and privacy flags",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "displayName": { "type": "string" },
         "username": { "type": "string" },
+        "email": { "type": "string" },
         "photoUrl": { "type": "string" },
         "isPrivate": { "type": "boolean" },
+        "isDev": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
         "totalFocusMinutes": { "type": "number" },
         "completedTasksCount": { "type": "number" },
         "completedHabitsCount": { "type": "number" },
-        "achievementsCount": { "type": "number" }
+        "achievementsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["displayName", "username"]
+      "required": ["userId", "displayName", "username"]
     },
     "CloudSyncDoc": {
       "title": "CloudSyncDoc",
-      "description": "Cloud backup document for user data and finances",
+      "description": "Cloud backup document for user data, notes, settings, and finances",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "backupJson": { "type": "string" },
         "notesJson": { "type": "string" },
         "settings": { "type": "object" },
         "financesJson": { "type": "string" },
-        "syncedAt": { "type": "number" }
+        "syncedAt": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       }
     },
-    "Task": {
-      "title": "Task",
-      "description": "User task item",
+    "InboxMessage": {
+      "title": "InboxMessage",
+      "description": "Direct note share, broadcast announcement, or bug report notification",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderDisplayName": { "type": "string" },
+        "senderUsername": { "type": "string" },
+        "senderPhotoUrl": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "recipientUid": { "type": "string" },
+        "recipientDisplayName": { "type": "string" },
+        "recipientUsername": { "type": "string" },
+        "recipientPhotoUrl": { "type": "string" },
+        "isOfficialDev": { "type": "boolean" },
         "title": { "type": "string" },
+        "contentMarkdown": { "type": "string" },
         "category": { "type": "string" },
-        "priority": { "type": "string" },
-        "dueDateText": { "type": "string" },
-        "isCompleted": { "type": "boolean" }
+        "sentAtMillis": { "type": "number" },
+        "isRead": { "type": "boolean" },
+        "isDownloaded": { "type": "boolean" },
+        "isBroadcast": { "type": "boolean" },
+        "isBugReport": { "type": "boolean" }
       },
-      "required": ["title"]
+      "required": ["id", "senderUid", "title", "contentMarkdown", "sentAtMillis"]
     },
-    "Habit": {
-      "title": "Habit",
-      "description": "User habit item",
+    "RecipientLookup": {
+      "title": "RecipientLookup",
+      "description": "Public recipient index entry keyed by SHA-256 hash without exposing PII",
       "type": "object",
       "properties": {
-        "title": { "type": "string" },
-        "category": { "type": "string" },
-        "currentStreak": { "type": "number" },
-        "completedDatesCsv": { "type": "string" }
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "username": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["title"]
+      "required": ["uid", "displayName", "username"]
     },
-    "Note": {
-      "title": "Note",
-      "description": "User note item",
+    "BugReport": {
+      "title": "BugReport",
+      "description": "User-submitted bug report for developer triage",
       "type": "object",
       "properties": {
+        "id": { "type": "string" },
+        "reporterUid": { "type": "string" },
+        "reporterDisplayName": { "type": "string" },
+        "reporterUsername": { "type": "string" },
+        "reporterEmail": { "type": "string" },
         "title": { "type": "string" },
-        "content": { "type": "string" },
-        "category": { "type": "string" },
-        "isPinned": { "type": "boolean" }
+        "description": { "type": "string" },
+        "appVersion": { "type": "string" },
+        "deviceModel": { "type": "string" },
+        "createdAtMillis": { "type": "number" },
+        "status": { "type": "string" }
       },
-      "required": ["title"]
+      "required": ["id", "reporterUid", "title", "description", "createdAtMillis", "status"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
-      "description": "User profile document"
+      "description": "Owner-isolated user profile document"
     },
     "/users/{userId}/cloudSync/{docId}": {
       "schema": { "$ref": "#/entities/CloudSyncDoc" },
-      "description": "User cloud backup payloads"
+      "description": "User cloud backup payloads (current, finances)"
     },
-    "/users/{userId}/tasks/{taskId}": {
-      "schema": { "$ref": "#/entities/Task" },
-      "description": "User tasks"
+    "/users/{userId}/inbox/{messageId}": {
+      "schema": { "$ref": "#/entities/InboxMessage" },
+      "description": "User received inbox messages"
     },
-    "/users/{userId}/habits/{habitId}": {
-      "schema": { "$ref": "#/entities/Habit" },
-      "description": "User habits"
+    "/users/{userId}/sent/{messageId}": {
+      "schema": { "$ref": "#/entities/InboxMessage" },
+      "description": "User sent inbox messages"
     },
-    "/users/{userId}/notes/{noteId}": {
-      "schema": { "$ref": "#/entities/Note" },
-      "description": "User notes"
+    "/usernameLookup/{lookupId}": {
+      "schema": { "$ref": "#/entities/RecipientLookup" },
+      "description": "Hashed @username lookup index for direct note sharing"
+    },
+    "/displayNameLookup/{lookupId}": {
+      "schema": { "$ref": "#/entities/RecipientLookup" },
+      "description": "Hashed displayName lookup index for direct note sharing"
+    },
+    "/emailLookup/{lookupId}": {
+      "schema": { "$ref": "#/entities/RecipientLookup" },
+      "description": "Hashed email lookup index for direct note sharing"
+    },
+    "/broadcasts/{broadcastId}": {
+      "schema": { "$ref": "#/entities/InboxMessage" },
+      "description": "Official developer broadcast announcements"
+    },
+    "/bugReports/{reportId}": {
+      "schema": { "$ref": "#/entities/BugReport" },
+      "description": "Authenticated user bug reports"
     }
   }
 }

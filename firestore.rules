@@ -2,66 +2,260 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthenticated() {
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     function isDeveloper() {
-      return isAuthenticated() && (
-        request.auth.token.email in ['obitoinfamous@gmail.com', 'obitoinfamous5@gmail.com', 'marcioafonsorey@gmail.com', 'marcioreyakm@gmail.com', 'marcioreyakm@gmail.co']
-      );
+      return isSignedIn() &&
+        ('email_verified' in request.auth.token) &&
+        request.auth.token.email_verified == true &&
+        ('email' in request.auth.token) &&
+        request.auth.token.email in [
+          'obitoinfamous@gmail.com',
+          'obitoinfamous5@gmail.com',
+          'marcioafonsorey@gmail.com',
+          'marcioreyakm@gmail.com',
+          'marcioreyakm@gmail.co'
+        ];
     }
 
-    // User profile: readable by authenticated users to allow @username search, writable by owner or developer
+    function isValidUser(data, userId) {
+      return data.keys().hasOnly([
+          'userId', 'displayName', 'username', 'email', 'photoUrl',
+          'isPrivate', 'isDev', 'isBanned',
+          'totalFocusMinutes', 'completedTasksCount', 'completedHabitsCount', 'achievementsCount',
+          'createdAt', 'updatedAt'
+        ]) &&
+        (!('userId' in data) || data.userId == userId) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 60 &&
+        (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 200)) &&
+        (!('photoUrl' in data) || data.photoUrl == null || (data.photoUrl is string && data.photoUrl.size() <= 1000)) &&
+        (!('isPrivate' in data) || data.isPrivate is bool) &&
+        (!('isDev' in data) || data.isDev is bool) &&
+        (!('isBanned' in data) || data.isBanned is bool) &&
+        (!('totalFocusMinutes' in data) || (data.totalFocusMinutes is int && data.totalFocusMinutes >= 0)) &&
+        (!('completedTasksCount' in data) || (data.completedTasksCount is int && data.completedTasksCount >= 0)) &&
+        (!('completedHabitsCount' in data) || (data.completedHabitsCount is int && data.completedHabitsCount >= 0)) &&
+        (!('achievementsCount' in data) || (data.achievementsCount is int && data.achievementsCount >= 0)) &&
+        (!('createdAt' in data) || (data.createdAt is timestamp && data.createdAt <= request.time)) &&
+        (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidCloudSync(data, userId) {
+      return data.keys().hasOnly([
+          'userId', 'backupJson', 'notesJson', 'settings', 'financesJson', 'syncedAt', 'updatedAt'
+        ]) &&
+        (!('userId' in data) || data.userId == userId) &&
+        (!('backupJson' in data) || (data.backupJson is string && data.backupJson.size() <= 900000)) &&
+        (!('notesJson' in data) || (data.notesJson is string && data.notesJson.size() <= 900000)) &&
+        (!('financesJson' in data) || (data.financesJson is string && data.financesJson.size() <= 900000)) &&
+        (!('settings' in data) || data.settings is map) &&
+        (!('syncedAt' in data) || (data.syncedAt is int && data.syncedAt >= 0)) &&
+        (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidInboxMessage(data) {
+      return data.keys().hasOnly([
+          'id', 'senderUid', 'senderDisplayName', 'senderUsername', 'senderPhotoUrl', 'senderEmail',
+          'recipientUid', 'recipientDisplayName', 'recipientUsername', 'recipientPhotoUrl',
+          'isOfficialDev', 'title', 'contentMarkdown', 'category', 'sentAtMillis',
+          'isRead', 'isDownloaded', 'isBroadcast', 'isBugReport'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+        data.senderDisplayName is string && data.senderDisplayName.size() <= 120 &&
+        data.senderUsername is string && data.senderUsername.size() <= 60 &&
+        (!('senderPhotoUrl' in data) || data.senderPhotoUrl == null || (data.senderPhotoUrl is string && data.senderPhotoUrl.size() <= 1000)) &&
+        (!('senderEmail' in data) || data.senderEmail == null || (data.senderEmail is string && data.senderEmail.size() <= 200)) &&
+        data.recipientUid is string && data.recipientUid.size() <= 128 &&
+        data.recipientDisplayName is string && data.recipientDisplayName.size() <= 120 &&
+        data.recipientUsername is string && data.recipientUsername.size() <= 60 &&
+        (!('recipientPhotoUrl' in data) || data.recipientPhotoUrl == null || (data.recipientPhotoUrl is string && data.recipientPhotoUrl.size() <= 1000)) &&
+        data.isOfficialDev is bool &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.contentMarkdown is string && data.contentMarkdown.size() >= 1 && data.contentMarkdown.size() <= 200000 &&
+        data.category is string && data.category.size() <= 60 &&
+        data.sentAtMillis is int && data.sentAtMillis >= 0 &&
+        data.isRead is bool &&
+        data.isDownloaded is bool &&
+        data.isBroadcast is bool &&
+        data.isBugReport is bool;
+    }
+
+    function isValidRecipientLookup(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'username']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'username', 'photoUrl', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.username is string && data.username.size() >= 1 && data.username.size() <= 60 &&
+        (!('photoUrl' in data) || data.photoUrl == null || (data.photoUrl is string && data.photoUrl.size() <= 1000)) &&
+        (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidBugReport(data) {
+      return data.keys().hasAll(['id', 'reporterUid', 'title', 'description', 'createdAtMillis', 'status']) &&
+        data.keys().hasOnly([
+          'id', 'reporterUid', 'reporterDisplayName', 'reporterUsername', 'reporterEmail',
+          'title', 'description', 'appVersion', 'deviceModel', 'createdAtMillis', 'status'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+        data.reporterUid is string && data.reporterUid.size() >= 1 && data.reporterUid.size() <= 128 &&
+        (!('reporterDisplayName' in data) || (data.reporterDisplayName is string && data.reporterDisplayName.size() <= 100)) &&
+        (!('reporterUsername' in data) || (data.reporterUsername is string && data.reporterUsername.size() <= 60)) &&
+        (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 200)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 10000 &&
+        (!('appVersion' in data) || (data.appVersion is string && data.appVersion.size() <= 40)) &&
+        (!('deviceModel' in data) || (data.deviceModel is string && data.deviceModel.size() <= 120)) &&
+        data.createdAtMillis is int && data.createdAtMillis >= 0 &&
+        data.status in ['OPEN', 'IN_PROGRESS', 'RESOLVED'];
+    }
+
+    // Owner-isolated user profile document (developers can list/moderate in DevTools)
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write, delete: if isOwner(userId) || isDeveloper();
+      allow get: if isValidId(userId) && (isOwner(userId) || isDeveloper());
+      allow list: if isDeveloper();
 
-      // User private subcollections
-      match /tasks/{taskId} {
-        allow read, write: if isOwner(userId) || isDeveloper();
-      }
+      allow create: if isValidId(userId) &&
+        (isOwner(userId) || isDeveloper()) &&
+        incoming().keys().hasAll(['displayName', 'username']) &&
+        isValidUser(incoming(), userId) &&
+        (isDeveloper() || (
+          (!('isDev' in incoming()) || incoming().isDev == false) &&
+          (!('isBanned' in incoming()) || incoming().isBanned == false)
+        ));
 
-      match /habits/{habitId} {
-        allow read, write: if isOwner(userId) || isDeveloper();
-      }
+      allow update: if isValidId(userId) &&
+        isValidUser(incoming(), userId) &&
+        (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+        (!('userId' in existing()) || !('userId' in incoming()) || incoming().userId == existing().userId) &&
+        (
+          isDeveloper() || (
+            isOwner(userId) &&
+            (!('isDev' in incoming()) || ('isDev' in existing() && incoming().isDev == existing().isDev) || (!('isDev' in existing()) && incoming().isDev == false)) &&
+            (!('isBanned' in incoming()) || ('isBanned' in existing() && incoming().isBanned == existing().isBanned) || (!('isBanned' in existing()) && incoming().isBanned == false))
+          )
+        );
 
-      match /notes/{noteId} {
-        allow read, write: if isOwner(userId) || isDeveloper();
-      }
+      allow delete: if isValidId(userId) && (isOwner(userId) || isDeveloper());
 
-      match /settings/{settingId} {
-        allow read, write: if isOwner(userId) || isDeveloper();
-      }
-
+      // User cloud backup payloads
       match /cloudSync/{docId} {
-        allow read, write, delete: if isOwner(userId) || isDeveloper();
+        allow get: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isDeveloper());
+        allow list: if isValidId(userId) && (isOwner(userId) || isDeveloper());
+        allow create, update: if isValidId(userId) && isValidId(docId) &&
+          (isOwner(userId) || isDeveloper()) &&
+          isValidCloudSync(incoming(), userId);
+        allow delete: if isValidId(userId) && isValidId(docId) && (isOwner(userId) || isDeveloper());
       }
 
+      // User inbox messages
       match /inbox/{messageId} {
-        allow read, update, delete: if isOwner(userId) || isDeveloper();
-        allow create: if isAuthenticated();
+        allow get: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isDeveloper());
+        allow list: if isValidId(userId) && (isOwner(userId) || isDeveloper());
+        allow create: if isValidId(userId) && isValidId(messageId) &&
+          isSignedIn() &&
+          incoming().senderUid == request.auth.uid &&
+          incoming().recipientUid == userId &&
+          isValidInboxMessage(incoming());
+        allow update: if isValidId(userId) && isValidId(messageId) &&
+          (isOwner(userId) || isDeveloper()) &&
+          isValidInboxMessage(incoming()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'isDownloaded']);
+        allow delete: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isDeveloper());
       }
 
+      // User sent messages
       match /sent/{messageId} {
-        allow read, write, delete: if isOwner(userId) || isDeveloper();
+        allow get: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isDeveloper());
+        allow list: if isValidId(userId) && (isOwner(userId) || isDeveloper());
+        allow create, update: if isValidId(userId) && isValidId(messageId) &&
+          isOwner(userId) &&
+          incoming().senderUid == request.auth.uid &&
+          isValidInboxMessage(incoming());
+        allow delete: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isDeveloper());
       }
+    }
+
+    // Non-PII hashed recipient lookup tables (get only, no enumeration/list)
+    match /usernameLookup/{lookupId} {
+      allow get: if isSignedIn() && isValidId(lookupId);
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(lookupId) &&
+        incoming().uid == request.auth.uid &&
+        isValidRecipientLookup(incoming());
+      allow update: if isSignedIn() && isValidId(lookupId) &&
+        existing().uid == request.auth.uid &&
+        incoming().uid == request.auth.uid &&
+        isValidRecipientLookup(incoming());
+      allow delete: if isSignedIn() && existing().uid == request.auth.uid;
+    }
+
+    match /displayNameLookup/{lookupId} {
+      allow get: if isSignedIn() && isValidId(lookupId);
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(lookupId) &&
+        incoming().uid == request.auth.uid &&
+        isValidRecipientLookup(incoming());
+      allow update: if isSignedIn() && isValidId(lookupId) &&
+        existing().uid == request.auth.uid &&
+        incoming().uid == request.auth.uid &&
+        isValidRecipientLookup(incoming());
+      allow delete: if isSignedIn() && existing().uid == request.auth.uid;
+    }
+
+    match /emailLookup/{lookupId} {
+      allow get: if isSignedIn() && isValidId(lookupId);
+      allow list: if false;
+      allow create: if isSignedIn() && isValidId(lookupId) &&
+        incoming().uid == request.auth.uid &&
+        isValidRecipientLookup(incoming());
+      allow update: if isSignedIn() && isValidId(lookupId) &&
+        existing().uid == request.auth.uid &&
+        incoming().uid == request.auth.uid &&
+        isValidRecipientLookup(incoming());
+      allow delete: if isSignedIn() && existing().uid == request.auth.uid;
     }
 
     // Global developer announcements / broadcasts
     match /broadcasts/{broadcastId} {
-      allow read: if isAuthenticated();
-      allow write: if isDeveloper();
+      allow get: if isSignedIn() && isValidId(broadcastId);
+      allow list: if isSignedIn() && existing().isBroadcast == true;
+      allow create, update: if isDeveloper() && isValidId(broadcastId) &&
+        incoming().isBroadcast == true &&
+        isValidInboxMessage(incoming());
+      allow delete: if isDeveloper() && isValidId(broadcastId);
     }
 
-    // Bug reports sent by authenticated users to app developers
+    // Bug reports sent by authenticated users
     match /bugReports/{reportId} {
-      allow create: if isAuthenticated() && request.resource.data.reporterUid == request.auth.uid;
-      allow read, update, delete: if isDeveloper();
+      allow create: if isSignedIn() && isValidId(reportId) &&
+        incoming().reporterUid == request.auth.uid &&
+        isValidBugReport(incoming());
+      allow get, list, update, delete: if isDeveloper();
     }
   }
 }

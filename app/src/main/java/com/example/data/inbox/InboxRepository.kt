@@ -3,11 +3,13 @@ package com.example.data.inbox
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import com.example.R
+import com.example.data.firebase.CitraFirebaseProvider
+import com.example.data.firebase.OperationType
+import com.example.data.firebase.handleFirestoreError
 import com.example.data.model.InboxMessage
 import com.example.data.model.RecipientInfo
 import com.example.data.model.RecipientLookupState
-import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.Dispatchers
@@ -17,7 +19,11 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-class InboxRepository(private val context: Context) {
+class InboxRepository(
+    private val context: Context,
+    private val overrideFirestore: FirebaseFirestore? = null,
+    private val overrideAuth: FirebaseAuth? = null
+) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences("citra_inbox_prefs", Context.MODE_PRIVATE)
 
@@ -66,31 +72,11 @@ class InboxRepository(private val context: Context) {
         }
     }
 
-    private val firestore: FirebaseFirestore?
-        get() {
-            return try {
-                val app = com.example.data.auth.AuthRepository.ensureFirebaseInitialized(context) ?: return null
-                val dbId = try {
-                    val str = context.getString(R.string.firestore_database_id)
-                    if (str.isNotBlank() && str != "firestore_database_id") str else "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
-                } catch (_: Exception) {
-                    "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
-                }
+    private val auth: FirebaseAuth?
+        get() = overrideAuth ?: CitraFirebaseProvider.getAuth(context)
 
-                if (dbId.isNotBlank() && dbId != "default" && dbId != "(default)") {
-                    try {
-                        FirebaseFirestore.getInstance(app, dbId)
-                    } catch (e: Exception) {
-                        FirebaseFirestore.getInstance(app)
-                    }
-                } else {
-                    FirebaseFirestore.getInstance(app)
-                }
-            } catch (e: Exception) {
-                Log.e("InboxRepository", "Firebase Firestore could not be initialized", e)
-                null
-            }
-        }
+    private val firestore: FirebaseFirestore?
+        get() = overrideFirestore ?: CitraFirebaseProvider.getFirestore(context)
 
     suspend fun searchRecipient(
         query: String,
@@ -104,59 +90,57 @@ class InboxRepository(private val context: Context) {
         try {
             fun docToRecipient(doc: com.google.firebase.firestore.DocumentSnapshot): RecipientInfo {
                 return RecipientInfo(
-                    uid = doc.id,
+                    uid = doc.getString("uid") ?: doc.id,
                     displayName = doc.getString("displayName") ?: clean,
                     username = (doc.getString("username") ?: clean).removePrefix("@"),
                     photoUrl = doc.getString("photoUrl"),
-                    email = doc.getString("email")
+                    email = null
                 )
             }
 
             if (preferUsernameLookup || raw.startsWith("@")) {
-                val byUsername = db.collection("users")
-                    .whereEqualTo("username", clean)
-                    .limit(1)
+                val usernameKey = CitraFirebaseProvider.sha256Hex(clean)
+                val byUsername = db.collection("usernameLookup")
+                    .document(usernameKey)
                     .get()
                     .await()
-                if (!byUsername.isEmpty) {
-                    return@withContext RecipientLookupState.Found(docToRecipient(byUsername.documents.first()))
+                if (byUsername.exists()) {
+                    return@withContext RecipientLookupState.Found(docToRecipient(byUsername))
                 }
             }
 
-            // Primary lookup: exact email or display name
             if (raw.contains("@") && raw.contains(".") && !raw.startsWith("@")) {
-                val byEmail = db.collection("users")
-                    .whereEqualTo("email", raw.lowercase())
-                    .limit(1)
+                val emailKey = CitraFirebaseProvider.sha256Hex(raw.lowercase())
+                val byEmail = db.collection("emailLookup")
+                    .document(emailKey)
                     .get()
                     .await()
-                if (!byEmail.isEmpty) {
-                    return@withContext RecipientLookupState.Found(docToRecipient(byEmail.documents.first()))
+                if (byEmail.exists()) {
+                    return@withContext RecipientLookupState.Found(docToRecipient(byEmail))
                 }
             }
 
-            val byDisplay = db.collection("users")
-                .whereEqualTo("displayName", raw)
-                .limit(1)
+            val displayKey = CitraFirebaseProvider.sha256Hex(raw)
+            val byDisplay = db.collection("displayNameLookup")
+                .document(displayKey)
                 .get()
                 .await()
-            if (!byDisplay.isEmpty) {
-                return@withContext RecipientLookupState.Found(docToRecipient(byDisplay.documents.first()))
+            if (byDisplay.exists()) {
+                return@withContext RecipientLookupState.Found(docToRecipient(byDisplay))
             }
 
-            // Secondary fallback lookup: @username without requiring leading @
-            val byUsernameFallback = db.collection("users")
-                .whereEqualTo("username", clean)
-                .limit(1)
+            val usernameFallbackKey = CitraFirebaseProvider.sha256Hex(clean)
+            val byUsernameFallback = db.collection("usernameLookup")
+                .document(usernameFallbackKey)
                 .get()
                 .await()
-            if (!byUsernameFallback.isEmpty) {
-                return@withContext RecipientLookupState.Found(docToRecipient(byUsernameFallback.documents.first()))
+            if (byUsernameFallback.exists()) {
+                return@withContext RecipientLookupState.Found(docToRecipient(byUsernameFallback))
             }
 
             RecipientLookupState.NotFound
         } catch (e: Exception) {
-            Log.e("InboxRepository", "Error looking up recipient $clean", e)
+            handleFirestoreError(e, OperationType.GET, "recipientLookup", auth)
             RecipientLookupState.Error(e.localizedMessage ?: "Erro ao buscar destinatário")
         }
     }
@@ -167,6 +151,7 @@ class InboxRepository(private val context: Context) {
         recipientInfo: RecipientInfo? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(IllegalStateException("Banco de dados indisponível"))
+        val inboxPath = "users/$recipientUid/inbox/${message.id}"
         try {
             val messageWithRecipient = message.copy(
                 recipientUid = recipientUid,
@@ -182,6 +167,7 @@ class InboxRepository(private val context: Context) {
                 .await()
 
             if (messageWithRecipient.senderUid.isNotBlank()) {
+                val sentPath = "users/${messageWithRecipient.senderUid}/sent/${messageWithRecipient.id}"
                 try {
                     db.collection("users")
                         .document(messageWithRecipient.senderUid)
@@ -190,20 +176,23 @@ class InboxRepository(private val context: Context) {
                         .set(messageWithRecipient.copy(isRead = true).toFirestoreMap())
                         .await()
                 } catch (e: Exception) {
-                    Log.w("InboxRepository", "Could not save sent message copy", e)
+                    handleFirestoreError(e, OperationType.CREATE, sentPath, auth)
                 }
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("InboxRepository", "Failed to send message to $recipientUid", e)
+            handleFirestoreError(e, OperationType.CREATE, inboxPath, auth)
             Result.failure(e)
         }
     }
 
     suspend fun sendBroadcastMessage(message: InboxMessage): Result<Unit> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(IllegalStateException("Banco de dados indisponível"))
+        val broadcastPath = "broadcasts/${message.id}"
         try {
             val broadcastMsg = message.copy(
+                isBroadcast = true,
+                isOfficialDev = true,
                 recipientDisplayName = "Todos os usuários",
                 recipientUsername = "citra_oficial"
             )
@@ -213,6 +202,7 @@ class InboxRepository(private val context: Context) {
                 .await()
 
             if (broadcastMsg.senderUid.isNotBlank()) {
+                val sentPath = "users/${broadcastMsg.senderUid}/sent/${broadcastMsg.id}"
                 try {
                     db.collection("users")
                         .document(broadcastMsg.senderUid)
@@ -221,12 +211,12 @@ class InboxRepository(private val context: Context) {
                         .set(broadcastMsg.copy(isRead = true).toFirestoreMap())
                         .await()
                 } catch (e: Exception) {
-                    Log.w("InboxRepository", "Could not save sent broadcast copy", e)
+                    handleFirestoreError(e, OperationType.CREATE, sentPath, auth)
                 }
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("InboxRepository", "Failed to send broadcast", e)
+            handleFirestoreError(e, OperationType.CREATE, broadcastPath, auth)
             Result.failure(e)
         }
     }
@@ -241,37 +231,39 @@ class InboxRepository(private val context: Context) {
         description: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(IllegalStateException("Banco de dados indisponível"))
+        val reportId = java.util.UUID.randomUUID().toString()
+        val reportPath = "bugReports/$reportId"
         try {
-            val reportId = java.util.UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
             val cleanTitle = title.trim().ifBlank { "Relato de Bug" }
-            val cleanDesc = description.trim()
+            val cleanDesc = description.trim().ifBlank { "Sem descrição" }
             val appVersion = try {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "N/A"
             } catch (_: Exception) {
                 "N/A"
             }
 
-            // 1. Write to global bugReports collection
-            val reportData = mapOf(
+            val reportData = mutableMapOf<String, Any>(
                 "id" to reportId,
                 "reporterUid" to reporterUid,
-                "reporterDisplayName" to reporterDisplayName,
-                "reporterUsername" to reporterUsername,
-                "reporterEmail" to (reporterEmail ?: ""),
-                "title" to cleanTitle,
-                "description" to cleanDesc,
-                "appVersion" to appVersion,
-                "deviceModel" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})",
+                "reporterDisplayName" to reporterDisplayName.take(100),
+                "reporterUsername" to reporterUsername.take(60),
+                "title" to cleanTitle.take(200),
+                "description" to cleanDesc.take(10000),
+                "appVersion" to appVersion.take(40),
+                "deviceModel" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE})".take(120),
                 "createdAtMillis" to now,
                 "status" to "OPEN"
             )
+            if (!reporterEmail.isNullOrBlank()) {
+                reportData["reporterEmail"] = reporterEmail.take(200)
+            }
+
             db.collection("bugReports")
                 .document(reportId)
                 .set(reportData)
                 .await()
 
-            // 2. Deliver directly to developer inboxes so devs see it in Caixa de Entrada immediately
             val formattedMarkdown = buildString {
                 appendLine("## 🐞 Relato de Bug")
                 appendLine("**Usuário:** $reporterDisplayName (@$reporterUsername)")
@@ -285,7 +277,7 @@ class InboxRepository(private val context: Context) {
                 appendLine(cleanDesc)
             }
 
-            val devMessage = InboxMessage(
+            val sentCopy = InboxMessage(
                 id = reportId,
                 senderUid = reporterUid,
                 senderDisplayName = reporterDisplayName,
@@ -300,51 +292,27 @@ class InboxRepository(private val context: Context) {
                 contentMarkdown = formattedMarkdown,
                 category = "Relato de Bug",
                 sentAtMillis = now,
-                isRead = false,
+                isRead = true,
                 isDownloaded = false,
                 isBroadcast = false,
                 isBugReport = true
             )
 
-            val devUids = mutableSetOf<String>()
-            try {
-                val devFlagDocs = db.collection("users").whereEqualTo("isDev", true).get().await()
-                devFlagDocs.documents.forEach { devUids.add(it.id) }
-            } catch (_: Exception) {}
-            try {
-                val devEmailDocs = db.collection("users")
-                    .whereIn("email", DEVELOPER_EMAILS.toList())
-                    .get()
-                    .await()
-                devEmailDocs.documents.forEach { devUids.add(it.id) }
-            } catch (_: Exception) {}
-
-            for (devUid in devUids) {
-                try {
-                    db.collection("users")
-                        .document(devUid)
-                        .collection("inbox")
-                        .document(reportId)
-                        .set(devMessage.copy(recipientUid = devUid).toFirestoreMap())
-                        .await()
-                } catch (_: Exception) {}
-            }
-
-            // 3. Save copy to reporter's Sent box
+            val sentPath = "users/$reporterUid/sent/$reportId"
             try {
                 db.collection("users")
                     .document(reporterUid)
                     .collection("sent")
                     .document(reportId)
-                    .set(devMessage.copy(isRead = true).toFirestoreMap())
+                    .set(sentCopy.toFirestoreMap())
                     .await()
             } catch (e: Exception) {
-                Log.w("InboxRepository", "Could not save bug report in sent box", e)
+                handleFirestoreError(e, OperationType.CREATE, sentPath, auth)
             }
 
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("InboxRepository", "Failed to send bug report", e)
+            handleFirestoreError(e, OperationType.CREATE, reportPath, auth)
             Result.failure(e)
         }
     }
@@ -356,6 +324,7 @@ class InboxRepository(private val context: Context) {
             return@flow
         }
 
+        val inboxPath = "users/$userUid/inbox"
         try {
             val dismissedBroadcasts = prefs.getStringSet("dismissed_broadcasts", emptySet()) ?: emptySet()
             val readBroadcasts = prefs.getStringSet("read_broadcasts", emptySet()) ?: emptySet()
@@ -373,14 +342,15 @@ class InboxRepository(private val context: Context) {
                 doc.data?.let { InboxMessage.fromFirestoreMap(doc.id, it) }
             }
 
-            // 2. Fetch public broadcasts (developer announcements)
+            // 2. Fetch public broadcasts (aligned with security rule existing().isBroadcast == true)
             val broadcastDocs = try {
                 db.collection("broadcasts")
-                    .orderBy("sentAtMillis", Query.Direction.DESCENDING)
+                    .whereEqualTo("isBroadcast", true)
                     .limit(20)
                     .get()
                     .await()
             } catch (e: Exception) {
+                handleFirestoreError(e, OperationType.LIST, "broadcasts", auth)
                 null
             }
 
@@ -396,11 +366,61 @@ class InboxRepository(private val context: Context) {
                 }
             } ?: emptyList()
 
-            // Combine and sort by sentAtMillis descending
-            val combined = (personalMessages + broadcastMessages).sortedByDescending { it.sentAtMillis }
+            // 3. For developer accounts, also surface bugReports from /bugReports
+            val currentEmail = auth?.currentUser?.email
+            val bugMessages = if (isDeveloper(currentEmail, userUid)) {
+                try {
+                    val bugDocs = db.collection("bugReports")
+                        .limit(20)
+                        .get()
+                        .await()
+                    bugDocs.documents.mapNotNull { doc ->
+                        val data = doc.data ?: return@mapNotNull null
+                        val rId = doc.id
+                        if (dismissedBroadcasts.contains(rId)) return@mapNotNull null
+                        val rUid = (data["reporterUid"] as? String).orEmpty()
+                        val rName = (data["reporterDisplayName"] as? String) ?: "Usuário Citra"
+                        val rUsername = (data["reporterUsername"] as? String).orEmpty()
+                        val rEmail = data["reporterEmail"] as? String
+                        val rTitle = (data["title"] as? String) ?: "Relato de Bug"
+                        val rDesc = (data["description"] as? String).orEmpty()
+                        val rVersion = (data["appVersion"] as? String) ?: "N/A"
+                        val rDevice = (data["deviceModel"] as? String).orEmpty()
+                        val createdAt = (data["createdAtMillis"] as? Number)?.toLong() ?: 0L
+                        InboxMessage(
+                            id = rId,
+                            senderUid = rUid,
+                            senderDisplayName = rName,
+                            senderUsername = rUsername,
+                            senderEmail = rEmail,
+                            recipientUid = userUid,
+                            recipientDisplayName = "Equipe Citra (Devs)",
+                            recipientUsername = "suporte",
+                            isOfficialDev = false,
+                            title = "🐞 Bug: $rTitle",
+                            contentMarkdown = "**Versão:** $rVersion | **Dispositivo:** $rDevice\n\n$rDesc",
+                            category = "Relato de Bug",
+                            sentAtMillis = createdAt,
+                            isRead = readBroadcasts.contains(rId),
+                            isDownloaded = false,
+                            isBroadcast = false,
+                            isBugReport = true
+                        )
+                    }
+                } catch (e: Exception) {
+                    handleFirestoreError(e, OperationType.LIST, "bugReports", auth)
+                    emptyList()
+                }
+            } else {
+                emptyList()
+            }
+
+            val combined = (personalMessages + broadcastMessages + bugMessages)
+                .distinctBy { it.id }
+                .sortedByDescending { it.sentAtMillis }
             emit(combined)
         } catch (e: Exception) {
-            Log.e("InboxRepository", "Error fetching inbox for $userUid", e)
+            handleFirestoreError(e, OperationType.LIST, inboxPath, auth)
             emit(emptyList())
         }
     }.flowOn(Dispatchers.IO)
@@ -412,6 +432,7 @@ class InboxRepository(private val context: Context) {
             return@flow
         }
 
+        val sentPath = "users/$userUid/sent"
         try {
             val sentDocs = db.collection("users")
                 .document(userUid)
@@ -426,18 +447,19 @@ class InboxRepository(private val context: Context) {
             }
             emit(sentMessages)
         } catch (e: Exception) {
-            Log.e("InboxRepository", "Error fetching sent messages for $userUid", e)
+            handleFirestoreError(e, OperationType.LIST, sentPath, auth)
             emit(emptyList())
         }
     }.flowOn(Dispatchers.IO)
 
     suspend fun markAsRead(userUid: String, message: InboxMessage) = withContext(Dispatchers.IO) {
-        if (message.isBroadcast) {
+        if (message.isBroadcast || message.isBugReport) {
             val current = prefs.getStringSet("read_broadcasts", emptySet()) ?: emptySet()
             prefs.edit().putStringSet("read_broadcasts", current + message.id).apply()
             return@withContext
         }
         val db = firestore ?: return@withContext
+        val path = "users/$userUid/inbox/${message.id}"
         try {
             db.collection("users")
                 .document(userUid)
@@ -446,13 +468,14 @@ class InboxRepository(private val context: Context) {
                 .update("isRead", true)
                 .await()
         } catch (e: Exception) {
-            Log.w("InboxRepository", "Error marking message as read", e)
+            handleFirestoreError(e, OperationType.UPDATE, path, auth)
         }
     }
 
     suspend fun markAsDownloaded(userUid: String, message: InboxMessage) = withContext(Dispatchers.IO) {
         if (message.isBroadcast) return@withContext
         val db = firestore ?: return@withContext
+        val path = "users/$userUid/inbox/${message.id}"
         try {
             db.collection("users")
                 .document(userUid)
@@ -461,17 +484,18 @@ class InboxRepository(private val context: Context) {
                 .update("isDownloaded", true, "isRead", true)
                 .await()
         } catch (e: Exception) {
-            Log.w("InboxRepository", "Error marking message as downloaded", e)
+            handleFirestoreError(e, OperationType.UPDATE, path, auth)
         }
     }
 
     suspend fun deleteMessage(userUid: String, message: InboxMessage) = withContext(Dispatchers.IO) {
-        if (message.isBroadcast) {
+        if (message.isBroadcast || message.isBugReport) {
             val current = prefs.getStringSet("dismissed_broadcasts", emptySet()) ?: emptySet()
             prefs.edit().putStringSet("dismissed_broadcasts", current + message.id).apply()
             return@withContext
         }
         val db = firestore ?: return@withContext
+        val path = "users/$userUid/inbox/${message.id}"
         try {
             db.collection("users")
                 .document(userUid)
@@ -480,18 +504,19 @@ class InboxRepository(private val context: Context) {
                 .delete()
                 .await()
         } catch (e: Exception) {
-            Log.w("InboxRepository", "Error deleting message", e)
+            handleFirestoreError(e, OperationType.DELETE, path, auth)
         }
     }
 
     suspend fun deleteMessages(userUid: String, messages: List<InboxMessage>) = withContext(Dispatchers.IO) {
-        val broadcastIds = messages.filter { it.isBroadcast }.map { it.id }.toSet()
-        if (broadcastIds.isNotEmpty()) {
+        val localDismissIds = messages.filter { it.isBroadcast || it.isBugReport }.map { it.id }.toSet()
+        if (localDismissIds.isNotEmpty()) {
             val current = prefs.getStringSet("dismissed_broadcasts", emptySet()) ?: emptySet()
-            prefs.edit().putStringSet("dismissed_broadcasts", current + broadcastIds).apply()
+            prefs.edit().putStringSet("dismissed_broadcasts", current + localDismissIds).apply()
         }
         val db = firestore ?: return@withContext
-        for (msg in messages.filter { !it.isBroadcast }) {
+        for (msg in messages.filter { !it.isBroadcast && !it.isBugReport }) {
+            val path = "users/$userUid/inbox/${msg.id}"
             try {
                 db.collection("users")
                     .document(userUid)
@@ -499,7 +524,9 @@ class InboxRepository(private val context: Context) {
                     .document(msg.id)
                     .delete()
                     .await()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                handleFirestoreError(e, OperationType.DELETE, path, auth)
+            }
         }
     }
 
@@ -509,6 +536,7 @@ class InboxRepository(private val context: Context) {
 
     suspend fun deleteSentMessage(userUid: String, messageId: String) = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext
+        val path = "users/$userUid/sent/$messageId"
         try {
             db.collection("users")
                 .document(userUid)
@@ -517,13 +545,14 @@ class InboxRepository(private val context: Context) {
                 .delete()
                 .await()
         } catch (e: Exception) {
-            Log.w("InboxRepository", "Error deleting sent message", e)
+            handleFirestoreError(e, OperationType.DELETE, path, auth)
         }
     }
 
     suspend fun deleteSentMessages(userUid: String, messageIds: List<String>) = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext
         for (id in messageIds) {
+            val path = "users/$userUid/sent/$id"
             try {
                 db.collection("users")
                     .document(userUid)
@@ -531,7 +560,9 @@ class InboxRepository(private val context: Context) {
                     .document(id)
                     .delete()
                     .await()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                handleFirestoreError(e, OperationType.DELETE, path, auth)
+            }
         }
     }
 }

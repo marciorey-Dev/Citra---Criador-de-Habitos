@@ -2,11 +2,12 @@ package com.example.data.devtools
 
 import android.content.Context
 import android.util.Log
-import com.example.R
 import com.example.data.auth.UserProfile
+import com.example.data.firebase.CitraFirebaseProvider
+import com.example.data.firebase.OperationType
+import com.example.data.firebase.handleFirestoreError
 import com.example.data.inbox.InboxRepository
 import com.example.data.model.InboxMessage
-import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
@@ -22,30 +23,7 @@ class DevToolsRepository(private val context: Context) {
     private val inboxRepository = InboxRepository.getInstance(context)
 
     private val firestore: FirebaseFirestore?
-        get() {
-            return try {
-                val app = com.example.data.auth.AuthRepository.ensureFirebaseInitialized(context) ?: return null
-                val dbId = try {
-                    val str = context.getString(R.string.firestore_database_id)
-                    if (str.isNotBlank() && str != "firestore_database_id") str else "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
-                } catch (_: Exception) {
-                    "ai-studio-android-citracri-aef1e0cf-8dac-4828-a367-9197571c1d74"
-                }
-
-                if (dbId.isNotBlank() && dbId != "default" && dbId != "(default)") {
-                    try {
-                        FirebaseFirestore.getInstance(app, dbId)
-                    } catch (e: Exception) {
-                        FirebaseFirestore.getInstance(app)
-                    }
-                } else {
-                    FirebaseFirestore.getInstance(app)
-                }
-            } catch (e: Exception) {
-                Log.e("DevToolsRepository", "Firebase Firestore initialization failed", e)
-                null
-            }
-        }
+        get() = CitraFirebaseProvider.getFirestore(context)
 
     private val _accounts = MutableStateFlow<List<DevUserAccount>>(emptyList())
     val accounts: StateFlow<List<DevUserAccount>> = _accounts.asStateFlow()
@@ -121,7 +99,9 @@ class DevToolsRepository(private val context: Context) {
                                 habitsBytes = (backupJson.length * 0.35).toLong().coerceAtLeast(0L)
                                 otherBytes = ((backupJson.length * 0.20) + financesJson.toByteArray(Charsets.UTF_8).size).toLong().coerceAtLeast(0L)
                             }
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            handleFirestoreError(e, OperationType.GET, "users/$uid/cloudSync/current", CitraFirebaseProvider.getAuth(context))
+                        }
 
                         // If user has zero synced bytes yet, provide realistic proportion based on their stats
                         val focusM = (doc.getLong("totalFocusMinutes") ?: 0L).toInt()
@@ -164,6 +144,7 @@ class DevToolsRepository(private val context: Context) {
                         )
                     }
                 } catch (e: Exception) {
+                    handleFirestoreError(e, OperationType.LIST, "users", CitraFirebaseProvider.getAuth(context))
                     Log.w("DevToolsRepository", "Failed fetching Firestore users, using seed data", e)
                 }
             }
@@ -367,7 +348,9 @@ class DevToolsRepository(private val context: Context) {
                 try {
                     db.collection("users").document(targetUid)
                         .collection("cloudSync").document("current").delete().await()
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    handleFirestoreError(e, OperationType.DELETE, "users/$targetUid/cloudSync/current", CitraFirebaseProvider.getAuth(context))
+                }
             }
 
             // Update in-memory state
@@ -397,7 +380,9 @@ class DevToolsRepository(private val context: Context) {
             if (db != null) {
                 try {
                     db.collection("users").document(targetUid).delete().await()
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    handleFirestoreError(e, OperationType.DELETE, "users/$targetUid", CitraFirebaseProvider.getAuth(context))
+                }
             }
 
             val updated = _accounts.value.filter { it.uid != targetUid }
@@ -416,7 +401,9 @@ class DevToolsRepository(private val context: Context) {
                 try {
                     db.collection("users").document(targetUid)
                         .set(mapOf("isBanned" to shouldBan), SetOptions.merge()).await()
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    handleFirestoreError(e, OperationType.UPDATE, "users/$targetUid", CitraFirebaseProvider.getAuth(context))
+                }
             }
 
             val updated = _accounts.value.map { acc ->
@@ -443,7 +430,9 @@ class DevToolsRepository(private val context: Context) {
                 try {
                     db.collection("users").document(targetUid)
                         .set(mapOf("isDev" to shouldPromote), SetOptions.merge()).await()
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    handleFirestoreError(e, OperationType.UPDATE, "users/$targetUid", CitraFirebaseProvider.getAuth(context))
+                }
             }
 
             val updated = _accounts.value.map { acc ->

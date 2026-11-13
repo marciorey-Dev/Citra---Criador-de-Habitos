@@ -239,6 +239,13 @@ class MainActivity : ComponentActivity() {
                     return@CitraTheme
                 }
 
+                // Attempt silent Credential Manager sign-in on launch if not in guest mode
+                LaunchedEffect(isAuthReady) {
+                    if (isAuthReady && currentUser == null && !isGuestMode) {
+                        authRepository.attemptAutoSignIn(this@MainActivity)
+                    }
+                }
+
                 // If user is not logged in and hasn't chosen guest mode yet, show first-launch AuthScreen
                 if (currentUser == null && !isGuestMode) {
                     AuthScreen(
@@ -416,6 +423,8 @@ class MainActivity : ComponentActivity() {
                                     cloudData.notesJson?.let { viewModel.importNotesJson(it) }
                                     cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
                                 }
+                            } else {
+                                viewModel.checkCloudFinanceBackupAvailable()
                             }
                         } catch (_: Exception) {}
 
@@ -428,7 +437,6 @@ class MainActivity : ComponentActivity() {
                                 else -> (now - lastSyncTimestamp) >= 24 * 60 * 60 * 1000L // "DAILY"
                             }
                             if (shouldSync) {
-                                viewModel.updateLastSyncTimestamp(now)
                                 try {
                                     val cloudData = authRepository.fetchCloudUserData()
                                     if (cloudData != null) {
@@ -437,7 +445,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     val financesJson = viewModel.exportFinancesJson()
                                     val settingsMap = viewModel.getSettingsMapForCloud()
-                                    authRepository.syncAllUserDataToCloud(
+                                    val syncResult = authRepository.syncAllUserDataToCloud(
                                         tasks = viewModel.tasks.value,
                                         habits = viewModel.habits.value,
                                         notes = viewModel.notes.value,
@@ -447,6 +455,12 @@ class MainActivity : ComponentActivity() {
                                         settingsMap = settingsMap,
                                         financesJson = financesJson
                                     )
+                                    if (syncResult.isSuccess) {
+                                        viewModel.updateLastSyncTimestamp(now)
+                                        if (financesJson.isNotBlank()) {
+                                            authRepository.syncFinancesToCloud(financesJson)
+                                        }
+                                    }
                                 } catch (_: Exception) {}
                             }
                         }
@@ -1094,13 +1108,9 @@ class MainActivity : ComponentActivity() {
         // Sync all user data to Firebase Firestore if logged in and sync is enabled
         val user = authRepository.currentUser.value
         if (viewModel.syncEnabled.value && user != null && !user.isGuest) {
-            val settingsMap = mapOf<String, Any>(
-                "themeAccent" to viewModel.themeAccent.value.name,
-                "keepScreenOn" to viewModel.keepScreenOn.value,
-                "ambientMusicInApp" to viewModel.notificationSettings.value.ambientBreakMusicInApp,
-                "ambientMusicVolume" to viewModel.notificationSettings.value.ambientMusicVolume
-            )
+            val settingsMap = viewModel.getSettingsMapForCloud()
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                val financesJson = try { viewModel.exportFinancesJson() } catch (_: Exception) { null }
                 authRepository.syncAllUserDataToCloud(
                     tasks = viewModel.tasks.value,
                     habits = viewModel.habits.value,
@@ -1108,7 +1118,8 @@ class MainActivity : ComponentActivity() {
                     categories = viewModel.categories.value,
                     focusSessions = viewModel.focusSessions.value,
                     achievements = viewModel.achievements.value,
-                    settingsMap = settingsMap
+                    settingsMap = settingsMap,
+                    financesJson = financesJson
                 )
             }
             viewModel.backupFinancesNow(showToast = false)
