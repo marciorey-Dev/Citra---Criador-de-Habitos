@@ -54,7 +54,7 @@ jobs:
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools platforms;android-36.1 platforms;android-36 build-tools;36.0.0'
 
-      # 4. Garantir pacotes e licenças do Android SDK (incluindo android-36.1)
+      # 4. Verificar pacotes e licenças do Android SDK (incluindo android-36.1)
       - name: Garantir pacotes e licenças do Android SDK
         run: |
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
@@ -93,10 +93,13 @@ jobs:
           fi
           keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey
 
-      # 7. Garantir .env.example, .env, local.properties e google-services.json
-      - name: Preparar ambiente e credenciais
+      # 7. Garantir .env.example, .env, local.properties e google-services.json via GitHub Secrets
+      - name: Preparar ambiente e credenciais do Firebase
+        id: prep_env
         env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true }}
         run: |
           if [ ! -f ".env.example" ]; then
             printf 'GEMINI_API_KEY=\n' > .env.example
@@ -104,17 +107,35 @@ jobs:
           if [ ! -f ".env" ]; then
             cp .env.example .env
           fi
+
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           if [ -n "$SDK_ROOT" ]; then
             printf 'sdk.dir=%s\n' "$SDK_ROOT" > local.properties
           fi
-          if [ ! -f "app/google-services.json" ]; then
-            if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-              echo "Restaurando app/google-services.json a partir do segredo..."
-              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            else
-              echo "::warning::app/google-services.json ausente e secret GOOGLE_SERVICES_JSON não configurado."
+
+          CREATED_GS_FROM_SECRET="false"
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "Restaurando app/google-services.json a partir do secret GOOGLE_SERVICES_JSON_BASE64..."
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '\r\n ' | base64 -d > app/google-services.json
+            CREATED_GS_FROM_SECRET="true"
+          elif [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Restaurando app/google-services.json a partir do secret GOOGLE_SERVICES_JSON..."
+            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            CREATED_GS_FROM_SECRET="true"
+          fi
+          echo "created_gs_from_secret=$CREATED_GS_FROM_SECRET" >> "$GITHUB_OUTPUT"
+
+          if [ -f "app/google-services.json" ]; then
+            if ! python3 -m json.tool app/google-services.json >/dev/null 2>&1; then
+              echo "::error::app/google-services.json existe, mas não é um JSON válido. Verifique o conteúdo do secret GOOGLE_SERVICES_JSON / GOOGLE_SERVICES_JSON_BASE64."
+              exit 1
             fi
+            echo "app/google-services.json validado com sucesso."
+          elif [ "$IS_FORK_PR" = "true" ]; then
+            echo "::warning::Pull request de fork sem acesso a Secrets; compilando sem google-services.json."
+          else
+            echo "::error::app/google-services.json não encontrado! Cadastre o secret GOOGLE_SERVICES_JSON (ou GOOGLE_SERVICES_JSON_BASE64) em Settings -> Secrets and variables -> Actions para gerar um APK com Firebase e Google Sign-In funcionais."
+            exit 1
           fi
 
       # 8. Verificar e preparar Gradle Wrapper (gradlew)
@@ -163,10 +184,14 @@ jobs:
             echo "actual_variant=debug" >> "$GITHUB_OUTPUT"
           fi
 
-      # 11. Limpar keystore temporária de release
-      - name: Limpar arquivos temporários de assinatura
+      # 11. Limpar arquivos sensíveis temporários criados a partir de secrets
+      - name: Limpar arquivos temporários de credenciais e assinatura
         if: always()
-        run: rm -f release-key.jks
+        run: |
+          rm -f release-key.jks
+          if [ "${{ steps.prep_env.outputs.created_gs_from_secret }}" = "true" ]; then
+            rm -f app/google-services.json
+          fi
 
       # 12. Coletar, organizar APKs gerados e escrever resumo
       - name: Organizar APKs gerados

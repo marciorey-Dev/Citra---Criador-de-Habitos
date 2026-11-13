@@ -1,12 +1,30 @@
 # 🚀 Compilação pelo GitHub Actions (Citra Android)
 
-Este projeto está configurado para compilar o APK diretamente nos servidores do GitHub usando o workflow `.github/workflows/build-apk.yml`.
+Este projeto está configurado para compilar o APK diretamente nos servidores do GitHub usando `.github/workflows/build-apk.yml` mantendo `app/google-services.json` **fora do repositório público** (via `.gitignore`) e injetando-o com segurança por **GitHub Secrets**.
 
-## ✅ O que já vem pronto no repositório
-- **Gradle Wrapper (`gradlew` + `gradle/wrapper/*`)** configurado para **Gradle 9.3.1**.
-- **Android SDK `compileSdk 36.1`** e **Build Tools 36.0.0** instalados automaticamente no runner Linux (`ubuntu-latest`) com **Java 21 (Temurin)**.
-- **Assinatura compatível com Firebase e Login Google (`debug.keystore.base64`)**: o workflow restaura automaticamente a `debug.keystore` com o SHA-1 registrado no `app/google-services.json`, garantindo que o login com Google e o Firestore funcionem no APK de testes.
-- **Variáveis de ambiente (`.env`)**: criadas automaticamente a partir de `.env.example` durante o build.
+---
+
+## 🔐 Passo obrigatório (1x): Configurar o `google-services.json` no GitHub Secrets
+
+Como `app/google-services.json` está no `.gitignore` para não expor configurações do projeto Firebase em repositórios públicos, cadastre-o uma única vez nos **Secrets** do repositório:
+
+1. No GitHub, abra seu repositório → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
+2. Escolha **uma** das duas opções abaixo (a opção Base64 evita erros de formatação):
+
+### Opção A — `GOOGLE_SERVICES_JSON_BASE64` *(Recomendada)*
+Gere o texto em Base64 no seu computador e cole no valor do secret `GOOGLE_SERVICES_JSON_BASE64`:
+- **Linux / macOS:**
+  ```bash
+  base64 -w 0 app/google-services.json
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  [Convert]::ToBase64String([IO.File]::ReadAllBytes("app\google-services.json"))
+  ```
+
+### Opção B — `GOOGLE_SERVICES_JSON` *(JSON direto)*
+- Nome do secret: `GOOGLE_SERVICES_JSON`
+- Valor: cole o conteúdo inteiro do arquivo `app/google-services.json`.
 
 ---
 
@@ -20,17 +38,16 @@ Este projeto está configurado para compilar o APK diretamente nos servidores do
 
 ---
 
-## 🔐 Secrets opcionais para APK Release
-Se quiser compilar a variante **`release`** pelo GitHub Actions (`Run workflow` → `release`), cadastre em **Settings → Secrets and variables → Actions** do repositório:
+## 🔑 Secrets opcionais para APK Release
+Para compilar a variante **`release`** pelo GitHub Actions (`Run workflow` → `release`), cadastre também em **Settings → Secrets and variables → Actions**:
 
 | Secret | Descrição |
 | --- | --- |
 | `RELEASE_KEYSTORE_BASE64` | Arquivo `.jks` de upload codificado em Base64 (alias obrigatório: `upload`) |
 | `RELEASE_STORE_PASSWORD` | Senha da keystore de release |
 | `RELEASE_KEY_PASSWORD` | Senha da chave (`upload`) |
-| `GOOGLE_SERVICES_JSON` | *(Opcional)* Conteúdo do `app/google-services.json`, caso decida não versionar o arquivo no repo |
 
-> Se a variante `release` for executada sem esses secrets, o workflow emite um aviso e gera o **Debug APK** automaticamente para não falhar a compilação.
+> Se a variante `release` for executada sem esses secrets de assinatura, o workflow emite um aviso e gera o **Debug APK** automaticamente.
 
 ---
 
