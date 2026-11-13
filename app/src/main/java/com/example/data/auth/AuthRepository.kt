@@ -4,11 +4,13 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import android.os.SystemClock
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import com.example.R
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -16,7 +18,9 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingExcept
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -254,21 +258,56 @@ class AuthRepository(private val context: Context) {
         }
     }
 
+    private fun resolveActivity(callerContext: Context?): Activity? {
+        var tempContext: Context? = callerContext ?: context
+        while (tempContext is ContextWrapper) {
+            if (tempContext is Activity) return tempContext
+            tempContext = tempContext.baseContext
+        }
+        return null
+    }
+
+    private fun completeFirebaseUserSignIn(user: FirebaseUser): UserProfile {
+        _isGuestMode.value = false
+        prefs.edit().putBoolean("is_guest_mode", false).apply()
+        loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString(), user.email)
+        return _currentUser.value ?: UserProfile(
+            uid = user.uid,
+            displayName = user.displayName ?: "Usuário Citra",
+            username = user.uid.take(6),
+            photoUrl = user.photoUrl?.toString(),
+            email = user.email,
+            isPrivate = false,
+            isGuest = false
+        )
+    }
+
+    suspend fun signInWithGoogleViaBrowser(callerContext: Context? = null): Result<UserProfile> {
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
+        val activity = resolveActivity(callerContext)
+            ?: return Result.failure(IllegalStateException("Contexto de Activity indisponível para abrir o login Google."))
+        return try {
+            val provider = OAuthProvider.newBuilder("google.com")
+                .setScopes(listOf("email", "profile"))
+                .addCustomParameter("prompt", "select_account")
+                .build()
+            val authResult = currentAuth.startActivityForSignInWithProvider(activity, provider).await()
+            val user = authResult.user ?: throw IllegalStateException("Usuário retornado pelo Firebase foi nulo.")
+            Result.success(completeFirebaseUserSignIn(user))
+        } catch (e: Exception) {
+            android.util.Log.e("AuthRepository", "Erro no login Google via navegador (OAuthProvider)", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun signInWithGoogle(callerContext: Context? = null): Result<UserProfile> {
         val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth não está inicializado."))
-        return try {
-            val resolvedContext: Context = callerContext ?: context
-            var activity: Activity? = null
-            var tempContext: Context? = resolvedContext
-            while (tempContext is ContextWrapper) {
-                if (tempContext is Activity) {
-                    activity = tempContext
-                    break
-                }
-                tempContext = tempContext.baseContext
-            }
+        val resolvedContext: Context = callerContext ?: context
+        val activity = resolveActivity(resolvedContext)
+        val targetContext: Context = activity ?: resolvedContext
 
-            val targetContext: Context = activity ?: resolvedContext
+        val attemptStartMs = SystemClock.elapsedRealtime()
+        return try {
             val serverClientId = try {
                 targetContext.getString(R.string.default_web_client_id)
             } catch (e: Exception) {
@@ -325,23 +364,39 @@ class AuthRepository(private val context: Context) {
             val authResult = currentAuth.signInWithCredential(firebaseCredential).await()
             val user = authResult.user ?: throw IllegalStateException("Usuário retornado pelo Firebase foi nulo.")
 
-            _isGuestMode.value = false
-            prefs.edit().putBoolean("is_guest_mode", false).apply()
-
-            loadUserProfile(user.uid, user.displayName, user.photoUrl?.toString(), user.email)
-            Result.success(
-                _currentUser.value ?: UserProfile(
-                    uid = user.uid,
-                    displayName = user.displayName ?: "Usuário Citra",
-                    username = user.uid.take(6),
-                    photoUrl = user.photoUrl?.toString(),
-                    email = user.email,
-                    isPrivate = false,
-                    isGuest = false
-                )
-            )
+            Result.success(completeFirebaseUserSignIn(user))
         } catch (e: GetCredentialCancellationException) {
-            android.util.Log.w("AuthRepository", "Google Sign-In cancelado ou dispensado: ${e.message}", e)
+            val elapsedMs = SystemClock.elapsedRealtime() - attemptStartMs
+            android.util.Log.w("AuthRepository", "Google Sign-In cancelado ou dispensado em ${elapsedMs}ms: ${e.message}", e)
+            // When Google Play Services aborts immediately (<1500ms) due to 28444/keystore/cache mismatch,
+            // seamlessly fall back to Firebase's web-based Google OAuth flow.
+            if (elapsedMs < 1500L && activity != null) {
+                val browserResult = signInWithGoogleViaBrowser(activity)
+                if (browserResult.isSuccess) return browserResult
+                val browserEx = browserResult.exceptionOrNull()
+                return Result.failure(
+                    IllegalStateException(
+                        "Play Services cancelou imediatamente (${elapsedMs}ms: ${e.localizedMessage ?: "sem detalhe"}). " +
+                            "Fallback navegador: ${browserEx?.javaClass?.simpleName}: ${browserEx?.localizedMessage ?: "falhou"}",
+                        browserEx ?: e
+                    )
+                )
+            }
+            Result.failure(e)
+        } catch (e: GetCredentialException) {
+            android.util.Log.w("AuthRepository", "CredentialManager falhou (${e.javaClass.simpleName}): ${e.message}", e)
+            if (activity != null) {
+                val browserResult = signInWithGoogleViaBrowser(activity)
+                if (browserResult.isSuccess) return browserResult
+                val browserEx = browserResult.exceptionOrNull()
+                return Result.failure(
+                    IllegalStateException(
+                        "${e.javaClass.simpleName}: ${e.localizedMessage}. " +
+                            "Fallback navegador: ${browserEx?.javaClass?.simpleName}: ${browserEx?.localizedMessage ?: "falhou"}",
+                        browserEx ?: e
+                    )
+                )
+            }
             Result.failure(e)
         } catch (e: Exception) {
             android.util.Log.e("AuthRepository", "Erro no login Google", e)
