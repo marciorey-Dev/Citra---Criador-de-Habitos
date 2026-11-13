@@ -54,7 +54,7 @@ jobs:
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platform-tools platforms;android-36.1 platforms;android-36 build-tools;36.0.0'
 
-      # 4. Verificar pacotes e licenças do Android SDK (incluindo android-36.1)
+      # 4. Garantir pacotes e licenças do Android SDK (incluindo android-36.1)
       - name: Garantir pacotes e licenças do Android SDK
         run: |
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
