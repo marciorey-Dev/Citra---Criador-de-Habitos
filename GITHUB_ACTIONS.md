@@ -1,38 +1,20 @@
 # 🚀 Compilação pelo GitHub Actions (Citra Android)
 
-Este projeto está configurado para compilar o APK diretamente nos servidores do GitHub usando `.github/workflows/build-apk.yml` mantendo `app/google-services.json` **fora do repositório público** (via `.gitignore`) e injetando-o com segurança por **GitHub Secrets**.
+Este projeto está configurado para compilar o APK diretamente nos servidores do GitHub usando `.github/workflows/build-apk.yml`, com `app/google-services.json` já incluído no projeto para compilar imediatamente (e também aceitando Secrets como sobrescrita opcional).
 
 ---
 
-## 🔐 Passo obrigatório (1x): Configurar o `google-services.json` no GitHub Secrets
+## ✅ O que já vem pronto no projeto
+- **`app/google-services.json`**: já está no repositório com as credenciais Firebase do app `com.aistudio.habitcraft.krqpmv` (projeto `gen-lang-client-0656311562`), o `certificate_hash` SHA-1 da `debug.keystore` e o `oauth_client` Web (`default_web_client_id`).
+- **`debug.keystore.base64`**: restaura a assinatura de debug compatível com Firebase Auth e Google Sign-In.
 
-Como `app/google-services.json` está no `.gitignore` para não expor configurações do projeto Firebase em repositórios públicos, cadastre-o uma única vez nos **Secrets** do repositório:
+---
 
-1. No GitHub, abra seu repositório → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
-2. Escolha **uma** das duas opções abaixo (a opção Base64 evita erros de formatação):
-
-### Opção A — `GOOGLE_SERVICES_JSON_BASE64` *(Recomendada)*
-Gere o texto em Base64 no seu computador e cole no valor do secret `GOOGLE_SERVICES_JSON_BASE64`:
-- **Linux / macOS:**
-  ```bash
-  base64 -w 0 app/google-services.json
-  ```
-- **Windows (PowerShell):**
-  ```powershell
-  [Convert]::ToBase64String([IO.File]::ReadAllBytes("app\google-services.json"))
-  ```
-
-### Opção B — `GOOGLE_SERVICES_JSON` *(JSON direto)*
-- Nome do secret: `GOOGLE_SERVICES_JSON`
-- Valor: cole o conteúdo inteiro do arquivo `app/google-services.json`.
-
-### Opção C — Secrets individuais do Firebase *(Geração dinâmica)*
-Se preferir que o GitHub Actions monte `app/google-services.json` dinamicamente antes do build, cadastre estes secrets:
-- `FIREBASE_PROJECT_ID` (ex.: `gen-lang-client-0656311562`)
-- `FIREBASE_APP_ID` (ID do app Android no Firebase, ex.: `1:...:android:...`)
-- `FIREBASE_API_KEY` (Chave Web/Android do projeto Firebase)
-- `FIREBASE_WEB_CLIENT_ID` (Client ID OAuth 2.0 Web `client_type: 3`, usado no `default_web_client_id`)
-- *(Opcionais)* `FIREBASE_PROJECT_NUMBER`, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_ANDROID_CLIENT_ID`
+## 🔐 Secrets opcionais (para sobrescrever o Firebase sem alterar o código)
+Se você quiser apontar o build para outro projeto Firebase via GitHub Secrets (**Settings → Secrets and variables → Actions**), o workflow aceita automaticamente:
+- **`GOOGLE_SERVICES_JSON_BASE64`**: conteúdo do `app/google-services.json` em Base64.
+- **`GOOGLE_SERVICES_JSON`**: conteúdo JSON completo do `app/google-services.json`.
+- Ou os secrets individuais **`FIREBASE_PROJECT_ID`**, **`FIREBASE_APP_ID`**, **`FIREBASE_API_KEY`**, **`FIREBASE_WEB_CLIENT_ID`**.
 
 ---
 

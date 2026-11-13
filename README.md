@@ -59,13 +59,12 @@
 O repositório conta com automação de build configurada em `.github/workflows/build-apk.yml` (veja instruções completas em [`GITHUB_ACTIONS.md`](GITHUB_ACTIONS.md)).
 
 ### Passo a passo para gerar o APK de Testes:
-1. **Configurar Secret do Firebase (1x):** Por segurança, `app/google-services.json` fica no `.gitignore`. Cadastre o secret `GOOGLE_SERVICES_JSON_BASE64` (ou `GOOGLE_SERVICES_JSON`) em **Settings → Secrets and variables → Actions**.
-2. **Compilação Automática:** Todo `git push` ou `pull request` dispara automaticamente a compilação do APK de testes com a `debug.keystore` compatível com Firebase/Google Sign-In.
-3. **Disparo Manual (1 clique):**
+1. **Compilação Automática:** Todo `git push` ou `pull request` dispara automaticamente a compilação do APK de testes usando `app/google-services.json` e a `debug.keystore` compatível com Firebase/Google Sign-In.
+2. **Disparo Manual (1 clique):**
    - Acesse o seu repositório no GitHub e clique na aba **Actions**.
    - No menu lateral esquerdo, selecione **Compilar APK Android (Citra)**.
    - Clique em **Run workflow**, selecione a variante (`debug` ou `release`) e clique no botão verde **Run workflow**.
-4. **Download do APK:**
+3. **Download do APK:**
    - Aguarde a conclusão do build (ícone verde de check ✔️).
    - Clique no workflow concluído.
    - Na seção **Artifacts** (na parte inferior da página), baixe o pacote **Citra-Test-APK**.
