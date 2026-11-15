@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,16 +33,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.auth.AuthRepository
-import com.example.data.devtools.DevToolsRepository
-import com.example.data.inbox.InboxRepository
 import com.example.ui.MainViewModel
 import com.example.ui.screens.stats.StatsScreen
 import com.example.ui.theme.GreenAccent
 import com.example.ui.theme.RedAction
-import com.example.ui.components.AppTutorialDialog
 import com.example.ui.components.BackupDialog
-import com.example.ui.components.CloudSyncedDataDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.components.LatexManualDialog
 import androidx.compose.foundation.BorderStroke
@@ -54,44 +48,29 @@ import java.io.File
 @Composable
 fun ProfileScreen(
     viewModel: MainViewModel,
-    authRepository: AuthRepository,
     onOpenSettings: () -> Unit,
-    onOpenAuthGate: () -> Unit,
     onNavigateToNotes: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = remember { context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
 
-    val user by authRepository.currentUser.collectAsState()
+    val localDisplayName by viewModel.localDisplayName.collectAsState()
+    val localPhotoPath by viewModel.localPhotoPath.collectAsState()
     val notes by viewModel.notes.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
     val habits by viewModel.habits.collectAsState()
-    val categories by viewModel.categories.collectAsState()
-    val achievements by viewModel.achievements.collectAsState()
     val focusSessions by viewModel.focusSessions.collectAsState()
     val keepScreenOn by viewModel.keepScreenOn.collectAsState()
     val notificationSettings by viewModel.notificationSettings.collectAsState()
 
-    val devToolsRepository = remember { DevToolsRepository.getInstance(context) }
-    val isDeveloper = remember(user) {
-        user?.isDev == true || InboxRepository.isDeveloper(user?.email, user?.uid)
-    }
-
-    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: DevTools (se dev), 2: Dados
-
-    LaunchedEffect(isDeveloper) {
-        if (!isDeveloper && selectedSubTab > 1) {
-            selectedSubTab = 1
-        }
-    }
+    var selectedSubTab by remember { mutableStateOf(0) } // 0: Estatísticas, 1: Dados
 
     // Modals
     var showEditNameDialog by remember { mutableStateOf(false) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var showLatexManualDialog by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
-    var showCloudDataDialog by remember { mutableStateOf(false) }
     var resetTarget by remember { mutableStateOf<String?>(null) } // "tasks", "habits", "notes", "all"
 
     // Photo picker launcher (Gallery)
@@ -101,15 +80,15 @@ fun ProfileScreen(
         if (uri != null) {
             coroutineScope.launch {
                 try {
-                    val uid = user?.uid ?: "guest"
                     val avatarDir = File(context.filesDir, "avatars").apply { mkdirs() }
-                    val targetFile = File(avatarDir, "user_${uid}.jpg")
+                    avatarDir.listFiles()?.forEach { it.delete() }
+                    val targetFile = File(avatarDir, "user_profile_${System.currentTimeMillis()}.jpg")
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         targetFile.outputStream().use { output ->
                             input.copyTo(output)
                         }
                     }
-                    authRepository.updateProfile(photoUrl = targetFile.absolutePath)
+                    viewModel.setLocalPhotoPath(targetFile.absolutePath)
                     Toast.makeText(context, "Foto de perfil atualizada!", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(context, "Erro ao salvar imagem local.", Toast.LENGTH_SHORT).show()
@@ -125,13 +104,13 @@ fun ProfileScreen(
         if (bitmap != null) {
             coroutineScope.launch {
                 try {
-                    val uid = user?.uid ?: "guest"
                     val avatarDir = File(context.filesDir, "avatars").apply { mkdirs() }
-                    val targetFile = File(avatarDir, "user_${uid}.jpg")
+                    avatarDir.listFiles()?.forEach { it.delete() }
+                    val targetFile = File(avatarDir, "user_profile_${System.currentTimeMillis()}.jpg")
                     targetFile.outputStream().use { out ->
                         bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
                     }
-                    authRepository.updateProfile(photoUrl = targetFile.absolutePath)
+                    viewModel.setLocalPhotoPath(targetFile.absolutePath)
                     Toast.makeText(context, "Foto capturada com sucesso!", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(context, "Erro ao salvar foto da câmera.", Toast.LENGTH_SHORT).show()
@@ -171,30 +150,13 @@ fun ProfileScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = user?.displayName ?: "Viajante Citra",
+                                        text = localDisplayName,
                                         fontSize = 20.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    if (isDeveloper) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = Color(0xFFFFB703).copy(alpha = 0.2f),
-                                            border = BorderStroke(1.dp, Color(0xFFD97706).copy(alpha = 0.5f))
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                            ) {
-                                                Text("🛠️", fontSize = 10.sp)
-                                                Text("DEV", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
-                                            }
-                                        }
-                                    }
                                     Spacer(modifier = Modifier.width(6.dp))
                                     IconButton(
                                         onClick = { showEditNameDialog = true },
@@ -205,40 +167,6 @@ fun ProfileScreen(
                                             contentDescription = "Editar Nome",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(17.dp)
-                                        )
-                                    }
-                                }
-                                val displayHandle = "@${(user?.username ?: "viajante").removePrefix("@")}"
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            clipboardManager.setPrimaryClip(ClipData.newPlainText("Citra Usuario", displayHandle))
-                                            Toast.makeText(context, "$displayHandle copiado! Use para receber notas.", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .testTag("profile_username_badge")
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Text(
-                                            text = displayHandle,
-                                            fontSize = 12.5.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copiar @usuário",
-                                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                                            modifier = Modifier.size(12.dp)
                                         )
                                     }
                                 }
@@ -258,9 +186,9 @@ fun ProfileScreen(
                                         .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), CircleShape)
                                         .clickable { showImageSourceDialog = true }
                                 ) {
-                                    if (!user?.photoUrl.isNullOrBlank()) {
+                                    if (!localPhotoPath.isNullOrBlank()) {
                                         AsyncImage(
-                                            model = user?.photoUrl,
+                                            model = File(localPhotoPath!!),
                                             contentDescription = "Foto de Perfil",
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
@@ -268,7 +196,7 @@ fun ProfileScreen(
                                     } else {
                                         Box(contentAlignment = Alignment.Center) {
                                             Text(
-                                                text = user?.displayName?.take(1)?.uppercase() ?: "C",
+                                                text = localDisplayName.take(1).uppercase().ifBlank { "C" },
                                                 fontSize = 32.sp,
                                                 fontWeight = FontWeight.ExtraBold,
                                                 color = MaterialTheme.colorScheme.primary
@@ -324,50 +252,17 @@ fun ProfileScreen(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
                         }
-
-                        // Guest mode warning & sign in link
-                        if (user?.isGuest == true) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpenAuthGate() }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.CloudQueue, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Modo Sem Conta Ativado", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                        Text("Toque aqui para conectar ou criar conta e sincronizar na nuvem.", fontSize = 11.sp)
-                                    }
-                                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
                     }
                 }
             }
 
-            // 2. SEGMENTED SUB-TABS SELECTOR: [Estatísticas] [DevTools (se dev)] [Dados]
+            // 2. SEGMENTED SUB-TABS SELECTOR: [Estatísticas] [Dados]
             item {
-                val subTabsList = remember(isDeveloper) {
-                    if (isDeveloper) {
-                        listOf(
-                            0 to Pair("Estatísticas", Icons.Default.BarChart),
-                            1 to Pair("DevTools", Icons.Default.AdminPanelSettings),
-                            2 to Pair("Dados", Icons.Default.Storage)
-                        )
-                    } else {
-                        listOf(
-                            0 to Pair("Estatísticas", Icons.Default.BarChart),
-                            1 to Pair("Dados", Icons.Default.Storage)
-                        )
-                    }
+                val subTabsList = remember {
+                    listOf(
+                        0 to Pair("Estatísticas", Icons.Default.BarChart),
+                        1 to Pair("Dados", Icons.Default.Storage)
+                    )
                 }
 
                 Surface(
@@ -400,23 +295,15 @@ fun ProfileScreen(
                                     Icon(
                                         imageVector = pair.second,
                                         contentDescription = null,
-                                        tint = if (isSelected) {
-                                            if (pair.first == "DevTools") Color(0xFFD97706) else MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = pair.first,
-                                        fontSize = if (isDeveloper) 12.sp else 13.5.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                        color = if (isSelected) {
-                                            if (pair.first == "DevTools") Color(0xFFD97706) else MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1
                                     )
                                 }
@@ -427,13 +314,7 @@ fun ProfileScreen(
             }
 
             // 4. SUB-TAB CONTENT
-            val currentTab = if (isDeveloper) {
-                selectedSubTab
-            } else {
-                if (selectedSubTab == 1) 2 else 0
-            }
-
-            when (currentTab) {
+            when (selectedSubTab) {
                 0 -> {
                     // ESTATÍSTICAS
                     item {
@@ -441,17 +322,7 @@ fun ProfileScreen(
                     }
                 }
 
-                1 -> {
-                    // DEVTOOLS (Painel entre Estatísticas e Dados para contas de desenvolvedor)
-                    item {
-                        DevToolsPanel(
-                            currentUser = user,
-                            devToolsRepository = devToolsRepository
-                        )
-                    }
-                }
-
-                2 -> {
+                else -> {
                     // DADOS (Technical info, storage usage, share app, tutorial, accessibility)
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -504,202 +375,6 @@ fun ProfileScreen(
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("Tarefas / Hábitos Ativos:", fontSize = 12.sp)
                                         Text("${tasks.size} tarefas • ${habits.size} hábitos", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                    }
-                                }
-                            }
-
-                            // Firebase Cloud Sync Card
-                            Card(
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                imageVector = Icons.Default.CloudSync,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                "Firebase Firestore",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = if (user?.isGuest == false) GreenAccent.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant
-                                        ) {
-                                            Text(
-                                                text = if (user?.isGuest == false) "Sincronizado" else "Modo Convidado",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (user?.isGuest == false) GreenAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = if (user?.isGuest == false)
-                                            "Tarefas, hábitos, notas, conquistas e sessões são sincronizados em tempo real no seu Firestore."
-                                        else
-                                            "Conecte sua conta para fazer backup contínuo na nuvem.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        lineHeight = 15.sp
-                                    )
-
-                                    if (user?.isGuest == false) {
-                                        var isSyncingNow by remember { mutableStateOf(false) }
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Button(
-                                                onClick = {
-                                                    isSyncingNow = true
-                                                    coroutineScope.launch {
-                                                        val settingsMap = viewModel.getSettingsMapForCloud()
-                                                        val financesJson = viewModel.exportFinancesJson()
-                                                        val syncRes = authRepository.syncAllUserDataToCloud(
-                                                            tasks = tasks,
-                                                            habits = habits,
-                                                            notes = notes,
-                                                            categories = categories,
-                                                            focusSessions = focusSessions,
-                                                            achievements = achievements,
-                                                            settingsMap = settingsMap,
-                                                            financesJson = financesJson
-                                                        )
-                                                        if (syncRes.isSuccess && financesJson.isNotBlank()) {
-                                                            authRepository.syncFinancesToCloud(financesJson)
-                                                        }
-                                                        isSyncingNow = false
-                                                        if (syncRes.isSuccess) {
-                                                            viewModel.updateLastSyncTimestamp(System.currentTimeMillis())
-                                                            Toast.makeText(context, "Dados, estatísticas e finanças sincronizados!", Toast.LENGTH_SHORT).show()
-                                                        } else {
-                                                            Toast.makeText(context, "Falha ao sincronizar com a nuvem. Verifique sua conexão.", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(10.dp),
-                                                enabled = !isSyncingNow,
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Sincronizar", fontSize = 11.sp)
-                                            }
-
-                                            OutlinedButton(
-                                                onClick = {
-                                                    isSyncingNow = true
-                                                    coroutineScope.launch {
-                                                        val cloudData = authRepository.fetchCloudUserData()
-                                                        val cloudFinancesFallback = if (cloudData?.financesJson.isNullOrBlank()) {
-                                                            authRepository.fetchCloudFinances()
-                                                        } else null
-                                                        isSyncingNow = false
-                                                        if (cloudData != null || !cloudFinancesFallback.isNullOrBlank()) {
-                                                            if (cloudData != null) {
-                                                                viewModel.applyCloudSettings(cloudData.settings)
-                                                                cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
-                                                                cloudData.notesJson?.let { viewModel.importNotesJson(it) }
-                                                                (cloudData.financesJson ?: cloudFinancesFallback)?.let { viewModel.restoreFinancesJson(it) }
-                                                            } else {
-                                                                cloudFinancesFallback?.let { viewModel.restoreFinancesJson(it) }
-                                                            }
-                                                            Toast.makeText(context, "Dados, estatísticas e finanças restaurados da nuvem!", Toast.LENGTH_SHORT).show()
-                                                        } else {
-                                                            Toast.makeText(context, "Nenhum backup em nuvem encontrado.", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    }
-                                                },
-                                                shape = RoundedCornerShape(10.dp),
-                                                enabled = !isSyncingNow,
-                                                modifier = Modifier.weight(1f)
-                                            ) {
-                                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Restaurar", fontSize = 11.sp)
-                                            }
-                                        }
-
-                                        FilledTonalButton(
-                                            onClick = { showCloudDataDialog = true },
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Monitoramento do Armazenamento em Nuvem", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-
-                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                                        Text(
-                                            text = "Frequência de Sincronização Automática",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-
-                                        val currentSyncFreq by viewModel.syncFrequency.collectAsState()
-                                        val freqOptions = listOf(
-                                            "1_HOUR" to "A cada 1 hora",
-                                            "DAILY" to "Uma vez por dia (Padrão)",
-                                            "WEEKLY" to "Uma vez por semana",
-                                            "ON_APP_OPEN" to "Sempre ao abrir o app"
-                                        )
-
-                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            freqOptions.forEach { (key, label) ->
-                                                val isSelected = currentSyncFreq == key
-                                                Surface(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable { viewModel.setSyncFrequency(key) }
-                                                        .border(
-                                                            width = if (isSelected) 1.5.dp else 0.dp,
-                                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                                            shape = RoundedCornerShape(10.dp)
-                                                        )
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        RadioButton(
-                                                            selected = isSelected,
-                                                            onClick = { viewModel.setSyncFrequency(key) },
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(8.dp))
-                                                        Text(
-                                                            text = label,
-                                                            fontSize = 12.sp,
-                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -976,19 +651,6 @@ fun ProfileScreen(
                                 }
                             }
 
-                            // Desconectar / Sair
-                            if (user?.isGuest == false) {
-                                OutlinedButton(
-                                    onClick = { authRepository.signOut() },
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RedAction),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Desconectar Conta")
-                                }
-                            }
                         }
                     }
                 }
@@ -996,43 +658,26 @@ fun ProfileScreen(
         }
     }
 
-    // Edit Name & Username Dialog
+    // Edit Local Display Name Dialog
     if (showEditNameDialog) {
-        var newName by remember { mutableStateOf(user?.displayName ?: "") }
-        var newUsername by remember { mutableStateOf((user?.username ?: "").removePrefix("@")) }
+        var newName by remember { mutableStateOf(localDisplayName) }
         AlertDialog(
             onDismissRequest = { showEditNameDialog = false },
             title = { Text("Editar Perfil", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Nome de Exibição") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = newUsername,
-                        onValueChange = { input ->
-                            newUsername = input.removePrefix("@").lowercase().filter { it.isLetterOrDigit() || it == '.' || it == '_' }
-                        },
-                        label = { Text("Usuário (@usuario)") },
-                        prefix = { Text("@") },
-                        supportingText = { Text("Usado como método secundário para receber notas.", fontSize = 11.sp) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Nome de Exibição") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (newName.isNotBlank()) {
-                            authRepository.updateProfile(
-                                displayName = newName.trim(),
-                                username = newUsername.trim().takeIf { it.isNotBlank() }
-                            )
+                            viewModel.setLocalDisplayName(newName.trim())
                             showEditNameDialog = false
                         }
                     }
@@ -1103,14 +748,6 @@ fun ProfileScreen(
             onExportBackup = { viewModel.exportBackupJson() },
             onRestoreBackup = { json -> viewModel.restoreBackupJson(json) },
             onDismiss = { showBackupDialog = false }
-        )
-    }
-
-    if (showCloudDataDialog) {
-        CloudSyncedDataDialog(
-            authRepository = authRepository,
-            viewModel = viewModel,
-            onDismiss = { showCloudDataDialog = false }
         )
     }
 

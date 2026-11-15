@@ -214,7 +214,7 @@ object CitraTutorialData {
         CitraTutorialArea.MENU to listOf(
             CitraTutorialStep(
                 title = "Configurações Gerais",
-                text = "Ajuste toques de alarme, imagem de fundo, sincronização na nuvem, reset dos mascotes do Timer e preferências das Finanças.",
+                text = "Ajuste toques de alarme, imagem de fundo, reset dos mascotes do Timer e preferências das Finanças.",
                 targetKey = "top_menu_settings",
                 preferBelow = true
             ),

@@ -439,36 +439,25 @@ fun FinanceEntryEditorDialog(
                                 .clickable { showDatePicker = true }
                         )
 
-                        ExposedDropdownMenuBox(
-                            expanded = currencyExpanded,
-                            onExpandedChange = { currencyExpanded = !currencyExpanded },
-                            modifier = Modifier.weight(1f)
-                        ) {
+                        Box(modifier = Modifier.weight(1f)) {
                             OutlinedTextField(
                                 value = "${selectedCurrency.symbol} (${selectedCurrency.code})",
                                 onValueChange = {},
                                 readOnly = true,
                                 label = { Text("Moeda") },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = currencyExpanded) },
+                                trailingIcon = {
+                                    IconButton(onClick = { currencyExpanded = true }) {
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Selecionar moeda")
+                                    }
+                                },
                                 shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .menuAnchor()
+                                modifier = Modifier.fillMaxWidth()
                             )
-                            ExposedDropdownMenu(
-                                expanded = currencyExpanded,
-                                onDismissRequest = { currencyExpanded = false }
-                            ) {
-                                FinanceCurrency.entries.forEach { curr ->
-                                    DropdownMenuItem(
-                                        text = { Text(curr.displayName) },
-                                        onClick = {
-                                            selectedCurrency = curr
-                                            currencyExpanded = false
-                                        }
-                                    )
-                                }
-                            }
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { currencyExpanded = true }
+                            )
                         }
                     }
 
@@ -615,8 +604,29 @@ fun FinanceEntryEditorDialog(
                     }
 
                     Text("Moeda", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val quickEntryCurrencies = remember(selectedCurrency, defaultCurrencyCode) {
+                        listOf(
+                            selectedCurrency,
+                            FinanceCurrency.fromCode(defaultCurrencyCode),
+                            FinanceCurrency.AOA,
+                            FinanceCurrency.MZN,
+                            FinanceCurrency.BRL,
+                            FinanceCurrency.EUR,
+                            FinanceCurrency.USD,
+                            FinanceCurrency.GBP
+                        ).distinct()
+                    }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(FinanceCurrency.entries, key = { it.code }) { curr ->
+                        item {
+                            AssistChip(
+                                onClick = { currencyExpanded = true },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Pesquisar", fontSize = 12.sp) }
+                            )
+                        }
+                        items(quickEntryCurrencies, key = { it.code }) { curr ->
                             FilterChip(
                                 selected = selectedCurrency == curr,
                                 onClick = { selectedCurrency = curr },
@@ -761,6 +771,17 @@ fun FinanceEntryEditorDialog(
             onDismiss = { showManageCategories = false },
             onSaveCategory = onSaveCategory,
             onArchiveCategory = onArchiveCategory
+        )
+    }
+
+    if (currencyExpanded) {
+        SearchableCurrencyPickerDialog(
+            selectedCurrency = selectedCurrency,
+            onDismiss = { currencyExpanded = false },
+            onSelectCurrency = { curr ->
+                selectedCurrency = curr
+                currencyExpanded = false
+            }
         )
     }
 }

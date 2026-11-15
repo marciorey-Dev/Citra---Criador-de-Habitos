@@ -21,6 +21,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
+import androidx.compose.material.icons.automirrored.filled.FormatAlignRight
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -36,6 +38,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -828,26 +831,28 @@ fun VisualBlockItem(
                             }
 
                             // Alignment toggles (Left, Center, Right)
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (block.alignment == "left") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.clickable { onUpdate(block.copy(alignment = "left")) }
-                            ) {
-                                Text("Esq", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (block.alignment == "left") MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (block.alignment == "center") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.clickable { onUpdate(block.copy(alignment = "center")) }
-                            ) {
-                                Text("Centro", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (block.alignment == "center") MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (block.alignment == "right") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.clickable { onUpdate(block.copy(alignment = "right")) }
-                            ) {
-                                Text("Dir", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (block.alignment == "right") MaterialTheme.colorScheme.primary else Color.Gray, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            listOf(
+                                Triple("left", Icons.AutoMirrored.Filled.FormatAlignLeft, "Alinhar à esquerda"),
+                                Triple("center", Icons.Default.FormatAlignCenter, "Centralizar"),
+                                Triple("right", Icons.AutoMirrored.Filled.FormatAlignRight, "Alinhar à direita")
+                            ).forEach { (alignKey, alignIcon, alignDesc) ->
+                                val isSelected = block.alignment == alignKey
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier
+                                        .clickable { onUpdate(block.copy(alignment = alignKey)) }
+                                        .testTag("visual_image_align_$alignKey")
+                                ) {
+                                    Icon(
+                                        imageVector = alignIcon,
+                                        contentDescription = alignDesc,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .padding(horizontal = 5.dp, vertical = 3.dp)
+                                            .size(16.dp)
+                                    )
+                                }
                             }
 
                             IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {

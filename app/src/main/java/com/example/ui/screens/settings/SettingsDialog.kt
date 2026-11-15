@@ -50,6 +50,7 @@ fun SettingsDialog(
     val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
     val disabledWelcomeCategories by viewModel.disabledWelcomeCategories.collectAsState()
     val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
+    val noteToolbarPosition by viewModel.noteToolbarPosition.collectAsState()
 
     // Finance Module States
     val financesEnabled by viewModel.financesEnabled.collectAsState()
@@ -831,6 +832,88 @@ fun SettingsDialog(
                                         }
                                     }
                                 }
+
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+
+                                Text(
+                                    text = "Posição do menu de formatação",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.5.sp
+                                )
+                                Text(
+                                    text = "Escolha entre manter o menu fixado no topo (oculta ao rolar para baixo) ou colado ao teclado na parte inferior.",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val isBottom = noteToolbarPosition == "BOTTOM"
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (!isBottom) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { viewModel.setNoteToolbarPosition("TOP") }
+                                            .testTag("settings_toolbar_pos_top")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VerticalAlignTop,
+                                                contentDescription = null,
+                                                tint = if (!isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Acima (Topo)",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = if (!isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = if (isBottom) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { viewModel.setNoteToolbarPosition("BOTTOM") }
+                                            .testTag("settings_toolbar_pos_bottom")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VerticalAlignBottom,
+                                                contentDescription = null,
+                                                tint = if (isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Abaixo (Teclado)",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = if (isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1010,29 +1093,13 @@ fun SettingsDialog(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text("Moeda padrão", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                                        Box {
-                                            OutlinedButton(
-                                                onClick = { financeCurrencyExpanded = true },
-                                                shape = RoundedCornerShape(12.dp),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                            ) {
-                                                Text(currentCurr.displayName, fontSize = 12.5.sp)
-                                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            }
-                                            DropdownMenu(
-                                                expanded = financeCurrencyExpanded,
-                                                onDismissRequest = { financeCurrencyExpanded = false }
-                                            ) {
-                                                com.example.data.model.FinanceCurrency.entries.forEach { curr ->
-                                                    DropdownMenuItem(
-                                                        text = { Text(curr.displayName) },
-                                                        onClick = {
-                                                            viewModel.setFinanceDefaultCurrency(curr.code)
-                                                            financeCurrencyExpanded = false
-                                                        }
-                                                    )
-                                                }
-                                            }
+                                        OutlinedButton(
+                                            onClick = { financeCurrencyExpanded = true },
+                                            shape = RoundedCornerShape(12.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(currentCurr.displayName, fontSize = 12.5.sp)
+                                            Icon(Icons.Default.Search, contentDescription = "Pesquisar moeda", modifier = Modifier.padding(start = 6.dp).size(15.dp))
                                         }
                                     }
 
@@ -1074,63 +1141,6 @@ fun SettingsDialog(
                                         )
                                     }
 
-                                    // Sincronização automática na nuvem (Ativar / Desativar)
-                                    val syncEnabled by viewModel.syncEnabled.collectAsState()
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text("Sincronização automática na nuvem", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                                            Text(
-                                                text = if (syncEnabled) "Ativada (sincroniza ao abrir e sair)" else "Desativada (apenas backup manual)",
-                                                fontSize = 11.5.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        Switch(
-                                            checked = syncEnabled,
-                                            onCheckedChange = { viewModel.setSyncEnabled(it) }
-                                        )
-                                    }
-
-                                    // Backup na nuvem (botão manual)
-                                    val lastFinSync by viewModel.lastFinanceSyncTimestamp.collectAsState()
-                                    val syncDateFmt = remember { java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale("pt", "AO")) }
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text("Backup na nuvem", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                                                Text(
-                                                    text = if (lastFinSync > 0L) {
-                                                        "Último backup: ${syncDateFmt.format(java.util.Date(lastFinSync))}"
-                                                    } else {
-                                                        "Sincronize manualmente quando quiser"
-                                                    },
-                                                    fontSize = 11.5.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            FilledTonalButton(
-                                                onClick = { viewModel.backupFinancesNow(showToast = true) },
-                                                shape = RoundedCornerShape(12.dp),
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                            ) {
-                                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Fazer backup agora", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                            }
-                                        }
-                                    }
-
                                     // Apagar dados de finanças (confirmação dupla)
                                     OutlinedButton(
                                         onClick = { showEraseFinanceDialog = true },
@@ -1170,6 +1180,17 @@ fun SettingsDialog(
                 }
             }
         }
+    }
+
+    if (financeCurrencyExpanded) {
+        com.example.ui.screens.finances.SearchableCurrencyPickerDialog(
+            selectedCurrency = com.example.data.model.FinanceCurrency.fromCode(financeDefaultCurrency),
+            onDismiss = { financeCurrencyExpanded = false },
+            onSelectCurrency = { curr ->
+                viewModel.setFinanceDefaultCurrency(curr.code)
+                financeCurrencyExpanded = false
+            }
+        )
     }
 
     if (showFinanceWizard) {

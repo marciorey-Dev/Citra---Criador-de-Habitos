@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -131,7 +132,7 @@ fun FinanceWalletsDialog(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    Icons.Default.CloudDone,
+                                    Icons.Default.CheckCircle,
                                     contentDescription = null,
                                     tint = GreenAccent,
                                     modifier = Modifier.size(13.dp)
@@ -1346,6 +1347,7 @@ fun FinanceExchangeRatesDialog(
     var fromCurr by remember {
         mutableStateOf(FinanceCurrency.entries.firstOrNull { it != defaultCurrency } ?: FinanceCurrency.USD)
     }
+    var showFromCurrencyPicker by remember { mutableStateOf(false) }
     var rateText by remember { mutableStateOf("") }
     val dateFmt = remember { SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "AO")) }
 
@@ -1400,11 +1402,30 @@ fun FinanceExchangeRatesDialog(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
+                                val quickCurrencies = remember(defaultCurrency, fromCurr) {
+                                    (listOf(
+                                        FinanceCurrency.AOA,
+                                        FinanceCurrency.MZN,
+                                        FinanceCurrency.BRL,
+                                        FinanceCurrency.EUR,
+                                        FinanceCurrency.USD,
+                                        FinanceCurrency.GBP,
+                                        fromCurr
+                                    ).distinct()).filter { it != defaultCurrency }
+                                }
                                 Row(
                                     modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    FinanceCurrency.entries.filter { it != defaultCurrency }.forEach { c ->
+                                    AssistChip(
+                                        onClick = { showFromCurrencyPicker = true },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        },
+                                        label = { Text("${fromCurr.code} • Pesquisar") }
+                                    )
+                                    quickCurrencies.forEach { c ->
                                         FilterChip(
                                             selected = fromCurr == c,
                                             onClick = { fromCurr = c },
@@ -1475,7 +1496,34 @@ fun FinanceExchangeRatesDialog(
             }
         }
     }
+
+    if (showFromCurrencyPicker) {
+        SearchableCurrencyPickerDialog(
+            selectedCurrency = fromCurr,
+            onDismiss = { showFromCurrencyPicker = false },
+            onSelectCurrency = { picked ->
+                if (picked != defaultCurrency) {
+                    fromCurr = picked
+                }
+                showFromCurrencyPicker = false
+            }
+        )
+    }
 }
+
+private enum class CurrencyFilterTab(val label: String) {
+    ALL("Todas"),
+    POPULAR("Populares & PALOP"),
+    CRYPTO("Cripto")
+}
+
+private val POPULAR_CURRENCY_CODES = setOf(
+    "AOA", "MZN", "BRL", "EUR", "USD", "GBP", "CVE", "STN", "ZAR", "CAD", "CHF", "JPY", "CNY"
+)
+
+private val CRYPTO_CURRENCY_CODES = setOf(
+    "BTC", "ETH", "USDT", "USDC", "SOL", "BNB", "XRP", "ADA", "DOGE", "DOT", "POL", "AVAX", "LINK", "LTC"
+)
 
 @Composable
 fun SearchableCurrencyPickerDialog(
@@ -1484,11 +1532,18 @@ fun SearchableCurrencyPickerDialog(
     onSelectCurrency: (FinanceCurrency) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    val filteredCurrencies = remember(searchQuery) {
+    var activeFilter by remember { mutableStateOf(CurrencyFilterTab.ALL) }
+
+    val filteredCurrencies = remember(searchQuery, activeFilter) {
+        val baseList = when (activeFilter) {
+            CurrencyFilterTab.ALL -> FinanceCurrency.entries
+            CurrencyFilterTab.POPULAR -> FinanceCurrency.entries.filter { it.code in POPULAR_CURRENCY_CODES }
+            CurrencyFilterTab.CRYPTO -> FinanceCurrency.entries.filter { it.code in CRYPTO_CURRENCY_CODES }
+        }
         if (searchQuery.isBlank()) {
-            FinanceCurrency.entries
+            baseList
         } else {
-            FinanceCurrency.entries.filter { it.matchesSearch(searchQuery) }
+            baseList.filter { it.matchesSearch(searchQuery) }
         }
     }
 
@@ -1497,18 +1552,19 @@ fun SearchableCurrencyPickerDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .heightIn(max = 580.dp)
-                .padding(vertical = 16.dp)
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.84f)
+                .imePadding()
+                .padding(vertical = 12.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(20.dp)
+                    .padding(horizontal = 18.dp, vertical = 18.dp)
             ) {
                 // Header
                 Row(
@@ -1516,32 +1572,125 @@ fun SearchableCurrencyPickerDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text(
-                            text = "Selecionar Moeda",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Pesquise por moeda, sigla ou país",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.CurrencyExchange,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "Escolher Moeda",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "${filteredCurrencies.size} de ${FinanceCurrency.entries.size} moedas",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Fechar")
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar", modifier = Modifier.size(20.dp))
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Search TextField
+                // Currently selected currency highlight banner
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = selectedCurrency.symbol,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = selectedCurrency.displayName,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (selectedCurrency.countryOrOrigin.isNotBlank()) {
+                                    Text(
+                                        text = selectedCurrency.countryOrOrigin,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                text = "Atual",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Cohesive Search Bar
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     placeholder = {
-                        Text("Ex: MT, Moçambique, USD, Real...", fontSize = 13.5.sp)
+                        Text("Pesquisar moeda, sigla (AOA, MT) ou país...", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = "Pesquisar", tint = MaterialTheme.colorScheme.primary)
@@ -1549,7 +1698,7 @@ fun SearchableCurrencyPickerDialog(
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Limpar", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Clear, contentDescription = "Limpar pesquisa", modifier = Modifier.size(18.dp))
                             }
                         }
                     },
@@ -1557,12 +1706,47 @@ fun SearchableCurrencyPickerDialog(
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Group Filter Pills
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(CurrencyFilterTab.entries) { tab ->
+                        val selected = activeFilter == tab
+                        FilterChip(
+                            selected = selected,
+                            onClick = { activeFilter = tab },
+                            label = {
+                                Text(
+                                    text = tab.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            leadingIcon = if (selected) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            } else null,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 if (filteredCurrencies.isEmpty()) {
                     Box(
@@ -1571,17 +1755,33 @@ fun SearchableCurrencyPickerDialog(
                             .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Default.SearchOff,
-                                contentDescription = null,
-                                modifier = Modifier.size(40.dp),
-                                tint = MaterialTheme.colorScheme.outline
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.SearchOff,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(28.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                             Text(
                                 "Nenhuma moeda encontrada",
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "Tente outro nome, código (USD, EUR) ou país.",
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1591,21 +1791,32 @@ fun SearchableCurrencyPickerDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         items(filteredCurrencies, key = { it.code }) { curr ->
                             val isSelected = curr == selectedCurrency
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                                border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                },
+                                border = BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                    }
+                                ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(16.dp))
                                     .clickable { onSelectCurrency(curr) }
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -1614,16 +1825,25 @@ fun SearchableCurrencyPickerDialog(
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Surface(
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            modifier = Modifier.size(40.dp)
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceContainerHigh
+                                            },
+                                            modifier = Modifier.size(42.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Text(
                                                     text = curr.symbol,
                                                     fontWeight = FontWeight.ExtraBold,
-                                                    fontSize = 13.sp,
-                                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                                    fontSize = if (curr.symbol.length >= 4) 10.5.sp else 13.5.sp,
+                                                    color = if (isSelected) {
+                                                        MaterialTheme.colorScheme.onPrimary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurface
+                                                    },
+                                                    maxLines = 1
                                                 )
                                             }
                                         }
@@ -1631,27 +1851,37 @@ fun SearchableCurrencyPickerDialog(
                                         Spacer(modifier = Modifier.width(12.dp))
 
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
                                                 Text(
                                                     text = curr.displayName,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 14.sp,
                                                     color = MaterialTheme.colorScheme.onSurface,
                                                     maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
                                                 )
-                                                Spacer(modifier = Modifier.width(6.dp))
                                                 Surface(
                                                     shape = RoundedCornerShape(6.dp),
-                                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                                    modifier = Modifier.padding(2.dp)
+                                                    color = if (isSelected) {
+                                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                                                    } else {
+                                                        MaterialTheme.colorScheme.surfaceVariant
+                                                    }
                                                 ) {
                                                     Text(
                                                         text = curr.code,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                        color = if (isSelected) {
+                                                            MaterialTheme.colorScheme.primary
+                                                        } else {
+                                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                                        },
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                                     )
                                                 }
                                             }
@@ -1668,11 +1898,12 @@ fun SearchableCurrencyPickerDialog(
                                     }
 
                                     if (isSelected) {
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Icon(
                                             Icons.Default.CheckCircle,
                                             contentDescription = "Selecionada",
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(21.dp)
                                         )
                                     }
                                 }

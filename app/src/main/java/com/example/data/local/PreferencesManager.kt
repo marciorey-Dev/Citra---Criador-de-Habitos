@@ -66,12 +66,15 @@ class PreferencesManager(private val context: Context) {
     )
     val completedTutorialAreas: StateFlow<Set<String>> = _completedTutorialAreas.asStateFlow()
 
-    // Sync Enabled & Frequency: "1_HOUR", "DAILY", "WEEKLY", "ON_APP_OPEN"
-    private val _syncEnabled = MutableStateFlow(prefs.getBoolean("sync_enabled", true))
-    val syncEnabled: StateFlow<Boolean> = _syncEnabled.asStateFlow()
+    // Local Offline Profile & First-Launch Onboarding
+    private val _hasCompletedOnboarding = MutableStateFlow(prefs.getBoolean("has_completed_onboarding", false))
+    val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
-    private val _syncFrequency = MutableStateFlow(prefs.getString("sync_frequency", "DAILY") ?: "DAILY")
-    val syncFrequency: StateFlow<String> = _syncFrequency.asStateFlow()
+    private val _userDisplayName = MutableStateFlow(prefs.getString("user_display_name", "Viajante Citra") ?: "Viajante Citra")
+    val userDisplayName: StateFlow<String> = _userDisplayName.asStateFlow()
+
+    private val _userPhotoPath = MutableStateFlow<String?>(prefs.getString("user_photo_path", null))
+    val userPhotoPath: StateFlow<String?> = _userPhotoPath.asStateFlow()
 
     // App Global Background Settings (Wallpaper, Blur, Darkness)
     private val _appBgUri = MutableStateFlow<String?>(prefs.getString("app_bg_uri", null))
@@ -86,6 +89,20 @@ class PreferencesManager(private val context: Context) {
     // Timer Citra Physics Balls (JSON array of diameters/durations)
     private val _citraTimerBallsJson = MutableStateFlow(prefs.getString("citra_timer_balls_json", "[]") ?: "[]")
     val citraTimerBallsJson: StateFlow<String> = _citraTimerBallsJson.asStateFlow()
+
+    // Timer Behavior Preferences: continuous cycles, dial tap to pause/resume, horizontal swipe navigation
+    private val _timerContinuousMode = MutableStateFlow(prefs.getBoolean("timer_continuous_mode", false))
+    val timerContinuousMode: StateFlow<Boolean> = _timerContinuousMode.asStateFlow()
+
+    private val _timerTapToToggle = MutableStateFlow(prefs.getBoolean("timer_tap_to_toggle", true))
+    val timerTapToToggle: StateFlow<Boolean> = _timerTapToToggle.asStateFlow()
+
+    private val _timerAllowSwipe = MutableStateFlow(prefs.getBoolean("timer_allow_swipe", true))
+    val timerAllowSwipe: StateFlow<Boolean> = _timerAllowSwipe.asStateFlow()
+
+    // Habit Consecutive Days Gratification Points
+    private val _habitRewardPoints = MutableStateFlow(prefs.getInt("habit_reward_points", 0))
+    val habitRewardPoints: StateFlow<Int> = _habitRewardPoints.asStateFlow()
 
     // Daily Welcome Phrases
     private val _welcomePhrasesEnabled = MutableStateFlow(prefs.getBoolean("welcome_phrases_enabled", true))
@@ -280,22 +297,22 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
-    fun setSyncEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("sync_enabled", enabled).apply()
-        _syncEnabled.value = enabled
+    fun setOnboardingCompleted(completed: Boolean = true) {
+        prefs.edit().putBoolean("has_completed_onboarding", completed).apply()
+        _hasCompletedOnboarding.value = completed
     }
 
-    fun setSyncFrequency(frequency: String) {
-        prefs.edit().putString("sync_frequency", frequency).apply()
-        _syncFrequency.value = frequency
+    fun setUserDisplayName(name: String) {
+        val clean = name.trim().ifBlank { "Viajante Citra" }
+        prefs.edit().putString("user_display_name", clean).apply()
+        _userDisplayName.value = clean
     }
 
-    fun getLastSyncTimestamp(): Long {
-        return prefs.getLong("last_sync_timestamp", 0L)
-    }
-
-    fun setLastSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
-        prefs.edit().putLong("last_sync_timestamp", timestamp).apply()
+    fun setUserPhotoPath(path: String?) {
+        prefs.edit().apply {
+            if (path.isNullOrBlank()) remove("user_photo_path") else putString("user_photo_path", path)
+        }.apply()
+        _userPhotoPath.value = path?.takeIf { it.isNotBlank() }
     }
 
     private fun loadThemeMode(): Boolean? {
@@ -400,7 +417,11 @@ class PreferencesManager(private val context: Context) {
             "ambient_music_in_app" to s.ambientBreakMusicInApp,
             "ambient_music_volume" to s.ambientMusicVolume,
             "override_silent_mode" to s.overrideSilentMode,
-            "daily_random_color" to _dailyRandomColor.value
+            "daily_random_color" to _dailyRandomColor.value,
+            "timer_continuous_mode" to _timerContinuousMode.value,
+            "timer_tap_to_toggle" to _timerTapToToggle.value,
+            "timer_allow_swipe" to _timerAllowSwipe.value,
+            "habit_reward_points" to _habitRewardPoints.value
         )
     }
 
@@ -432,6 +453,23 @@ class PreferencesManager(private val context: Context) {
         (map["keep_screen_on"] as? Boolean)?.let {
             editor.putBoolean("keep_screen_on", it)
             _keepScreenOn.value = it
+        }
+        (map["timer_continuous_mode"] as? Boolean)?.let {
+            editor.putBoolean("timer_continuous_mode", it)
+            _timerContinuousMode.value = it
+        }
+        (map["timer_tap_to_toggle"] as? Boolean)?.let {
+            editor.putBoolean("timer_tap_to_toggle", it)
+            _timerTapToToggle.value = it
+        }
+        (map["timer_allow_swipe"] as? Boolean)?.let {
+            editor.putBoolean("timer_allow_swipe", it)
+            _timerAllowSwipe.value = it
+        }
+        (map["habit_reward_points"] as? Number)?.toInt()?.let {
+            val safe = it.coerceAtLeast(0)
+            editor.putInt("habit_reward_points", safe)
+            _habitRewardPoints.value = safe
         }
 
         // Standard notification and sound effects settings
@@ -529,63 +567,140 @@ class PreferencesManager(private val context: Context) {
 
     // Timer Snapshot Persistence (Protects against app kill, clear from recents, or reboot)
     fun saveTimerSnapshot(snapshot: SavedTimerSnapshot) {
-        prefs.edit().apply {
-            putInt("timer_focus_mins", snapshot.focusMinutes)
-            putInt("timer_break_mins", snapshot.breakMinutes)
-            putInt("timer_total_cycles", snapshot.totalCycles)
-            putInt("timer_current_cycle", snapshot.currentCycle)
-            putInt("timer_rem_secs", snapshot.remainingSeconds)
-            putString("timer_phase", snapshot.phaseName)
-            putBoolean("timer_running", snapshot.isRunning)
-            putBoolean("timer_paused", snapshot.isPaused)
-            putString("timer_category", snapshot.selectedCategory)
-            if (snapshot.linkedTaskId != null) putLong("timer_linked_task", snapshot.linkedTaskId)
-            else remove("timer_linked_task")
-            putLong("timer_last_ts", snapshot.lastTimestamp)
-            putLong("timer_target_end_ts", snapshot.targetEndTimeMillis)
-            putBoolean("timer_is_stopwatch", snapshot.isStopwatchMode)
-            putLong("timer_stopwatch_start_ts", snapshot.stopwatchStartTimeMillis)
-            putInt("timer_stopwatch_accum_secs", snapshot.stopwatchAccumulatedSeconds)
-            apply()
+        synchronized(timerSnapshotLock) {
+            prefs.edit().apply {
+                putInt("timer_focus_mins", snapshot.focusMinutes)
+                putInt("timer_break_mins", snapshot.breakMinutes)
+                putInt("timer_total_cycles", snapshot.totalCycles)
+                putInt("timer_current_cycle", snapshot.currentCycle)
+                putInt("timer_rem_secs", snapshot.remainingSeconds)
+                putString("timer_phase", snapshot.phaseName)
+                putBoolean("timer_running", snapshot.isRunning)
+                putBoolean("timer_paused", snapshot.isPaused)
+                putString("timer_category", snapshot.selectedCategory)
+                if (snapshot.linkedTaskId != null) putLong("timer_linked_task", snapshot.linkedTaskId)
+                else remove("timer_linked_task")
+                putLong("timer_last_ts", snapshot.lastTimestamp)
+                putLong("timer_target_end_ts", snapshot.targetEndTimeMillis)
+                putBoolean("timer_is_stopwatch", snapshot.isStopwatchMode)
+                putLong("timer_stopwatch_start_ts", snapshot.stopwatchStartTimeMillis)
+                putInt("timer_stopwatch_accum_secs", snapshot.stopwatchAccumulatedSeconds)
+                commit()
+            }
         }
     }
 
     fun loadTimerSnapshot(): SavedTimerSnapshot? {
-        if (!prefs.contains("timer_rem_secs") && !prefs.contains("timer_is_stopwatch")) return null
-        val linkedTask = if (prefs.contains("timer_linked_task")) prefs.getLong("timer_linked_task", 0L) else null
-        return SavedTimerSnapshot(
-            focusMinutes = prefs.getInt("timer_focus_mins", 15),
-            breakMinutes = prefs.getInt("timer_break_mins", 5),
-            totalCycles = prefs.getInt("timer_total_cycles", 1),
-            currentCycle = prefs.getInt("timer_current_cycle", 1),
-            remainingSeconds = prefs.getInt("timer_rem_secs", 15 * 60),
-            phaseName = prefs.getString("timer_phase", "FOCUS") ?: "FOCUS",
-            isRunning = prefs.getBoolean("timer_running", false),
-            isPaused = prefs.getBoolean("timer_paused", false),
-            selectedCategory = prefs.getString("timer_category", "Estudos") ?: "Estudos",
-            linkedTaskId = linkedTask,
-            lastTimestamp = prefs.getLong("timer_last_ts", 0L),
-            targetEndTimeMillis = prefs.getLong("timer_target_end_ts", 0L),
-            isStopwatchMode = prefs.getBoolean("timer_is_stopwatch", false),
-            stopwatchStartTimeMillis = prefs.getLong("timer_stopwatch_start_ts", 0L),
-            stopwatchAccumulatedSeconds = prefs.getInt("timer_stopwatch_accum_secs", 0)
-        )
+        synchronized(timerSnapshotLock) {
+            if (!prefs.contains("timer_rem_secs") && !prefs.contains("timer_is_stopwatch")) return null
+            val linkedTask = if (prefs.contains("timer_linked_task")) prefs.getLong("timer_linked_task", 0L) else null
+            return SavedTimerSnapshot(
+                focusMinutes = prefs.getInt("timer_focus_mins", 15),
+                breakMinutes = prefs.getInt("timer_break_mins", 5),
+                totalCycles = prefs.getInt("timer_total_cycles", 1),
+                currentCycle = prefs.getInt("timer_current_cycle", 1),
+                remainingSeconds = prefs.getInt("timer_rem_secs", 15 * 60),
+                phaseName = prefs.getString("timer_phase", "FOCUS") ?: "FOCUS",
+                isRunning = prefs.getBoolean("timer_running", false),
+                isPaused = prefs.getBoolean("timer_paused", false),
+                selectedCategory = prefs.getString("timer_category", "Estudos") ?: "Estudos",
+                linkedTaskId = linkedTask,
+                lastTimestamp = prefs.getLong("timer_last_ts", 0L),
+                targetEndTimeMillis = prefs.getLong("timer_target_end_ts", 0L),
+                isStopwatchMode = prefs.getBoolean("timer_is_stopwatch", false),
+                stopwatchStartTimeMillis = prefs.getLong("timer_stopwatch_start_ts", 0L),
+                stopwatchAccumulatedSeconds = prefs.getInt("timer_stopwatch_accum_secs", 0)
+            )
+        }
+    }
+
+    /**
+     * Atomically claims completion of a FOCUS phase for [targetEndTimeMillis] so that
+     * concurrent AlarmReceiver and foreground/onResume ViewModel checks never record
+     * the same FocusSession twice in Room or double stats.
+     */
+    fun tryClaimFocusSessionCompletion(
+        targetEndTimeMillis: Long,
+        nextBreakSeconds: Int
+    ): Boolean {
+        synchronized(focusClaimLock) {
+            val now = System.currentTimeMillis()
+            val lastClaimedTarget = prefs.getLong("last_claimed_focus_target_ms", 0L)
+            val lastClaimedAt = prefs.getLong("last_claimed_focus_at_ms", 0L)
+            val snapshotTarget = prefs.getLong("timer_target_end_ts", 0L)
+            val currentPhase = prefs.getString("timer_phase", "FOCUS") ?: "FOCUS"
+
+            val effectiveKey = if (targetEndTimeMillis > 0L) targetEndTimeMillis else snapshotTarget
+            if (effectiveKey > 0L) {
+                if (effectiveKey == lastClaimedTarget) return false
+            } else {
+                if ((now - lastClaimedAt) in 0L until 15_000L) return false
+                if (prefs.contains("timer_phase") && currentPhase != "FOCUS") return false
+            }
+
+            if (prefs.contains("timer_phase") && currentPhase != "FOCUS") {
+                return false
+            }
+
+            prefs.edit().apply {
+                putLong("last_claimed_focus_target_ms", effectiveKey)
+                putLong("last_claimed_focus_at_ms", now)
+                putString("timer_phase", "BREAK")
+                putInt("timer_rem_secs", nextBreakSeconds.coerceAtLeast(0))
+                putBoolean("timer_running", false)
+                putBoolean("timer_paused", false)
+                putLong("timer_target_end_ts", 0L)
+                putLong("timer_last_ts", now)
+                commit()
+            }
+            return true
+        }
     }
 
     fun clearTimerSnapshot() {
-        prefs.edit().apply {
-            remove("timer_focus_mins")
-            remove("timer_break_mins")
-            remove("timer_total_cycles")
-            remove("timer_current_cycle")
-            remove("timer_rem_secs")
-            remove("timer_phase")
-            remove("timer_running")
-            remove("timer_paused")
-            remove("timer_category")
-            remove("timer_linked_task")
-            remove("timer_last_ts")
-            apply()
+        synchronized(timerSnapshotLock) {
+            prefs.edit().apply {
+                remove("timer_focus_mins")
+                remove("timer_break_mins")
+                remove("timer_total_cycles")
+                remove("timer_current_cycle")
+                remove("timer_rem_secs")
+                remove("timer_phase")
+                remove("timer_running")
+                remove("timer_paused")
+                remove("timer_category")
+                remove("timer_linked_task")
+                remove("timer_last_ts")
+                remove("timer_target_end_ts")
+                remove("timer_is_stopwatch")
+                remove("timer_stopwatch_start_ts")
+                remove("timer_stopwatch_accum_secs")
+                commit()
+            }
+        }
+    }
+
+    fun setTimerContinuousMode(enabled: Boolean) {
+        _timerContinuousMode.value = enabled
+        prefs.edit().putBoolean("timer_continuous_mode", enabled).apply()
+    }
+
+    fun setTimerTapToToggle(enabled: Boolean) {
+        _timerTapToToggle.value = enabled
+        prefs.edit().putBoolean("timer_tap_to_toggle", enabled).apply()
+    }
+
+    fun setTimerAllowSwipe(enabled: Boolean) {
+        _timerAllowSwipe.value = enabled
+        prefs.edit().putBoolean("timer_allow_swipe", enabled).apply()
+    }
+
+    fun addHabitRewardPoints(delta: Int): Int {
+        synchronized(habitRewardLock) {
+            val next = (_habitRewardPoints.value + delta).coerceAtLeast(0)
+            prefs.edit().putInt("habit_reward_points", next).commit()
+            _habitRewardPoints.value = next
+            return next
         }
     }
 
@@ -632,14 +747,6 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putBoolean("finance_biometric_enabled", enabled).apply()
     }
 
-    private val _lastFinanceSyncTimestamp = MutableStateFlow(prefs.getLong("last_finance_sync_timestamp", 0L))
-    val lastFinanceSyncTimestamp: StateFlow<Long> = _lastFinanceSyncTimestamp.asStateFlow()
-
-    fun setLastFinanceSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
-        _lastFinanceSyncTimestamp.value = timestamp
-        prefs.edit().putLong("last_finance_sync_timestamp", timestamp).apply()
-    }
-
     // Default note open mode (EDIT or READ)
     private val _defaultNoteOpenMode = MutableStateFlow(prefs.getString("default_note_open_mode", "EDIT") ?: "EDIT")
     val defaultNoteOpenMode: StateFlow<String> = _defaultNoteOpenMode.asStateFlow()
@@ -659,14 +766,16 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putInt("last_used_focus_mins", safe).apply()
     }
 
-    fun getSavedToolbarPosition(): Pair<Float, Float> {
-        val x = prefs.getFloat("saved_tb_offset_x", 0f)
-        val y = prefs.getFloat("saved_tb_offset_y", 0f)
-        return Pair(x, y)
-    }
+    // Note formatting toolbar position: "TOP" (default, above categories) or "BOTTOM" (docked above keyboard/margin)
+    private val _noteToolbarPosition = MutableStateFlow(
+        prefs.getString("note_toolbar_position", "TOP")?.takeIf { it == "TOP" || it == "BOTTOM" } ?: "TOP"
+    )
+    val noteToolbarPosition: StateFlow<String> = _noteToolbarPosition.asStateFlow()
 
-    fun saveToolbarPosition(x: Float, y: Float) {
-        prefs.edit().putFloat("saved_tb_offset_x", x).putFloat("saved_tb_offset_y", y).apply()
+    fun setNoteToolbarPosition(position: String) {
+        val clean = if (position == "BOTTOM") "BOTTOM" else "TOP"
+        _noteToolbarPosition.value = clean
+        prefs.edit().putString("note_toolbar_position", clean).apply()
     }
 
     fun resetFinanceDataPreferences() {
@@ -698,21 +807,11 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putString("toolbar_items_order", order.joinToString(",")).apply()
     }
 
-    fun getToolbarFloatingOffset(): Pair<Float, Float> {
-        val x = prefs.getFloat("toolbar_floating_offset_x", 0f)
-        val y = prefs.getFloat("toolbar_floating_offset_y", 0f)
-        return Pair(x, y)
-    }
-
-    fun saveToolbarFloatingOffset(x: Float, y: Float) {
-        prefs.edit()
-            .putFloat("toolbar_floating_offset_x", x)
-            .putFloat("toolbar_floating_offset_y", y)
-            .apply()
-    }
-
     companion object {
         private val citraBallLock = Any()
+        private val timerSnapshotLock = Any()
+        private val focusClaimLock = Any()
+        private val habitRewardLock = Any()
         val DEFAULT_TOOLBAR_ORDER = listOf(
             // Primeiro módulo (exatamente os 13 símbolos permitidos no topo por padrão):
             "bold", "italic", "inline_code", "titles", "checklist", "list",

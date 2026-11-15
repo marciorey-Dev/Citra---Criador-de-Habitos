@@ -51,6 +51,7 @@ import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteEditorMode
+import com.example.ui.screens.organization.notes.NoteReadingPreview
 import com.example.ui.screens.organization.notes.PaperNoteColors
 import com.example.ui.screens.organization.notes.PaperNotePalette
 import com.example.ui.screens.organization.notes.PaperNoteSurface
@@ -89,41 +90,9 @@ private fun categoryIconFor(category: String): ImageVector {
 
 @Composable
 private fun extractFirstImageUri(note: Note): String? {
-    return remember(note.backgroundImageUri, note.content) {
-        if (!note.backgroundImageUri.isNullOrBlank()) {
-            note.backgroundImageUri
-        } else {
-            val match = Regex("!\\[(?!audio:)(.*?)\\]\\((.*?)\\)").find(note.content)
-            match?.groupValues?.getOrNull(2)?.takeIf { it.isNotBlank() }
-        }
-    }
-}
-
-@Composable
-private fun extractCleanExcerpt(content: String, maxChars: Int = 120): String {
-    return remember(content, maxChars) {
-        content
-            .lines()
-            .map { it.trim() }
-            .filter { line ->
-                line.isNotBlank() &&
-                    !line.startsWith("---") &&
-                    !line.startsWith("|") &&
-                    !line.startsWith("```") &&
-                    !line.startsWith("$$") &&
-                    !line.startsWith("![audio:") &&
-                    !line.startsWith("![")
-            }
-            .joinToString(" ") { line ->
-                line.replace(Regex("!\\[audio:.*?\\]\\(.*?\\)"), "")
-                    .replace(Regex("!\\[.*?\\]\\(.*?\\)"), "")
-                    .replace(Regex("<.*?>"), "")
-                    .replace(Regex("[#*`~=_]+"), "")
-                    .replace(Regex("\\[(x| )\\]"), "")
-            }
-            .replace(Regex("\\s+"), " ")
-            .trim()
-            .take(maxChars)
+    return remember(note.content) {
+        val match = Regex("!\\[(?!audio:)(.*?)\\]\\((.*?)\\)").find(note.content)
+        match?.groupValues?.getOrNull(2)?.takeIf { it.isNotBlank() }
     }
 }
 
@@ -132,8 +101,6 @@ fun NotesSubTab(
     viewModel: MainViewModel
 ) {
     val context = LocalContext.current
-    val currentUser by viewModel.authRepository.currentUser.collectAsState()
-    val isUserLoggedIn = currentUser != null && currentUser?.isGuest == false
     val notes by viewModel.notes.collectAsState()
     val trashNotes by viewModel.trashNotes.collectAsState()
     val categories by viewModel.categories.collectAsState()
@@ -145,7 +112,6 @@ fun NotesSubTab(
     var isCreatingNew by remember { mutableStateOf(false) }
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteForSubmenu by remember { mutableStateOf<Note?>(null) }
-    var noteToShareViaCitra by remember { mutableStateOf<Note?>(null) }
     var showTrashDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
@@ -995,18 +961,6 @@ fun NotesSubTab(
                     backgroundBlur = note.backgroundBlur,
                     backgroundBrightness = note.backgroundBrightness
                 )
-            },
-            canShareViaCitra = isUserLoggedIn,
-            onShareViaCitra = {
-                if (isUserLoggedIn) {
-                    noteToShareViaCitra = it
-                } else {
-                    android.widget.Toast.makeText(
-                        context,
-                        "Entre com uma conta para compartilhar notas via Citra.",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
             }
         )
     }
@@ -1020,15 +974,6 @@ fun NotesSubTab(
             onPermanentDelete = { viewModel.permanentlyDeleteNote(it, context) },
             onEmptyTrash = { viewModel.emptyNoteTrash(context) },
             onDismiss = { showTrashDialog = false }
-        )
-    }
-
-    // Share via Citra Dialog (Blue Globe)
-    noteToShareViaCitra?.let { note ->
-        com.example.ui.screens.inbox.SendNoteDialog(
-            viewModel = viewModel,
-            initialNote = note,
-            onDismiss = { noteToShareViaCitra = null }
         )
     }
 }
@@ -1186,7 +1131,6 @@ fun SquareNoteCard(
     }
     val previewImageUri = extractFirstImageUri(note)
     val hasImage = previewImageUri != null
-    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 140)
 
     val badgeBg = when (note.category.lowercase().trim()) {
         "criatividade", "ideias" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
@@ -1315,16 +1259,17 @@ fun SquareNoteCard(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // Note Excerpt - high contrast according to app theme
-                if (cleanExcerpt.isNotBlank()) {
-                    Text(
-                        text = cleanExcerpt,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (previewImageUri != null) 3 else 5,
-                        overflow = TextOverflow.Ellipsis
+                // Note Reading-Mode Preview (styled headings, lists, checklists, quotes, inline formatting)
+                if (note.content.isNotBlank()) {
+                    NoteReadingPreview(
+                        content = note.content,
+                        maxElements = if (previewImageUri != null) 2 else 4,
+                        maxTotalLines = if (previewImageUri != null) 3 else 5,
+                        compact = true,
+                        textColor = MaterialTheme.colorScheme.onSurface,
+                        secondaryTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        accentColor = paperColors.accentColor,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -1496,7 +1441,6 @@ fun DetailNoteCard(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val cleanExcerpt = extractCleanExcerpt(note.content, maxChars = 180)
     val cardContainerColor = if (note.isPinned) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
     } else {
@@ -1588,16 +1532,17 @@ fun DetailNoteCard(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            if (cleanExcerpt.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = cleanExcerpt,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 17.sp,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
+            if (note.content.isNotBlank()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                NoteReadingPreview(
+                    content = note.content,
+                    maxElements = 3,
+                    maxTotalLines = 4,
+                    compact = false,
+                    textColor = MaterialTheme.colorScheme.onSurface,
+                    secondaryTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }
@@ -1931,9 +1876,7 @@ fun NoteSubmenuDialog(
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
-    onDuplicate: () -> Unit,
-    canShareViaCitra: Boolean = true,
-    onShareViaCitra: (Note) -> Unit = {}
+    onDuplicate: () -> Unit
 ) {
     val context = LocalContext.current
     val primaryColor = MaterialTheme.colorScheme.primary
@@ -1986,38 +1929,6 @@ fun NoteSubmenuDialog(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(if (note.isPinned) "Desafixar nota" else "Fixar nota no topo", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                // Compartilhar via Citra (Globo Azul)
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            onShareViaCitra(note)
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    val shareTint = if (canShareViaCitra) Color(0xFF2563EB) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Public,
-                            contentDescription = null,
-                            tint = shareTint,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = if (canShareViaCitra) "Compartilhar via Citra" else "Compartilhar via Citra (Requer conta)",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = shareTint
-                        )
                     }
                 }
 

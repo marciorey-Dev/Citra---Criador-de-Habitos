@@ -6,13 +6,16 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -20,6 +23,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -138,6 +143,7 @@ fun FullScreenBlockDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .imePadding()
                     .padding(16.dp)
             ) {
                 // Top Action Bar: Language selector above action buttons so long names (e.g. MARKDOWN) never collide
@@ -286,42 +292,86 @@ fun FullScreenBlockDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 if (block is CodeBlock) {
-                    OutlinedTextField(
-                        value = textState,
-                        onValueChange = { updateContent(it) },
-                        placeholder = { Text("// Digite ou cole seu código...", color = Color.Gray) },
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFF8FAFC),
-                            lineHeight = 22.sp
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF334155),
-                            unfocusedBorderColor = Color(0xFF1E293B)
-                        ),
+                    val codeScrollState = rememberScrollState()
+                    val codeFocusRequester = remember { FocusRequester() }
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                    )
-                } else if (block is MathBlock) {
-                    Column(modifier = Modifier.weight(1f)) {
+                            .verticalScroll(codeScrollState)
+                    ) {
                         OutlinedTextField(
                             value = textState,
                             onValueChange = { updateContent(it) },
-                            placeholder = { Text("Ex: 2^3 + 3/5 = x, \\int, \\sqrt...") },
-                            textStyle = MaterialTheme.typography.headlineSmall.copy(
-                                fontFamily = FontFamily.Serif,
-                                fontStyle = FontStyle.Italic,
-                                color = MaterialTheme.colorScheme.onSurface
+                            placeholder = { Text("// Digite ou cole seu código...", color = Color.Gray) },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                color = Color(0xFFF8FAFC),
+                                lineHeight = 22.sp
                             ),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                                focusedBorderColor = Color(0xFF334155),
+                                unfocusedBorderColor = Color(0xFF1E293B)
                             ),
+                            minLines = 6,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(codeFocusRequester)
+                        )
+                        // 14 empty paragraph spaces (14 x 24.dp = 336.dp) strictly inside fullscreen editor for scrolling
+                        Spacer(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(336.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    codeFocusRequester.requestFocus()
+                                }
+                        )
+                    }
+                } else if (block is MathBlock) {
+                    val mathScrollState = rememberScrollState()
+                    val mathFocusRequester = remember { FocusRequester() }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                        )
+                                .verticalScroll(mathScrollState)
+                        ) {
+                            OutlinedTextField(
+                                value = textState,
+                                onValueChange = { updateContent(it) },
+                                placeholder = { Text("Ex: 2^3 + 3/5 = x, \\int, \\sqrt...") },
+                                textStyle = MaterialTheme.typography.headlineSmall.copy(
+                                    fontFamily = FontFamily.Serif,
+                                    fontStyle = FontStyle.Italic,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                minLines = 4,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(mathFocusRequester)
+                            )
+                            // 14 empty paragraph spaces (14 x 24.dp = 336.dp) strictly inside fullscreen editor for scrolling
+                            Spacer(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(336.dp)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        mathFocusRequester.requestFocus()
+                                    }
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         // Real-time formatted preview card

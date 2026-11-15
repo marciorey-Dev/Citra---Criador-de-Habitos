@@ -246,48 +246,32 @@ fun FinancesScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.tutorialTarget("finances_header_actions")
                         ) {
-                            // Currency selector pill (Kz ▾)
-                            Box {
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainer,
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .clickable { currencyMenuExpanded = true }
+                            // Currency selector pill (Kz ▾) opening searchable currency dialog
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { currencyMenuExpanded = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = activeCurrency.symbol,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(modifier = Modifier.width(2.dp))
-                                        Icon(
-                                            Icons.Default.ArrowDropDown,
-                                            contentDescription = "Mudar moeda",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                                DropdownMenu(
-                                    expanded = currencyMenuExpanded,
-                                    onDismissRequest = { currencyMenuExpanded = false }
-                                ) {
-                                    FinanceCurrency.entries.forEach { curr ->
-                                        DropdownMenuItem(
-                                            text = { Text(curr.displayName) },
-                                            onClick = {
-                                                viewModel.setFinanceDefaultCurrency(curr.code)
-                                                currencyMenuExpanded = false
-                                            }
-                                        )
-                                    }
+                                    Text(
+                                        text = "${activeCurrency.symbol} · ${activeCurrency.code}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Mudar moeda",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
 
@@ -1338,6 +1322,17 @@ fun FinancesScreen(
             onDismiss = { showRecurringDialog = false },
             onSaveRule = { viewModel.saveFinanceRecurringRule(it) },
             onDeleteRule = { viewModel.deleteFinanceRecurringRule(it) }
+        )
+    }
+
+    if (currencyMenuExpanded) {
+        SearchableCurrencyPickerDialog(
+            selectedCurrency = activeCurrency,
+            onDismiss = { currencyMenuExpanded = false },
+            onSelectCurrency = { curr ->
+                viewModel.setFinanceDefaultCurrency(curr.code)
+                currencyMenuExpanded = false
+            }
         )
     }
 

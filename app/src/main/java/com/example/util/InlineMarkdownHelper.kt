@@ -60,6 +60,64 @@ object InlineMarkdownHelper {
         }
     }
 
+    internal enum class StyleKind {
+        BOLD, ITALIC, STRIKETHROUGH, UNDERLINE, HIGHLIGHT, QUOTE
+    }
+
+    internal data class StyleSpan(
+        val kind: StyleKind,
+        val start: Int,
+        val end: Int
+    )
+
+    internal enum class AtomicKind {
+        MATH_BLOCK, MATH_INLINE, CODE, BARE_URL
+    }
+
+    internal data class AtomicToken(
+        val kind: AtomicKind,
+        val start: Int,
+        val end: Int,
+        val content: String,
+        val extraUrl: String = ""
+    )
+
+    internal data class LinkLabelSpan(
+        val labelStart: Int,
+        val labelEnd: Int,
+        val fullUrl: String
+    )
+
+    internal data class AnalyzedInline(
+        val styleSpans: List<StyleSpan>,
+        val hidden: BooleanArray,
+        val atomics: List<AtomicToken>,
+        val linkLabels: List<LinkLabelSpan>
+    )
+
+    private data class StarRun(
+        val start: Int,
+        var end: Int,
+        val canOpen: Boolean,
+        val canClose: Boolean
+    ) {
+        val remaining: Int get() = end - start
+    }
+
+    private data class MarkerOpener(
+        val key: String,
+        val styleKind: StyleKind,
+        val openStart: Int,
+        val openEnd: Int
+    )
+
+    private data class HtmlTagMatch(
+        val groupKey: String,
+        val styleKind: StyleKind,
+        val isClosing: Boolean,
+        val length: Int
+    )
+
     private data class InlineStyleContext(
         val isBold: Boolean = false,
         val isItalic: Boolean = false,
@@ -81,9 +139,320 @@ object InlineMarkdownHelper {
         }
     }
 
+    internal fun analyzeInlineSpans(rawText: String): AnalyzedInline {
+        val n = rawText.length
+        val hidden = BooleanArray(n)
+        val protectedChars = BooleanArray(n)
+        val atomics = mutableListOf<AtomicToken>()
+        val linkLabels = mutableListOf<LinkLabelSpan>()
+        val styleSpans = mutableListOf<StyleSpan>()
+
+        fun markHiddenAndProtected(s: Int, e: Int) {
+            val start = s.coerceIn(0, n)
+            val end = e.coerceIn(0, n)
+            for (k in start until end) {
+                hidden[k] = true
+                protectedChars[k] = true
+            }
+        }
+
+        // Pass 1: Identify protected atomic tokens (Math, Inline Code, Links, Bare URLs)
+        var i = 0
+        while (i < n) {
+            if (protectedChars[i]) {
+                i++
+                continue
+            }
+
+            // 1. LaTeX Block Math: $$formula$$
+            if (rawText.startsWith("$$", i)) {
+                val end = rawText.indexOf("$$", i + 2)
+                if (end != -1) {
+                    atomics.add(AtomicToken(AtomicKind.MATH_BLOCK, i, end + 2, rawText.substring(i + 2, end)))
+                    for (k in i until end + 2) protectedChars[k] = true
+                    i = end + 2
+                    continue
+                }
+            }
+
+            // 2. LaTeX Inline Math: $formula$
+            if (rawText[i] == '$' && !rawText.startsWith("$$", i)) {
+                val end = rawText.indexOf('$', i + 1)
+                if (end > i + 1 && !rawText.substring(i + 1, end).contains('\n')) {
+                    atomics.add(AtomicToken(AtomicKind.MATH_INLINE, i, end + 1, rawText.substring(i + 1, end)))
+                    for (k in i until end + 1) protectedChars[k] = true
+                    i = end + 1
+                    continue
+                }
+            }
+
+            // 3. Inline Code: <>...</>, <code>...</code>, `...`
+            if (rawText.startsWith("<>", i)) {
+                val end = rawText.indexOf("</>", i + 2)
+                if (end != -1) {
+                    atomics.add(AtomicToken(AtomicKind.CODE, i, end + 3, rawText.substring(i + 2, end)))
+                    for (k in i until end + 3) protectedChars[k] = true
+                    i = end + 3
+                    continue
+                }
+            }
+            if (rawText.startsWith("<code>", i, ignoreCase = true)) {
+                val end = rawText.indexOf("</code>", i + 6, ignoreCase = true)
+                if (end != -1) {
+                    atomics.add(AtomicToken(AtomicKind.CODE, i, end + 7, rawText.substring(i + 6, end)))
+                    for (k in i until end + 7) protectedChars[k] = true
+                    i = end + 7
+                    continue
+                }
+            }
+            if (rawText[i] == '`' && !rawText.startsWith("```", i)) {
+                val end = rawText.indexOf('`', i + 1)
+                if (end != -1) {
+                    atomics.add(AtomicToken(AtomicKind.CODE, i, end + 1, rawText.substring(i + 1, end)))
+                    for (k in i until end + 1) protectedChars[k] = true
+                    i = end + 1
+                    continue
+                }
+            }
+
+            // 4. Markdown Link: [label](url) (skip image/audio ![...](...))
+            if (rawText[i] == '[' && (i == 0 || rawText[i - 1] != '!')) {
+                val closeLabel = rawText.indexOf("](", i + 1)
+                if (closeLabel != -1) {
+                    val innerLabel = rawText.substring(i + 1, closeLabel)
+                    if (!innerLabel.contains(']') && !innerLabel.contains('\n')) {
+                        val closeUrl = rawText.indexOf(')', closeLabel + 2)
+                        if (closeUrl != -1 && !rawText.substring(closeLabel + 2, closeUrl).contains('\n')) {
+                            val rawUrl = rawText.substring(closeLabel + 2, closeUrl)
+                            val fullUrl = normalizeUrl(rawUrl)
+                            markHiddenAndProtected(i, i + 1)
+                            markHiddenAndProtected(closeLabel, closeUrl + 1)
+                            linkLabels.add(LinkLabelSpan(i + 1, closeLabel, fullUrl))
+                            i++ // Advance inside label so nested inline styles and code still parse!
+                            continue
+                        }
+                    }
+                }
+            }
+
+            val insideLinkLabel = linkLabels.any { i in it.labelStart until it.labelEnd }
+
+            // 5. Pipe Link: url|label
+            if (!insideLinkLabel && (i == 0 || rawText[i - 1].isWhitespace())) {
+                val pipeMatch = PIPE_LINK_REGEX.find(rawText.substring(i))
+                if (pipeMatch != null && pipeMatch.range.first == 0) {
+                    val rawUrl = pipeMatch.groupValues[1]
+                    if (rawUrl.contains('.') || rawUrl.contains('/')) {
+                        val label = pipeMatch.groupValues[2].substringBefore(" ").ifEmpty { pipeMatch.groupValues[2] }
+                        val fullUrl = normalizeUrl(rawUrl)
+                        val labelStart = i + rawUrl.length + 1
+                        val labelEnd = labelStart + label.length
+                        markHiddenAndProtected(i, labelStart)
+                        linkLabels.add(LinkLabelSpan(labelStart, labelEnd, fullUrl))
+                        i = labelStart
+                        continue
+                    }
+                }
+            }
+
+            // 6. Bare URLs: https://... or www....
+            if (!insideLinkLabel && (rawText[i] == 'h' || rawText[i] == 'w')) {
+                val bareMatch = BARE_URL_REGEX.find(rawText.substring(i))
+                if (bareMatch != null && bareMatch.range.first == 0) {
+                    val matchedUrl = bareMatch.value
+                    val fullUrl = normalizeUrl(matchedUrl)
+                    val end = i + matchedUrl.length
+                    atomics.add(AtomicToken(AtomicKind.BARE_URL, i, end, matchedUrl, fullUrl))
+                    for (k in i until end) protectedChars[k] = true
+                    i = end
+                    continue
+                }
+            }
+
+            i++
+        }
+
+        // Pass 2: Match emphasis (*), underscores (_ / __), strike (~~), highlight (==), and inline HTML tags
+        val starStack = mutableListOf<StarRun>()
+        val markerStack = mutableListOf<MarkerOpener>()
+
+        i = 0
+        while (i < n) {
+            if (protectedChars[i]) {
+                i++
+                continue
+            }
+
+            // A. Asterisk runs (*, **, ***, etc.) - CommonMark-style stack matching for arbitrary combinations
+            if (rawText[i] == '*') {
+                var j = i + 1
+                while (j < n && rawText[j] == '*' && !protectedChars[j]) {
+                    j++
+                }
+                val runLen = j - i
+                val before = if (i > 0) rawText[i - 1] else null
+                val after = if (j < n) rawText[j] else null
+                val beforeWs = before == null || before.isWhitespace()
+                val afterWs = after == null || after.isWhitespace()
+
+                if (runLen == 1 && beforeWs && afterWs) {
+                    // Standalone " * " (multiplication) stays literal
+                    i = j
+                    continue
+                }
+
+                val canClose = !beforeWs
+                val canOpen = !afterWs
+                var remStart = i
+                val remEnd = j
+
+                while (remEnd > remStart && canClose) {
+                    val openerIdx = starStack.indexOfLast { it.remaining > 0 }
+                    if (openerIdx == -1) break
+                    val opener = starStack[openerIdx]
+                    if (opener.end == remStart) break
+
+                    val take = if (opener.remaining >= 2 && (remEnd - remStart) >= 2) 2 else 1
+                    val openConsumeStart = opener.end - take
+                    val openConsumeEnd = opener.end
+                    opener.end -= take
+
+                    val closeConsumeStart = remStart
+                    val closeConsumeEnd = remStart + take
+                    remStart += take
+
+                    for (k in openConsumeStart until openConsumeEnd) hidden[k] = true
+                    for (k in closeConsumeStart until closeConsumeEnd) hidden[k] = true
+
+                    val kind = if (take == 2) StyleKind.BOLD else StyleKind.ITALIC
+                    styleSpans.add(StyleSpan(kind, openConsumeEnd, closeConsumeStart))
+
+                    if (opener.remaining == 0) {
+                        starStack.removeAt(openerIdx)
+                    }
+                }
+
+                if (remEnd > remStart && canOpen) {
+                    starStack.add(StarRun(start = remStart, end = remEnd, canOpen = canOpen, canClose = canClose))
+                }
+
+                i = j
+                continue
+            }
+
+            // B. Inline HTML tags (<u>, <b>, <strong>, <i>, <em>, <s>, <del>, <mark>, <q>, <blockquote>)
+            if (rawText[i] == '<') {
+                val tag = matchInlineHtmlTag(rawText, i)
+                if (tag != null && (i until i + tag.length).none { protectedChars[it] }) {
+                    val tagEnd = i + tag.length
+                    if (tag.isClosing) {
+                        val openIdx = markerStack.indexOfLast { it.key == tag.groupKey }
+                        if (openIdx != -1) {
+                            val opener = markerStack.removeAt(openIdx)
+                            for (k in opener.openStart until opener.openEnd) hidden[k] = true
+                            for (k in i until tagEnd) hidden[k] = true
+                            styleSpans.add(StyleSpan(opener.styleKind, opener.openEnd, i))
+                        }
+                    } else {
+                        markerStack.add(MarkerOpener(tag.groupKey, tag.styleKind, i, tagEnd))
+                    }
+                    i = tagEnd
+                    continue
+                }
+            }
+
+            // C. Two-character symmetrical markers: ~~, ==, __
+            val twoCharMarker = when {
+                rawText.startsWith("~~", i) && i + 1 < n && !protectedChars[i + 1] -> "~~" to StyleKind.STRIKETHROUGH
+                rawText.startsWith("==", i) && i + 1 < n && !protectedChars[i + 1] -> "==" to StyleKind.HIGHLIGHT
+                rawText.startsWith("__", i) && i + 1 < n && !protectedChars[i + 1] -> "__" to StyleKind.UNDERLINE
+                else -> null
+            }
+            if (twoCharMarker != null) {
+                val (key, kind) = twoCharMarker
+                val markerEnd = i + 2
+                val before = if (i > 0) rawText[i - 1] else null
+                val after = if (markerEnd < n) rawText[markerEnd] else null
+                val openIdx = markerStack.indexOfLast { it.key == key }
+                val canClose = openIdx != -1 && markerStack[openIdx].openEnd < i && before != null && !before.isWhitespace()
+                val canOpen = after != null && !after.isWhitespace()
+
+                if (canClose) {
+                    val opener = markerStack.removeAt(openIdx)
+                    for (k in opener.openStart until opener.openEnd) hidden[k] = true
+                    for (k in i until markerEnd) hidden[k] = true
+                    styleSpans.add(StyleSpan(opener.styleKind, opener.openEnd, i))
+                } else if (canOpen) {
+                    markerStack.add(MarkerOpener(key, kind, i, markerEnd))
+                }
+                i = markerEnd
+                continue
+            }
+
+            // D. Single underscore _italic_ (respecting word boundaries so snake_case_ids stay literal)
+            if (rawText[i] == '_') {
+                val before = if (i > 0) rawText[i - 1] else null
+                val after = if (i + 1 < n) rawText[i + 1] else null
+                val openIdx = markerStack.indexOfLast { it.key == "_" }
+                val canClose = openIdx != -1 &&
+                    markerStack[openIdx].openEnd < i &&
+                    before != null && !before.isWhitespace() &&
+                    (after == null || !after.isLetterOrDigit())
+                val canOpen = after != null && !after.isWhitespace() &&
+                    (before == null || !before.isLetterOrDigit())
+
+                if (canClose) {
+                    val opener = markerStack.removeAt(openIdx)
+                    hidden[opener.openStart] = true
+                    hidden[i] = true
+                    styleSpans.add(StyleSpan(StyleKind.ITALIC, opener.openEnd, i))
+                } else if (canOpen) {
+                    markerStack.add(MarkerOpener("_", StyleKind.ITALIC, i, i + 1))
+                }
+                i++
+                continue
+            }
+
+            i++
+        }
+
+        return AnalyzedInline(
+            styleSpans = styleSpans,
+            hidden = hidden,
+            atomics = atomics,
+            linkLabels = linkLabels
+        )
+    }
+
+    private fun matchInlineHtmlTag(text: String, pos: Int): HtmlTagMatch? {
+        val candidates = listOf(
+            "<u>" to HtmlTagMatch("tag_u", StyleKind.UNDERLINE, false, 3),
+            "</u>" to HtmlTagMatch("tag_u", StyleKind.UNDERLINE, true, 4),
+            "<b>" to HtmlTagMatch("tag_b", StyleKind.BOLD, false, 3),
+            "</b>" to HtmlTagMatch("tag_b", StyleKind.BOLD, true, 4),
+            "<strong>" to HtmlTagMatch("tag_b", StyleKind.BOLD, false, 8),
+            "</strong>" to HtmlTagMatch("tag_b", StyleKind.BOLD, true, 9),
+            "<i>" to HtmlTagMatch("tag_i", StyleKind.ITALIC, false, 3),
+            "</i>" to HtmlTagMatch("tag_i", StyleKind.ITALIC, true, 4),
+            "<em>" to HtmlTagMatch("tag_i", StyleKind.ITALIC, false, 4),
+            "</em>" to HtmlTagMatch("tag_i", StyleKind.ITALIC, true, 5),
+            "<s>" to HtmlTagMatch("tag_s", StyleKind.STRIKETHROUGH, false, 3),
+            "</s>" to HtmlTagMatch("tag_s", StyleKind.STRIKETHROUGH, true, 4),
+            "<del>" to HtmlTagMatch("tag_s", StyleKind.STRIKETHROUGH, false, 5),
+            "</del>" to HtmlTagMatch("tag_s", StyleKind.STRIKETHROUGH, true, 6),
+            "<mark>" to HtmlTagMatch("tag_mark", StyleKind.HIGHLIGHT, false, 6),
+            "</mark>" to HtmlTagMatch("tag_mark", StyleKind.HIGHLIGHT, true, 7),
+            "<q>" to HtmlTagMatch("tag_quote", StyleKind.QUOTE, false, 3),
+            "</q>" to HtmlTagMatch("tag_quote", StyleKind.QUOTE, true, 4),
+            "<blockquote>" to HtmlTagMatch("tag_quote", StyleKind.QUOTE, false, 12),
+            "</blockquote>" to HtmlTagMatch("tag_quote", StyleKind.QUOTE, true, 13)
+        )
+        return candidates.firstOrNull { text.startsWith(it.first, pos, ignoreCase = true) }?.second
+    }
+
     /**
      * Parses inline markdown markers with full synergistic combination of styles:
-     * Negrito + Itálico + Tachado + Sublinhado + Citação + Links externos.
+     * Negrito + Itálico + Tachado + Sublinhado + Destaque + Código + Citação + Links externos.
      */
     fun parseInlineFormatting(
         rawText: String,
@@ -94,343 +463,145 @@ object InlineMarkdownHelper {
 
         val codeBgColor = if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
         val baseTextColor = if (isDark) Color.White else Color(0xFF1E293B)
+        val analyzed = analyzeInlineSpans(rawText)
+        val atomicByStart = analyzed.atomics.associateBy { it.start }
+        val sortedLinks = analyzed.linkLabels.sortedBy { it.labelStart }
+        val n = rawText.length
 
         return buildAnnotatedString {
-            parseFragment(
-                text = rawText,
-                context = InlineStyleContext(),
-                isDark = isDark,
-                linkColor = linkColor,
-                codeBgColor = codeBgColor,
-                baseTextColor = baseTextColor,
-                builder = this
-            )
-        }
-    }
+            var currentLink: LinkLabelSpan? = null
+            var linkIdx = 0
 
-    private fun parseFragment(
-        text: String,
-        context: InlineStyleContext,
-        isDark: Boolean,
-        linkColor: Color,
-        codeBgColor: Color,
-        baseTextColor: Color,
-        builder: AnnotatedString.Builder
-    ) {
-        var cursor = 0
-        val textLen = text.length
-
-        while (cursor < textLen) {
-            // 1. LaTeX Block Math: $$formula$$
-            if (text.startsWith("$$", cursor)) {
-                val end = text.indexOf("$$", cursor + 2)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 2, end)
-                    builder.append(LatexFormulaRenderer.formatAnnotatedBlock(inner, isDark, linkColor))
-                    cursor = end + 2
-                    continue
-                }
-            }
-
-            // 2. LaTeX Inline Math: $formula$
-            if (text.startsWith("$", cursor) && !text.startsWith("$$", cursor)) {
-                val end = text.indexOf("$", cursor + 1)
-                if (end != -1 && end > cursor + 1 && !text.substring(cursor + 1, end).contains("\n")) {
-                    val inner = text.substring(cursor + 1, end)
-                    builder.append(LatexFormulaRenderer.formatAnnotatedInline(inner, isDark))
-                    cursor = end + 1
-                    continue
-                }
-            }
-
-            // 3. Markdown Link: [label](url)
-            if (text.startsWith("[", cursor) && text.indexOf("](", cursor) != -1) {
-                val closeLabel = text.indexOf("](", cursor)
-                val closeUrl = text.indexOf(")", closeLabel)
-                if (closeUrl != -1) {
-                    val label = text.substring(cursor + 1, closeLabel)
-                    val rawUrl = text.substring(closeLabel + 2, closeUrl)
-                    val fullUrl = normalizeUrl(rawUrl)
-
-                    builder.pushStringAnnotation(tag = "LINK", annotation = fullUrl)
-                    parseFragment(
-                        text = label,
-                        context = context.copy(linkUrl = fullUrl, isUnderline = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    // Append external link icon in theme link color
-                    builder.withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold)) {
-                        builder.append(" 🔗")
+            fun syncLinkAt(pos: Int) {
+                val active = currentLink
+                if (active != null && pos >= active.labelEnd) {
+                    withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold)) {
+                        append(" 🔗")
                     }
-                    builder.pop()
-                    cursor = closeUrl + 1
+                    pop()
+                    currentLink = null
+                }
+                while (currentLink == null && linkIdx < sortedLinks.size && sortedLinks[linkIdx].labelStart <= pos) {
+                    val nextLink = sortedLinks[linkIdx++]
+                    if (pos <= nextLink.labelEnd) {
+                        pushStringAnnotation(tag = "LINK", annotation = nextLink.fullUrl)
+                        if (nextLink.labelStart == nextLink.labelEnd) {
+                            withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold)) {
+                                append(" 🔗")
+                            }
+                            pop()
+                        } else {
+                            currentLink = nextLink
+                        }
+                    }
+                }
+            }
+
+            var i = 0
+            while (i < n) {
+                syncLinkAt(i)
+
+                val atomic = atomicByStart[i]
+                if (atomic != null) {
+                    val ctx = contextAt(i, analyzed.styleSpans, currentLink)
+                    when (atomic.kind) {
+                        AtomicKind.MATH_BLOCK -> append(LatexFormulaRenderer.formatAnnotatedBlock(atomic.content, isDark, linkColor))
+                        AtomicKind.MATH_INLINE -> append(LatexFormulaRenderer.formatAnnotatedInline(atomic.content, isDark))
+                        AtomicKind.CODE -> appendStyledToken(
+                            " ${atomic.content} ",
+                            ctx.copy(isCode = true),
+                            isDark,
+                            linkColor,
+                            codeBgColor,
+                            baseTextColor,
+                            this
+                        )
+                        AtomicKind.BARE_URL -> {
+                            pushStringAnnotation(tag = "LINK", annotation = atomic.extraUrl)
+                            appendStyledToken(
+                                "${atomic.content} 🔗",
+                                ctx.copy(linkUrl = atomic.extraUrl, isUnderline = true),
+                                isDark,
+                                linkColor,
+                                codeBgColor,
+                                baseTextColor,
+                                this
+                            )
+                            pop()
+                        }
+                    }
+                    i = atomic.end
                     continue
                 }
-            }
 
-            // 4. Pipe Link: url|label
-            val pipeMatch = Regex("^([a-zA-Z0-9.:/_-]+)\\|([^\n]+)").find(text.substring(cursor))
-            if (pipeMatch != null && pipeMatch.range.first == 0 && (pipeMatch.groupValues[1].contains(".") || pipeMatch.groupValues[1].contains("/"))) {
-                val rawUrl = pipeMatch.groupValues[1]
-                val label = pipeMatch.groupValues[2].substringBefore(" ").ifEmpty { pipeMatch.groupValues[2] }
-                val fullUrl = normalizeUrl(rawUrl)
-
-                builder.pushStringAnnotation(tag = "LINK", annotation = fullUrl)
-                parseFragment(
-                    text = label,
-                    context = context.copy(linkUrl = fullUrl, isUnderline = true),
-                    isDark = isDark,
-                    linkColor = linkColor,
-                    codeBgColor = codeBgColor,
-                    baseTextColor = baseTextColor,
-                    builder = builder
-                )
-                builder.withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold)) {
-                    builder.append(" 🔗")
+                if (analyzed.hidden[i]) {
+                    i++
+                    continue
                 }
-                builder.pop()
-                cursor += rawUrl.length + 1 + label.length
-                continue
-            }
 
-            // 5. Bare URLs: https://... or www....
-            val bareUrlMatch = Regex("^(https?://[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]+|www\\.[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]+)").find(text.substring(cursor))
-            if (bareUrlMatch != null && bareUrlMatch.range.first == 0 && context.linkUrl == null) {
-                val matchedUrl = bareUrlMatch.value
-                val fullUrl = normalizeUrl(matchedUrl)
-                builder.pushStringAnnotation(tag = "LINK", annotation = fullUrl)
-                builder.withStyle(
-                    SpanStyle(
-                        color = linkColor,
-                        fontWeight = FontWeight.SemiBold,
-                        textDecoration = TextDecoration.Underline
-                    )
+                val ctx = contextAt(i, analyzed.styleSpans, currentLink)
+                var endRun = i + 1
+                while (
+                    endRun < n &&
+                    !analyzed.hidden[endRun] &&
+                    atomicByStart[endRun] == null &&
+                    (currentLink == null || endRun < currentLink!!.labelEnd) &&
+                    (linkIdx >= sortedLinks.size || endRun < sortedLinks[linkIdx].labelStart) &&
+                    contextAt(endRun, analyzed.styleSpans, currentLink) == ctx
                 ) {
-                    builder.append(matchedUrl)
-                    builder.append(" 🔗")
+                    endRun++
                 }
-                builder.pop()
-                cursor += matchedUrl.length
-                continue
+                appendStyledToken(
+                    rawText.substring(i, endRun),
+                    ctx,
+                    isDark,
+                    linkColor,
+                    codeBgColor,
+                    baseTextColor,
+                    this
+                )
+                i = endRun
             }
 
-            // 6. Bold: **text**
-            if (text.startsWith("**", cursor)) {
-                val end = text.indexOf("**", cursor + 2)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 2, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isBold = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 2
-                    continue
-                }
-            }
-
-            // 7. Strikethrough: ~~text~~
-            if (text.startsWith("~~", cursor)) {
-                val end = text.indexOf("~~", cursor + 2)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 2, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isStrikethrough = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 2
-                    continue
-                }
-            }
-
-            // 8. Underline: <u>text</u> or __text__
-            if (text.startsWith("<u>", cursor)) {
-                val end = text.indexOf("</u>", cursor + 3)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 3, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isUnderline = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 4
-                    continue
-                }
-            }
-            if (text.startsWith("__", cursor)) {
-                val end = text.indexOf("__", cursor + 2)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 2, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isUnderline = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 2
-                    continue
-                }
-            }
-
-            // 9. Highlight: ==text==
-            if (text.startsWith("==", cursor)) {
-                val end = text.indexOf("==", cursor + 2)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 2, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isHighlight = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 2
-                    continue
-                }
-            }
-
-            // 10. Quote / Citação inline: <blockquote>text</blockquote> or <q>text</q>
-            if (text.startsWith("<blockquote>", cursor)) {
-                val end = text.indexOf("</blockquote>", cursor + 12)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 12, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isQuote = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 13
-                    continue
-                }
-            }
-            if (text.startsWith("<q>", cursor)) {
-                val end = text.indexOf("</q>", cursor + 3)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 3, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isQuote = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 4
-                    continue
-                }
-            }
-
-            // 11. Inline code: `text` or <>text</> or <code>text</code>
-            if (text.startsWith("<>", cursor)) {
-                val end = text.indexOf("</>", cursor + 2)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 2, end)
-                    appendStyledToken(" $inner ", context.copy(isCode = true), isDark, linkColor, codeBgColor, baseTextColor, builder)
-                    cursor = end + 3
-                    continue
-                }
-            }
-            if (text.startsWith("<code>", cursor)) {
-                val end = text.indexOf("</code>", cursor + 6)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 6, end)
-                    appendStyledToken(" $inner ", context.copy(isCode = true), isDark, linkColor, codeBgColor, baseTextColor, builder)
-                    cursor = end + 7
-                    continue
-                }
-            }
-            if (text.startsWith("`", cursor) && !text.startsWith("```", cursor)) {
-                val end = text.indexOf("`", cursor + 1)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 1, end)
-                    appendStyledToken(" $inner ", context.copy(isCode = true), isDark, linkColor, codeBgColor, baseTextColor, builder)
-                    cursor = end + 1
-                    continue
-                }
-            }
-
-            // 12. Italic: *text* or _text_
-            if (text.startsWith("*", cursor) && !text.startsWith("**", cursor)) {
-                val end = text.indexOf("*", cursor + 1)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 1, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isItalic = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 1
-                    continue
-                }
-            }
-            if (text.startsWith("_", cursor) && !text.startsWith("__", cursor)) {
-                val end = text.indexOf("_", cursor + 1)
-                if (end != -1) {
-                    val inner = text.substring(cursor + 1, end)
-                    parseFragment(
-                        text = inner,
-                        context = context.copy(isItalic = true),
-                        isDark = isDark,
-                        linkColor = linkColor,
-                        codeBgColor = codeBgColor,
-                        baseTextColor = baseTextColor,
-                        builder = builder
-                    )
-                    cursor = end + 1
-                    continue
-                }
-            }
-
-            // Normal text character (or span of non-special characters)
-            val nextSpecial = findNextSpecialChar(text, cursor)
-            val chunk = text.substring(cursor, nextSpecial)
-            appendStyledToken(chunk, context, isDark, linkColor, codeBgColor, baseTextColor, builder)
-            cursor = nextSpecial
+            syncLinkAt(n)
         }
     }
 
-    private fun findNextSpecialChar(text: String, start: Int): Int {
-        for (i in start until text.length) {
-            val c = text[i]
-            if (c == '*' || c == '_' || c == '~' || c == '`' || c == '<' || c == '=' || c == '[' || c == '$' || c == '|' ||
-                (c == 'w' && text.startsWith("www.", i)) ||
-                (c == 'h' && (text.startsWith("http://", i) || text.startsWith("https://", i)))
-            ) {
-                return if (i == start) start + 1 else i
+    private fun contextAt(
+        pos: Int,
+        styleSpans: List<StyleSpan>,
+        currentLink: LinkLabelSpan?
+    ): InlineStyleContext {
+        var isBold = false
+        var isItalic = false
+        var isStrike = false
+        var isUnderline = currentLink != null
+        var isHighlight = false
+        var isQuote = false
+
+        for (span in styleSpans) {
+            if (pos in span.start until span.end) {
+                when (span.kind) {
+                    StyleKind.BOLD -> isBold = true
+                    StyleKind.ITALIC -> isItalic = true
+                    StyleKind.STRIKETHROUGH -> isStrike = true
+                    StyleKind.UNDERLINE -> isUnderline = true
+                    StyleKind.HIGHLIGHT -> isHighlight = true
+                    StyleKind.QUOTE -> isQuote = true
+                }
             }
         }
-        return text.length
+
+        return InlineStyleContext(
+            isBold = isBold,
+            isItalic = isItalic,
+            isStrikethrough = isStrike,
+            isUnderline = isUnderline,
+            isHighlight = isHighlight,
+            isCode = false,
+            isQuote = isQuote,
+            linkUrl = currentLink?.fullUrl
+        )
     }
 
     private fun appendStyledToken(
@@ -470,4 +641,7 @@ object InlineMarkdownHelper {
             builder.append(token)
         }
     }
+
+    private val PIPE_LINK_REGEX = Regex("^([a-zA-Z0-9.:/_-]+)\\|([^\n]+)")
+    private val BARE_URL_REGEX = Regex("^(https?://[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]+|www\\.[a-zA-Z0-9._~:/?#\\[\\]@!$&'()*+,;=-]+)")
 }

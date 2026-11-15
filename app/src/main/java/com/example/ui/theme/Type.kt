@@ -9,11 +9,7 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 
 val PlusJakartaSansFontFamily = FontFamily(
-    Font(R.font.plus_jakarta_sans, FontWeight.Normal),
-    Font(R.font.plus_jakarta_sans, FontWeight.Medium),
-    Font(R.font.plus_jakarta_sans, FontWeight.SemiBold),
-    Font(R.font.plus_jakarta_sans, FontWeight.Bold),
-    Font(R.font.plus_jakarta_sans, FontWeight.ExtraBold)
+    Font(R.font.plus_jakarta_sans, FontWeight.Normal)
 )
 
 // Set of Material typography styles to start with

@@ -45,7 +45,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
-import com.example.data.auth.AuthRepository
 import com.example.ui.MainViewModel
 import com.example.ui.PomodoroPhase
 import com.example.ui.components.AchievementsDialog
@@ -55,7 +54,6 @@ import com.example.ui.components.CreditsDialog
 import com.example.ui.components.MascotHumor
 import com.example.ui.components.WhatsNewDialog
 import com.example.ui.navigation.Screen
-import com.example.ui.screens.auth.AuthScreen
 import com.example.ui.screens.calendar.CalendarScreen
 import com.example.ui.screens.home.HomeScreen
 import com.example.ui.screens.organization.NotesSubTab
@@ -77,7 +75,6 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
-    private val authRepository by lazy { AuthRepository.getInstance(this) }
     private var pendingWidgetAction by mutableStateOf<String?>(null)
     private var pendingWidgetNoteId by mutableStateOf<Long?>(null)
 
@@ -139,14 +136,8 @@ class MainActivity : ComponentActivity() {
             val whatsNewVisible by viewModel.whatsNewVisible.collectAsState()
 
             val notificationSettings by viewModel.notificationSettings.collectAsState()
-            val currentUser by authRepository.currentUser.collectAsState()
-            val isGuestMode by authRepository.isGuestMode.collectAsState()
-            val isAuthReady by authRepository.isAuthReady.collectAsState()
-            val syncFrequency by viewModel.syncFrequency.collectAsState()
-            val lastSyncTimestamp by viewModel.lastSyncTimestamp.collectAsState()
 
             val activeAlarm by ActiveAlarmManager.activeAlarm.collectAsState()
-            val hasSocialNotifications by viewModel.hasSocialNotifications.collectAsState()
 
             LaunchedEffect(Unit) {
                 ActiveAlarmManager.checkAndRestore(this@MainActivity)
@@ -227,31 +218,25 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val isStartupScanDone by viewModel.isStartupScanDone.collectAsState()
+                val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsState()
 
                 LaunchedEffect(Unit) {
                     viewModel.performStartupFolderScan()
                     viewModel.runDueFinanceLinksOnStartup()
                 }
 
-                // Organic Loading Screen: Wait until auth state and resources are resolved
-                if (!isAuthReady || !isStartupScanDone) {
+                // Organic Loading Screen: Wait until local resources are resolved
+                if (!isStartupScanDone) {
                     CitraLoadingScreen(loadingText = "Carregando recursos do Citra...")
                     return@CitraTheme
                 }
 
-                // Attempt silent Credential Manager sign-in on launch if not in guest mode
-                LaunchedEffect(isAuthReady) {
-                    if (isAuthReady && currentUser == null && !isGuestMode) {
-                        authRepository.attemptAutoSignIn(this@MainActivity)
-                    }
-                }
-
-                // If user is not logged in and hasn't chosen guest mode yet, show first-launch AuthScreen
-                if (currentUser == null && !isGuestMode) {
-                    AuthScreen(
-                        authRepository = authRepository,
-                        onAuthSuccess = { /* currentUser will update via StateFlow */ },
-                        onContinueAsGuest = { /* isGuestMode will update via StateFlow */ }
+                // First-launch Citra Mascot intro animation & local profile setup
+                if (!hasCompletedOnboarding) {
+                    com.example.ui.screens.welcome.WelcomeIntroScreen(
+                        onFinishOnboarding = { displayName, photoPath ->
+                            viewModel.completeOnboarding(displayName, photoPath)
+                        }
                     )
                     return@CitraTheme
                 }
@@ -328,9 +313,6 @@ class MainActivity : ComponentActivity() {
                 var showSettingsDialog by remember { mutableStateOf(false) }
                 var showAddCategoryDialog by remember { mutableStateOf(false) }
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
-                var showAuthDialog by remember { mutableStateOf(false) }
-                var showInboxDialog by remember { mutableStateOf(false) }
-                val unreadInboxCount by viewModel.unreadInboxCount.collectAsState()
 
                 val appBgUri by viewModel.appBgUri.collectAsState()
                 val appBgBlur by viewModel.appBgBlur.collectAsState()
@@ -406,66 +388,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Auto-sync according to configured frequency (Default daily, or 1h, weekly, on app open)
-                // Auto-sync & Cloud settings loader (Silent save, load on user account entry)
-                val syncEnabled by viewModel.syncEnabled.collectAsState()
-                LaunchedEffect(currentUser?.uid, syncFrequency, syncEnabled) {
-                    val user = currentUser
-                    if (user != null && !user.isGuest) {
-                        try {
-                            val cloudData = authRepository.fetchCloudUserData()
-                            if (cloudData != null) {
-                                // Load and apply user settings saved in the cloud for this account
-                                viewModel.applyCloudSettings(cloudData.settings)
-
-                                if (viewModel.tasks.value.isEmpty() && viewModel.habits.value.isEmpty()) {
-                                    cloudData.backupJson?.let { viewModel.restoreBackupJson(it) }
-                                    cloudData.notesJson?.let { viewModel.importNotesJson(it) }
-                                    cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
-                                }
-                            } else {
-                                viewModel.checkCloudFinanceBackupAvailable()
-                            }
-                        } catch (_: Exception) {}
-
-                        if (syncEnabled) {
-                            val now = System.currentTimeMillis()
-                            val shouldSync = when (syncFrequency) {
-                                "ON_APP_OPEN" -> true
-                                "1_HOUR" -> (now - lastSyncTimestamp) >= 60 * 60 * 1000L
-                                "WEEKLY" -> (now - lastSyncTimestamp) >= 7 * 24 * 60 * 60 * 1000L
-                                else -> (now - lastSyncTimestamp) >= 24 * 60 * 60 * 1000L // "DAILY"
-                            }
-                            if (shouldSync) {
-                                try {
-                                    val cloudData = authRepository.fetchCloudUserData()
-                                    if (cloudData != null) {
-                                        cloudData.notesJson?.let { viewModel.importNotesJson(it) }
-                                        cloudData.financesJson?.let { viewModel.restoreFinancesJson(it) }
-                                    }
-                                    val financesJson = viewModel.exportFinancesJson()
-                                    val settingsMap = viewModel.getSettingsMapForCloud()
-                                    val syncResult = authRepository.syncAllUserDataToCloud(
-                                        tasks = viewModel.tasks.value,
-                                        habits = viewModel.habits.value,
-                                        notes = viewModel.notes.value,
-                                        categories = viewModel.categories.value,
-                                        focusSessions = viewModel.focusSessions.value,
-                                        achievements = viewModel.achievements.value,
-                                        settingsMap = settingsMap,
-                                        financesJson = financesJson
-                                    )
-                                    if (syncResult.isSuccess) {
-                                        viewModel.updateLastSyncTimestamp(now)
-                                        if (financesJson.isNotBlank()) {
-                                            authRepository.syncFinancesToCloud(financesJson)
-                                        }
-                                    }
-                                } catch (_: Exception) {}
-                            }
-                        }
-                    }
-                }
 
                 // Handle back press to return to Home or Timer (instant transition without intermediate scroll lag)
                 BackHandler(enabled = pagerState.currentPage != 0) {
@@ -475,6 +397,18 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val organizationSubTab by viewModel.organizationSubTab.collectAsState()
+                val timerAllowSwipe by viewModel.timerAllowSwipe.collectAsState()
+
+                // Track per-page entrance trigger token & timestamp so navigating via buttons
+                // replays a brief, fluid staircase fade-in animation on the destination screen.
+                val pageVisitTokens = remember { mutableStateMapOf<Int, Int>() }
+                val pageEnteredAt = remember { mutableStateMapOf<Int, Long>() }
+
+                LaunchedEffect(pagerState.currentPage) {
+                    val p = pagerState.currentPage
+                    pageVisitTokens[p] = (pageVisitTokens[p] ?: 0) + 1
+                    pageEnteredAt[p] = android.os.SystemClock.uptimeMillis()
+                }
 
                 // Trigger guided tutorial when entering each area for the first time
                 LaunchedEffect(pagerState.currentPage, organizationSubTab, screens) {
@@ -624,40 +558,6 @@ class MainActivity : ComponentActivity() {
                                             imageVector = Icons.Default.Settings,
                                             contentDescription = "Configurações",
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-
-                                // Notification Bell Button with Unread Badge
-                                val isInboxAccountLoggedIn = currentUser != null && currentUser?.isGuest == false
-                                IconButton(
-                                    onClick = { showInboxDialog = true },
-                                    modifier = Modifier.testTag("top_inbox_bell_button")
-                                ) {
-                                    BadgedBox(
-                                        badge = {
-                                            if (isInboxAccountLoggedIn && unreadInboxCount > 0) {
-                                                Badge(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                    contentColor = androidx.compose.ui.graphics.Color.White
-                                                ) {
-                                                    Text(
-                                                        text = if (unreadInboxCount > 99) "99+" else "$unreadInboxCount",
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Notifications,
-                                            contentDescription = "Caixa de Entrada",
-                                            tint = when {
-                                                !isInboxAccountLoggedIn -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                                                unreadInboxCount > 0 -> MaterialTheme.colorScheme.primary
-                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
                                         )
                                     }
                                 }
@@ -830,21 +730,10 @@ class MainActivity : ComponentActivity() {
                                 val selected = pagerState.currentPage == index
                                 NavigationBarItem(
                                     icon = {
-                                        BadgedBox(
-                                            badge = {
-                                                if (screen == Screen.Profile && hasSocialNotifications) {
-                                                    Badge(
-                                                        containerColor = Color(0xFFE53935),
-                                                        modifier = Modifier.size(8.dp)
-                                                    )
-                                                }
-                                            }
-                                        ) {
-                                            Icon(
-                                                imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
-                                                contentDescription = screen.title
-                                            )
-                                        }
+                                        Icon(
+                                            imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                            contentDescription = screen.title
+                                        )
                                     },
                                     label = {
                                         Text(
@@ -895,86 +784,80 @@ class MainActivity : ComponentActivity() {
                     }
 
                     // HorizontalPager: instant tab navigation on button clicks while preserving smooth user manual swiping
+                    val isTimerLockedFromSwipe = !timerAllowSwipe &&
+                        screens.getOrNull(pagerState.currentPage) == Screen.Timer
                     HorizontalPager(
                         state = pagerState,
-                        userScrollEnabled = !isNoteEditorOpen && !(pomodoroState.isRunning && screens.getOrNull(pagerState.currentPage) == Screen.Timer),
+                        userScrollEnabled = !isNoteEditorOpen && !isTimerLockedFromSwipe,
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
-                        when (screens[page]) {
-                            Screen.Home -> HomeScreen(
-                                viewModel = viewModel,
-                                onNavigateToTimer = {
-                                    coroutineScope.launch { pagerState.scrollToPage(1) }
-                                },
-                                onNavigateToOrganization = {
-                                    coroutineScope.launch { pagerState.scrollToPage(2) }
-                                },
-                                onQuickAddTask = {
-                                    showQuickAddTaskDialog = true
-                                },
-                                onQuickAddNote = {
-                                    viewModel.triggerCreateNote()
-                                    val notesPageIndex = screens.indexOf(Screen.Notes)
-                                    if (notesPageIndex >= 0) {
-                                        coroutineScope.launch { pagerState.scrollToPage(notesPageIndex) }
+                        val pageToken = pageVisitTokens[page] ?: 0
+                        val enteredAtMs = pageEnteredAt[page] ?: 0L
+                        CompositionLocalProvider(
+                            com.example.util.LocalScreenEntranceKey provides pageToken,
+                            com.example.util.LocalScreenEnteredAtMillis provides enteredAtMs
+                        ) {
+                            when (screens[page]) {
+                                Screen.Home -> HomeScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToTimer = {
+                                        coroutineScope.launch { pagerState.scrollToPage(1) }
+                                    },
+                                    onNavigateToOrganization = {
+                                        coroutineScope.launch { pagerState.scrollToPage(2) }
+                                    },
+                                    onQuickAddTask = {
+                                        showQuickAddTaskDialog = true
+                                    },
+                                    onQuickAddNote = {
+                                        viewModel.triggerCreateNote()
+                                        val notesPageIndex = screens.indexOf(Screen.Notes)
+                                        if (notesPageIndex >= 0) {
+                                            coroutineScope.launch { pagerState.scrollToPage(notesPageIndex) }
+                                        }
                                     }
-                                }
-                            )
-                            Screen.Timer -> TimerScreen(
-                                viewModel = viewModel,
-                                onNavigateToTasks = {
-                                    coroutineScope.launch { pagerState.scrollToPage(2) }
-                                }
-                            )
-                            Screen.Organization -> OrganizationScreen(
-                                viewModel = viewModel,
-                                onNavigateToTimerWithTask = {
-                                    coroutineScope.launch { pagerState.scrollToPage(1) }
-                                }
-                            )
-                            Screen.Notes -> NotesSubTab(
-                                viewModel = viewModel
-                            )
-                            Screen.Profile -> ProfileScreen(
-                                viewModel = viewModel,
-                                authRepository = authRepository,
-                                onOpenSettings = { showSettingsDialog = true },
-                                onOpenAuthGate = { showAuthDialog = true },
-                                onNavigateToNotes = {
-                                    val notesIndex = screens.indexOf(Screen.Notes)
-                                    if (notesIndex >= 0) {
-                                        coroutineScope.launch { pagerState.scrollToPage(notesIndex) }
+                                )
+                                Screen.Timer -> TimerScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToTasks = {
+                                        coroutineScope.launch { pagerState.scrollToPage(2) }
                                     }
-                                }
-                            )
-                            Screen.Calendar -> CalendarScreen(
-                                viewModel = viewModel,
-                                onStartPomodoroForTask = {
-                                    viewModel.linkTaskToPomodoro(it)
-                                    coroutineScope.launch { pagerState.scrollToPage(1) }
-                                }
-                            )
-                            Screen.Finances -> com.example.ui.screens.finances.FinancesScreen(
-                                viewModel = viewModel,
-                                onOpenFinanceSettings = { showSettingsDialog = true }
-                            )
+                                )
+                                Screen.Organization -> OrganizationScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToTimerWithTask = {
+                                        coroutineScope.launch { pagerState.scrollToPage(1) }
+                                    }
+                                )
+                                Screen.Notes -> NotesSubTab(
+                                    viewModel = viewModel
+                                )
+                                Screen.Profile -> ProfileScreen(
+                                    viewModel = viewModel,
+                                    onOpenSettings = { showSettingsDialog = true },
+                                    onNavigateToNotes = {
+                                        val notesIndex = screens.indexOf(Screen.Notes)
+                                        if (notesIndex >= 0) {
+                                            coroutineScope.launch { pagerState.scrollToPage(notesIndex) }
+                                        }
+                                    }
+                                )
+                                Screen.Calendar -> CalendarScreen(
+                                    viewModel = viewModel,
+                                    onStartPomodoroForTask = {
+                                        viewModel.linkTaskToPomodoro(it)
+                                        coroutineScope.launch { pagerState.scrollToPage(1) }
+                                    }
+                                )
+                                Screen.Finances -> com.example.ui.screens.finances.FinancesScreen(
+                                    viewModel = viewModel,
+                                    onOpenFinanceSettings = { showSettingsDialog = true }
+                                )
+                            }
                         }
                     }
                 }
             }
-
-                if (showAuthDialog) {
-                    Dialog(
-                        onDismissRequest = { showAuthDialog = false },
-                        properties = DialogProperties(usePlatformDefaultWidth = false)
-                    ) {
-                        AuthScreen(
-                            authRepository = authRepository,
-                            onAuthSuccess = { showAuthDialog = false },
-                            onContinueAsGuest = { showAuthDialog = false }
-                        )
-                    }
-                }
 
                 if (showSettingsDialog) {
                     SettingsDialog(
@@ -1012,42 +895,6 @@ class MainActivity : ComponentActivity() {
 
                 if (showCreditsDialog) {
                     CreditsDialog(onDismiss = { showCreditsDialog = false })
-                }
-
-                if (showInboxDialog) {
-                    com.example.ui.screens.inbox.InboxDialog(
-                        viewModel = viewModel,
-                        onOpenAuthGate = {
-                            showInboxDialog = false
-                            showAuthDialog = true
-                        },
-                        onDismiss = { showInboxDialog = false }
-                    )
-                }
-
-                val pendingCloudFinanceRestoreJson by viewModel.pendingCloudFinanceRestoreJson.collectAsState()
-                if (pendingCloudFinanceRestoreJson != null) {
-                    AlertDialog(
-                        onDismissRequest = { viewModel.dismissCloudFinanceRestore() },
-                        icon = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        title = { Text("Restaurar os dados da nuvem?", fontWeight = FontWeight.Bold) },
-                        text = {
-                            Text(
-                                "Encontramos um backup de Finanças guardado na sua conta Google. Deseja restaurar os lançamentos, categorias, configurações e vínculos?",
-                                fontSize = 14.sp
-                            )
-                        },
-                        confirmButton = {
-                            Button(onClick = { viewModel.confirmRestoreCloudFinances() }) {
-                                Text("Restaurar")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { viewModel.dismissCloudFinanceRestore() }) {
-                                Text("Agora não")
-                            }
-                        }
-                    )
                 }
 
                 // Quick Add Task Dialog from Home shortcut
@@ -1104,26 +951,6 @@ class MainActivity : ComponentActivity() {
         AmbientBreakMusicManager.onAppBackgrounded()
 
         viewModel.triggerAutoBackup()
-
-        // Sync all user data to Firebase Firestore if logged in and sync is enabled
-        val user = authRepository.currentUser.value
-        if (viewModel.syncEnabled.value && user != null && !user.isGuest) {
-            val settingsMap = viewModel.getSettingsMapForCloud()
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                val financesJson = try { viewModel.exportFinancesJson() } catch (_: Exception) { null }
-                authRepository.syncAllUserDataToCloud(
-                    tasks = viewModel.tasks.value,
-                    habits = viewModel.habits.value,
-                    notes = viewModel.notes.value,
-                    categories = viewModel.categories.value,
-                    focusSessions = viewModel.focusSessions.value,
-                    achievements = viewModel.achievements.value,
-                    settingsMap = settingsMap,
-                    financesJson = financesJson
-                )
-            }
-            viewModel.backupFinancesNow(showToast = false)
-        }
 
         // Ongoing floating notification when user leaves app while timer is running
         val state = viewModel.pomodoroState.value

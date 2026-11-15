@@ -24,7 +24,6 @@ class CitraRepository(
     val noteVersionDao = database.noteVersionDao()
     val financeDao = database.financeDao()
     val preferencesManager = PreferencesManager(context)
-    val authRepository by lazy { com.example.data.auth.AuthRepository.getInstance(context) }
 
     // Categories
     val allCategories: Flow<List<Category>> = categoryDao.getAllCategories()
@@ -92,36 +91,74 @@ class CitraRepository(
         NextAlarmScheduler.scheduleNextAlarm(context)
     }
 
-    suspend fun toggleHabitToday(habit: Habit): Boolean {
-        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val completedDates = habit.completedDatesCsv.split(",").filter { it.isNotBlank() }.toMutableSet()
+    suspend fun toggleHabitTodayWithConsecutiveDays(habit: Habit): Pair<Boolean, Int> {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val todayCal = Calendar.getInstance()
+        val todayStr = sdf.format(todayCal.time)
+        val yesterdayCal = (todayCal.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -1) }
+        val yesterdayStr = sdf.format(yesterdayCal.time)
+
+        val completedDates = habit.completedDatesCsv.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toMutableSet()
         val isAlreadyDone = completedDates.contains(todayStr)
 
         return if (isAlreadyDone) {
             completedDates.remove(todayStr)
-            val newStreak = (habit.currentStreak - 1).coerceAtLeast(0)
+            val computed = calculateConsecutiveDaysEndingAt(completedDates, yesterdayCal, sdf)
+            val newConsecutive = if (computed > 0) computed else (habit.currentStreak - 1).coerceAtLeast(0)
             habitDao.updateHabit(
                 habit.copy(
-                    currentStreak = newStreak,
+                    currentStreak = newConsecutive,
                     completedDatesCsv = completedDates.joinToString(",")
                 )
             )
-            false
+            Pair(false, newConsecutive)
         } else {
             completedDates.add(todayStr)
-            val newStreak = habit.currentStreak + 1
-            val newBest = maxOf(newStreak, habit.bestStreak)
+            val computed = calculateConsecutiveDaysEndingAt(completedDates, todayCal, sdf)
+            val legacyConsecutive = if (habit.lastCompletedDate == yesterdayStr && habit.currentStreak > 0) {
+                habit.currentStreak + 1
+            } else {
+                1
+            }
+            val newConsecutive = maxOf(computed, legacyConsecutive)
+            val newBest = maxOf(newConsecutive, habit.bestStreak)
             habitDao.updateHabit(
                 habit.copy(
-                    currentStreak = newStreak,
+                    currentStreak = newConsecutive,
                     bestStreak = newBest,
                     lastCompletedDate = todayStr,
                     completedDatesCsv = completedDates.joinToString(",")
                 )
             )
-            checkHabitAchievements(newStreak)
-            true
+            checkHabitAchievements(newConsecutive)
+            Pair(true, newConsecutive)
         }
+    }
+
+    suspend fun toggleHabitToday(habit: Habit): Boolean {
+        return toggleHabitTodayWithConsecutiveDays(habit).first
+    }
+
+    private fun calculateConsecutiveDaysEndingAt(
+        completedDates: Set<String>,
+        endCal: Calendar,
+        sdf: SimpleDateFormat
+    ): Int {
+        var count = 0
+        val cursor = endCal.clone() as Calendar
+        while (count < 3650) {
+            val dayStr = sdf.format(cursor.time)
+            if (completedDates.contains(dayStr)) {
+                count++
+                cursor.add(Calendar.DAY_OF_YEAR, -1)
+            } else {
+                break
+            }
+        }
+        return count
     }
 
     // Notes
@@ -155,15 +192,14 @@ class CitraRepository(
         }
     }
 
-    suspend fun upsertNotesFromCloud(cloudNotes: List<Note>): Int {
+    suspend fun upsertNotesLocally(incomingNotes: List<Note>): Int {
         var count = 0
-        cloudNotes.forEach { cloudNote ->
-            val noteUuid = cloudNote.uuid.ifBlank { java.util.UUID.randomUUID().toString() }
+        incomingNotes.forEach { incomingNote ->
+            val noteUuid = incomingNote.uuid.ifBlank { java.util.UUID.randomUUID().toString() }
             val existing = noteDao.getNoteByUuid(noteUuid)
             if (existing != null) {
-                // Last-Write-Wins: if cloud is newer or equal, update
-                if (cloudNote.updatedAt >= existing.updatedAt) {
-                    val merged = cloudNote.copy(
+                if (incomingNote.updatedAt >= existing.updatedAt) {
+                    val merged = incomingNote.copy(
                         id = existing.id,
                         uuid = noteUuid
                     )
@@ -177,10 +213,9 @@ class CitraRepository(
                     )
                 }
             } else {
-                // Also check if there's a note with the exact same title to avoid title collision
-                val existingByTitle = noteDao.getNoteByTitle(cloudNote.title)
+                val existingByTitle = noteDao.getNoteByTitle(incomingNote.title)
                 if (existingByTitle != null) {
-                    val merged = cloudNote.copy(
+                    val merged = incomingNote.copy(
                         id = existingByTitle.id,
                         uuid = noteUuid
                     )
@@ -193,11 +228,11 @@ class CitraRepository(
                         oldTitle = existingByTitle.title
                     )
                 } else {
-                    noteDao.insertNote(cloudNote.copy(id = 0L, uuid = noteUuid))
+                    noteDao.insertNote(incomingNote.copy(id = 0L, uuid = noteUuid))
                     com.example.util.CitraDocsFileManager.saveNoteMarkdown(
                         context = context,
-                        title = cloudNote.title,
-                        content = cloudNote.content,
+                        title = incomingNote.title,
+                        content = incomingNote.content,
                         uuid = noteUuid
                     )
                     count++
@@ -241,7 +276,7 @@ class CitraRepository(
     }
 
     suspend fun insertNotes(notes: List<Note>): Int {
-        return upsertNotesFromCloud(notes)
+        return upsertNotesLocally(notes)
     }
 
     suspend fun updateNote(note: Note) = noteDao.updateNote(note)
@@ -496,20 +531,32 @@ class CitraRepository(
             Achievement("task_5", "Produtor Ativo", "Conclua 5 tarefas no aplicativo", "📋", "Tarefas"),
             Achievement("task_10", "Em Chamas", "Conclua 10 tarefas", "⚡", "Tarefas"),
             Achievement("task_20", "Mestre da Execução", "Conclua 20 tarefas com sucesso", "🏆", "Tarefas"),
-            Achievement("streak_3", "Chama Inicial", "Mantenha uma sequência de 3 dias em um hábito", "🔥", "Hábitos"),
-            Achievement("streak_7", "1 Semana de Check-in", "Mantenha 7 dias seguidos de hábito", "🌟", "Hábitos"),
-            Achievement("streak_14", "2 Semanas de Disciplina", "Mantenha 14 dias seguidos de hábito", "💎", "Hábitos"),
-            Achievement("streak_21", "3 Semanas de Transformação", "Mantenha 21 dias seguidos de hábito", "🛡️", "Hábitos"),
-            Achievement("streak_28", "4 Semanas (1 Mês)", "Mantenha 28 dias seguidos de hábito", "🏰", "Hábitos"),
-            Achievement("streak_35", "5 Semanas Inabalável", "Mantenha 35 dias seguidos de hábito", "🏵️", "Hábitos"),
-            Achievement("streak_42", "6 Semanas de Mestria", "Mantenha 42 dias seguidos de hábito", "⚔️", "Hábitos"),
-            Achievement("streak_49", "7 Semanas Imbatível", "Mantenha 49 dias seguidos de hábito", "🔮", "Hábitos"),
-            Achievement("streak_56", "8 Semanas de Excelência", "Mantenha 56 dias seguidos de hábito", "🌌", "Hábitos"),
-            Achievement("streak_63", "9 Semanas Lendárias", "Mantenha 63 dias seguidos de hábito", "🪐", "Hábitos"),
+            Achievement("streak_3", "Ritmo Inicial", "Cumpra um hábito por 3 dias seguidos", "🌱", "Hábitos"),
+            Achievement("streak_7", "1 Semana de Check-in", "Cumpra 7 dias seguidos de hábito", "🌟", "Hábitos"),
+            Achievement("streak_14", "2 Semanas de Disciplina", "Cumpra 14 dias seguidos de hábito", "💎", "Hábitos"),
+            Achievement("streak_21", "3 Semanas de Transformação", "Cumpra 21 dias seguidos de hábito", "🛡️", "Hábitos"),
+            Achievement("streak_28", "4 Semanas (1 Mês)", "Cumpra 28 dias seguidos de hábito", "🏰", "Hábitos"),
+            Achievement("streak_35", "5 Semanas Inabalável", "Cumpra 35 dias seguidos de hábito", "🏵️", "Hábitos"),
+            Achievement("streak_42", "6 Semanas de Mestria", "Cumpra 42 dias seguidos de hábito", "⚔️", "Hábitos"),
+            Achievement("streak_49", "7 Semanas Imbatível", "Cumpra 49 dias seguidos de hábito", "🔮", "Hábitos"),
+            Achievement("streak_56", "8 Semanas de Excelência", "Cumpra 56 dias seguidos de hábito", "🌌", "Hábitos"),
+            Achievement("streak_63", "9 Semanas Lendárias", "Cumpra 63 dias seguidos de hábito", "🪐", "Hábitos"),
             Achievement("note_1", "Caderno Aberto", "Crie sua primeira anotação em Markdown", "📝", "Anotações"),
             Achievement("note_5", "Mente Organizada", "Salve 5 anotações com formatação", "📚", "Anotações")
         )
         achievementDao.insertDefaultAchievements(defaultAchievements)
+
+        // Ensure existing streak_3 achievement never retains old fire/streak text
+        val existingStreak3 = achievementDao.getAchievementById("streak_3")
+        if (existingStreak3 != null && (existingStreak3.description.contains("sequência", ignoreCase = true) || existingStreak3.iconEmoji == "🔥")) {
+            achievementDao.updateAchievement(
+                existingStreak3.copy(
+                    title = "Ritmo Inicial",
+                    description = "Cumpra um hábito por 3 dias seguidos",
+                    iconEmoji = "🌱"
+                )
+            )
+        }
 
         // Seed initial note if needed
         val currentNotes = noteDao.getAllNotes().firstOrNull()
@@ -559,12 +606,16 @@ Seu companheiro de produtividade, estudos e organização.
         )
     }
 
-    private fun getMondayOfWeek(timestamp: Long): String {
-        val cal = Calendar.getInstance().apply {
-            timeInMillis = timestamp
-            firstDayOfWeek = Calendar.MONDAY
-            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+    private fun getMondayOfWeek(timestamp: Long): String = Companion.getMondayOfWeek(timestamp)
+
+    companion object {
+        fun getMondayOfWeek(timestamp: Long): String {
+            val cal = Calendar.getInstance().apply {
+                timeInMillis = timestamp
+                firstDayOfWeek = Calendar.MONDAY
+                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            }
+            return SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
         }
-        return SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
     }
 }

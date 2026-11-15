@@ -101,35 +101,54 @@ fun Modifier.squashBounceClickable(
         )
 }
 
+import android.os.SystemClock
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableIntStateOf
+
+val LocalScreenEntranceKey = compositionLocalOf { 0 }
+val LocalScreenEnteredAtMillis = compositionLocalOf { 0L }
+
 /**
- * Staggered Entrance ("Efeito Escada") modifier used on initial app startup.
- * Delays the reveal based on [index] to create a cascading entrance with fade-in and upward slide.
+ * Brief, fluid Staggered Entrance ("Efeito Escada") modifier triggered on screen transitions.
+ * Displays each block sequentially with a soft fade-in and subtle upward slide.
  */
 fun Modifier.staggeredEntrance(
     index: Int,
     enabled: Boolean = true,
-    delayStepMs: Int = 65,
-    slideOffsetDp: Dp = 22.dp
+    delayStepMs: Int = 38,
+    slideOffsetDp: Dp = 14.dp
 ): Modifier = composed {
     if (!enabled) return@composed this
 
+    val screenKey = LocalScreenEntranceKey.current
+    val enteredAt = LocalScreenEnteredAtMillis.current
+    val clampedIndex = index.coerceIn(0, 6)
+
     val alpha = remember { Animatable(0f) }
     val offsetY = remember { Animatable(slideOffsetDp.value) }
+    val lastAnimatedKey = remember { mutableIntStateOf(-1) }
 
-    LaunchedEffect(Unit) {
-        delay((index * delayStepMs).toLong())
-        // Run slide-up and fade-in concurrently
-        val animSpec = tween<Float>(durationMillis = 380, easing = FastOutSlowInEasing)
-        alpha.animateTo(1f, animationSpec = animSpec)
-    }
+    LaunchedEffect(screenKey) {
+        if (lastAnimatedKey.intValue == screenKey) return@LaunchedEffect
+        lastAnimatedKey.intValue = screenKey
 
-    LaunchedEffect(Unit) {
-        delay((index * delayStepMs).toLong())
-        val animSpec = spring<Float>(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessLow
-        )
-        offsetY.animateTo(0f, animationSpec = animSpec)
+        val elapsed = if (enteredAt > 0L) (SystemClock.uptimeMillis() - enteredAt) else 0L
+        if (elapsed > 600L) {
+            alpha.snapTo(1f)
+            offsetY.snapTo(0f)
+            return@LaunchedEffect
+        }
+
+        alpha.snapTo(0f)
+        offsetY.snapTo(slideOffsetDp.value)
+        delay((clampedIndex * delayStepMs).toLong())
+        val fadeSpec = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
+        val slideSpec = tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing)
+        // Animate alpha & offset smoothly together
+        kotlinx.coroutines.coroutineScope {
+            kotlinx.coroutines.launch { alpha.animateTo(1f, animationSpec = fadeSpec) }
+            kotlinx.coroutines.launch { offsetY.animateTo(0f, animationSpec = slideSpec) }
+        }
     }
 
     this.graphicsLayer {
@@ -137,3 +156,4 @@ fun Modifier.staggeredEntrance(
         this.translationY = offsetY.value * density
     }
 }
+

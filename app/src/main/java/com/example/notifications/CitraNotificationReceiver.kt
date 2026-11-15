@@ -39,64 +39,86 @@ class CitraNotificationReceiver : BroadcastReceiver() {
 
         // Handle exact timer completion in background/lockscreen
         if (action == NotificationHelper.ACTION_TIMER_END) {
-            try {
-                val prefs = PreferencesManager(context)
-                val settings = prefs.settings.value
-                val sound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val prefs = PreferencesManager(context)
+                    val settings = prefs.settings.value
+                    val sound = if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
 
-                NotificationHelper.showInstantNotification(
-                    context = context,
-                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
-                    channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "Sessão Concluída!",
-                    message = "Seu tempo de foco no Arancia foi concluído com sucesso!",
-                    customSoundUriString = sound,
-                    vibratePhone = settings.vibrate,
-                    loopAlarm = false
-                )
-
-                // Save completed focus session to Room
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        val snapshot = prefs.loadTimerSnapshot()
-                        if (snapshot != null) {
-                            if (snapshot.phaseName == "FOCUS") {
+                    val snapshot = prefs.loadTimerSnapshot()
+                    if (snapshot != null) {
+                        if (snapshot.phaseName == "FOCUS") {
+                            val breakSec = snapshot.breakMinutes * 60
+                            val claimed = prefs.tryClaimFocusSessionCompletion(
+                                targetEndTimeMillis = snapshot.targetEndTimeMillis,
+                                nextBreakSeconds = breakSec
+                            )
+                            if (claimed) {
+                                val nowTs = System.currentTimeMillis()
                                 val db = AppDatabase.getInstance(context)
                                 val session = FocusSession(
                                     durationMinutes = snapshot.focusMinutes,
                                     category = snapshot.selectedCategory,
-                                    timestamp = System.currentTimeMillis()
+                                    timestamp = nowTs,
+                                    cycleCount = snapshot.currentCycle,
+                                    weekIdentifier = com.example.data.repository.CitraRepository.getMondayOfWeek(nowTs),
+                                    linkedTaskId = snapshot.linkedTaskId
                                 )
                                 db.focusSessionDao().insertSession(session)
+
+                                if (snapshot.linkedTaskId != null) {
+                                    val task = db.taskDao().getTaskById(snapshot.linkedTaskId)
+                                    if (task != null) {
+                                        db.taskDao().updateTask(
+                                            task.copy(focusMinutesCompleted = task.focusMinutesCompleted + snapshot.focusMinutes)
+                                        )
+                                    }
+                                }
+
                                 prefs.addCitraTimerBall(snapshot.focusMinutes, snapshot.targetEndTimeMillis)
 
-                                val breakSec = snapshot.breakMinutes * 60
-                                prefs.saveTimerSnapshot(
-                                    snapshot.copy(
-                                        phaseName = "BREAK",
-                                        remainingSeconds = breakSec,
-                                        isRunning = false,
-                                        isPaused = false,
-                                        targetEndTimeMillis = 0L
-                                    )
-                                )
-                            } else {
-                                prefs.saveTimerSnapshot(
-                                    snapshot.copy(
-                                        isRunning = false,
-                                        isPaused = false,
-                                        remainingSeconds = 0,
-                                        targetEndTimeMillis = 0L
-                                    )
+                                NotificationHelper.showInstantNotification(
+                                    context = context,
+                                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
+                                    channelId = NotificationHelper.CHANNEL_ALERTS,
+                                    title = "Sessão ${snapshot.currentCycle} de ${snapshot.totalCycles} Concluída!",
+                                    message = "Excelente dedicação de ${snapshot.focusMinutes}m! Pausa de ${snapshot.breakMinutes}m pronta.",
+                                    customSoundUriString = sound,
+                                    vibratePhone = settings.vibrate,
+                                    loopAlarm = false
                                 )
                             }
+                        } else {
+                            prefs.saveTimerSnapshot(
+                                snapshot.copy(
+                                    isRunning = false,
+                                    isPaused = false,
+                                    remainingSeconds = 0,
+                                    targetEndTimeMillis = 0L
+                                )
+                            )
+                            NotificationHelper.showInstantNotification(
+                                context = context,
+                                id = NotificationHelper.TIMER_NOTIFICATION_ID,
+                                channelId = NotificationHelper.CHANNEL_ALERTS,
+                                title = "Pausa Concluída!",
+                                message = "Seu intervalo no Arancia terminou.",
+                                customSoundUriString = sound,
+                                vibratePhone = settings.vibrate,
+                                loopAlarm = false
+                            )
                         }
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    try {
+                        if (wakeLock?.isHeld == true) wakeLock.release()
+                    } catch (_: Exception) {}
+                    try {
+                        pendingResult.finish()
                     } catch (_: Exception) {}
                 }
-            } finally {
-                try {
-                    if (wakeLock?.isHeld == true) wakeLock.release()
-                } catch (_: Exception) {}
             }
             return
         }

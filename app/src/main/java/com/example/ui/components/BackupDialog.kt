@@ -32,7 +32,6 @@ fun BackupDialog(
     val context = LocalContext.current
     var isRestoreMode by remember { mutableStateOf(false) }
     var jsonInput by remember { mutableStateOf("") }
-    var showCloudDialogFromBackup by remember { mutableStateOf(false) }
     var showErrorDialog by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -164,17 +163,6 @@ fun BackupDialog(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Colar Texto JSON Manualmente")
                     }
-
-                    // Button 5: Ver Dados na Nuvem
-                    OutlinedButton(
-                        onClick = { showCloudDialogFromBackup = true },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Ver Dados Salvos na Nuvem")
-                    }
                 } else {
                     Text(
                         text = "Você pode abrir um arquivo de backup do seu armazenamento ou colar o conteúdo JSON abaixo:",
@@ -267,14 +255,6 @@ fun BackupDialog(
                     Text("Entendi")
                 }
             }
-        )
-    }
-
-    if (showCloudDialogFromBackup) {
-        val authRepo = remember { com.example.data.auth.AuthRepository.getInstance(context) }
-        CloudSyncedDataDialog(
-            authRepository = authRepo,
-            onDismiss = { showCloudDialogFromBackup = false }
         )
     }
 }

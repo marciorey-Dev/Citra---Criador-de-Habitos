@@ -10,6 +10,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.sp
+import com.example.util.InlineMarkdownHelper
 
 data class CursorLineInfo(
     val lineIndex: Int,
@@ -249,112 +250,158 @@ object ObsidianMarkdownEngine {
     ) {
         if (start >= end) return
         val chunk = fullText.substring(start, end)
-
-        // 1. Bold (**text**)
-        Regex("\\*\\*(.*?)\\*\\*").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            builder.addStyle(SpanStyle(fontWeight = FontWeight.Bold), s, e)
-        }
-
-        // 2. Italic (*text*)
-        Regex("(?<!\\*)\\*(?!\\*)(.*?)(?<!\\*)\\*(?!\\*)").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            builder.addStyle(SpanStyle(fontStyle = FontStyle.Italic), s, e)
-        }
-
-        // 3. Strikethrough (~~text~~)
-        Regex("~~(.*?)~~").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            builder.addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), s, e)
-        }
-
-        // 4. Underline (<u>text</u>)
-        Regex("<u>(.*?)</u>").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            builder.addStyle(SpanStyle(textDecoration = TextDecoration.Underline), s, e)
-        }
-
-        // 5. Highlight (==text==)
+        val analyzed = InlineMarkdownHelper.analyzeInlineSpans(chunk)
         val highlightColor = if (isDarkBg) Color(0xFF6B5800) else Color(0xFFFFF176)
-        Regex("==(.*?)==").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            builder.addStyle(SpanStyle(background = highlightColor), s, e)
-        }
-
-        // 6. Inline code (`code`)
         val codeBg = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)
-        Regex("`([^`]+)`").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            builder.addStyle(
-                SpanStyle(
-                    fontFamily = FontFamily.Monospace,
-                    background = codeBg,
-                    color = primaryColor
-                ),
-                s,
-                e
-            )
+
+        // Apply combined inline style flags per run so Bold + Italic + Strikethrough + Underline + Highlight combine cleanly
+        val n = chunk.length
+        val boldArr = BooleanArray(n)
+        val italicArr = BooleanArray(n)
+        val strikeArr = BooleanArray(n)
+        val underlineArr = BooleanArray(n)
+        val highlightArr = BooleanArray(n)
+        val quoteArr = BooleanArray(n)
+
+        for (span in analyzed.styleSpans) {
+            val s = span.start.coerceIn(0, n)
+            val e = span.end.coerceIn(0, n)
+            for (k in s until e) {
+                when (span.kind) {
+                    InlineMarkdownHelper.StyleKind.BOLD -> boldArr[k] = true
+                    InlineMarkdownHelper.StyleKind.ITALIC -> italicArr[k] = true
+                    InlineMarkdownHelper.StyleKind.STRIKETHROUGH -> strikeArr[k] = true
+                    InlineMarkdownHelper.StyleKind.UNDERLINE -> underlineArr[k] = true
+                    InlineMarkdownHelper.StyleKind.HIGHLIGHT -> highlightArr[k] = true
+                    InlineMarkdownHelper.StyleKind.QUOTE -> quoteArr[k] = true
+                }
+            }
+        }
+        for (link in analyzed.linkLabels) {
+            for (k in link.labelStart.coerceIn(0, n) until link.labelEnd.coerceIn(0, n)) {
+                underlineArr[k] = true
+            }
         }
 
-        // 7. Links ([label](url))
-        Regex("\\[(.*?)\\]\\((.*?)\\)").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
+        var idx = 0
+        while (idx < n) {
+            val b = boldArr[idx]
+            val it = italicArr[idx]
+            val st = strikeArr[idx]
+            val un = underlineArr[idx]
+            val hl = highlightArr[idx]
+            val qt = quoteArr[idx]
+            val hid = analyzed.hidden[idx]
+
+            var runEnd = idx + 1
+            while (
+                runEnd < n &&
+                boldArr[runEnd] == b &&
+                italicArr[runEnd] == it &&
+                strikeArr[runEnd] == st &&
+                underlineArr[runEnd] == un &&
+                highlightArr[runEnd] == hl &&
+                quoteArr[runEnd] == qt &&
+                analyzed.hidden[runEnd] == hid
+            ) {
+                runEnd++
+            }
+
+            val decs = mutableListOf<TextDecoration>()
+            if (st) decs.add(TextDecoration.LineThrough)
+            if (un) decs.add(TextDecoration.Underline)
+
+            if (b || it || decs.isNotEmpty() || hl || qt || hid) {
+                builder.addStyle(
+                    SpanStyle(
+                        fontWeight = if (b) FontWeight.Bold else null,
+                        fontStyle = if (it || qt) FontStyle.Italic else null,
+                        textDecoration = if (decs.isNotEmpty()) TextDecoration.combine(decs) else null,
+                        background = if (hl) highlightColor else Color.Unspecified,
+                        color = when {
+                            hid -> textColor.copy(alpha = 0.42f)
+                            hl && isDarkBg -> Color(0xFFFEF08A)
+                            hl -> Color(0xFF713F12)
+                            st -> textColor.copy(alpha = 0.65f)
+                            qt -> textColor.copy(alpha = 0.8f)
+                            else -> Color.Unspecified
+                        }
+                    ),
+                    start + idx,
+                    start + runEnd
+                )
+            }
+            idx = runEnd
+        }
+
+        // Inline links
+        for (link in analyzed.linkLabels) {
             builder.addStyle(
                 SpanStyle(
                     color = Color(0xFF3B82F6),
                     textDecoration = TextDecoration.Underline
                 ),
-                s,
-                e
+                start + link.labelStart,
+                start + link.labelEnd
             )
         }
 
-        // 8. LaTeX Display Math ($$...$$)
-        Regex("\\$\\$(.*?)\\$\\$").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            val mathBg = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFFEF3C7)
-            val mathFg = if (isDarkBg) Color(0xFFFDE68A) else Color(0xFF78350F)
-            builder.addStyle(
-                SpanStyle(
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic,
-                    background = mathBg,
-                    color = mathFg
-                ),
-                s,
-                e
-            )
+        // Atomic tokens: Inline Code, Math, Bare URLs
+        for (atomic in analyzed.atomics) {
+            val s = start + atomic.start
+            val e = start + atomic.end
+            when (atomic.kind) {
+                InlineMarkdownHelper.AtomicKind.CODE -> builder.addStyle(
+                    SpanStyle(
+                        fontFamily = FontFamily.Monospace,
+                        background = codeBg,
+                        color = primaryColor
+                    ),
+                    s,
+                    e
+                )
+                InlineMarkdownHelper.AtomicKind.MATH_BLOCK -> {
+                    val mathBg = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFFEF3C7)
+                    val mathFg = if (isDarkBg) Color(0xFFFDE68A) else Color(0xFF78350F)
+                    builder.addStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.Bold,
+                            fontStyle = FontStyle.Italic,
+                            background = mathBg,
+                            color = mathFg
+                        ),
+                        s,
+                        e
+                    )
+                }
+                InlineMarkdownHelper.AtomicKind.MATH_INLINE -> {
+                    val mathBg = if (isDarkBg) Color(0xFF334155).copy(alpha = 0.5f) else Color(0xFFF1F5F9)
+                    val mathFg = if (isDarkBg) Color(0xFF93C5FD) else Color(0xFF0F172A)
+                    builder.addStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Serif,
+                            fontStyle = FontStyle.Italic,
+                            fontWeight = FontWeight.SemiBold,
+                            background = mathBg,
+                            color = mathFg
+                        ),
+                        s,
+                        e
+                    )
+                }
+                InlineMarkdownHelper.AtomicKind.BARE_URL -> builder.addStyle(
+                    SpanStyle(
+                        color = Color(0xFF3B82F6),
+                        textDecoration = TextDecoration.Underline
+                    ),
+                    s,
+                    e
+                )
+            }
         }
 
-        // 9. LaTeX Inline Math ($...$)
-        Regex("(?<!\\$)\\$(?!\\$)([^\\$\\n]+?)(?<!\\$)\\$(?!\\$)").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            val mathBg = if (isDarkBg) Color(0xFF334155).copy(alpha = 0.5f) else Color(0xFFF1F5F9)
-            val mathFg = if (isDarkBg) Color(0xFF93C5FD) else Color(0xFF0F172A)
-            builder.addStyle(
-                SpanStyle(
-                    fontFamily = FontFamily.Serif,
-                    fontStyle = FontStyle.Italic,
-                    fontWeight = FontWeight.SemiBold,
-                    background = mathBg,
-                    color = mathFg
-                ),
-                s,
-                e
-            )
-        }
-
-        // 10. Audio or Image token
+        // Audio or Image token
         Regex("(!?\\[(audio:)?(.*?)\\]\\(.*?\\))").findAll(chunk).forEach { match ->
             val s = start + match.range.first
             val e = start + match.range.last + 1
@@ -374,8 +421,8 @@ object ObsidianMarkdownEngine {
     }
 
     /**
-     * Encloses the current selection with prefix and suffix.
-     * If nothing is selected, inserts prefix and suffix and puts cursor in the middle.
+     * Encloses the current selection with prefix and suffix, or toggles it off if the selection
+     * is already wrapped by that exact style (supporting combined ** + * + ~~ + <u> + ==).
      */
     fun wrapSelection(value: TextFieldValue, prefix: String, suffix: String): TextFieldValue {
         val text = value.text
@@ -385,9 +432,55 @@ object ObsidianMarkdownEngine {
             val min = minOf(selection.start, selection.end)
             val max = maxOf(selection.start, selection.end)
             val selected = text.substring(min, max)
-            val newText = text.substring(0, min) + prefix + selected + suffix + text.substring(max)
-            val newSelection = TextRange(min + prefix.length, min + prefix.length + selected.length)
-            value.copy(text = newText, selection = newSelection)
+            val before = text.substring(0, min)
+            val after = text.substring(max)
+
+            val shouldUnwrapSurrounding = when (prefix) {
+                "*" -> {
+                    val starsBefore = before.takeLastWhile { it == '*' }.length
+                    val starsAfter = after.takeWhile { it == '*' }.length
+                    (starsBefore % 2 == 1) && (starsAfter % 2 == 1)
+                }
+                "**" -> {
+                    val starsBefore = before.takeLastWhile { it == '*' }.length
+                    val starsAfter = after.takeWhile { it == '*' }.length
+                    starsBefore >= 2 && starsAfter >= 2
+                }
+                else -> before.endsWith(prefix) && after.startsWith(suffix)
+            }
+
+            if (shouldUnwrapSurrounding) {
+                val newBefore = before.dropLast(prefix.length)
+                val newAfter = after.drop(suffix.length)
+                val newText = newBefore + selected + newAfter
+                val newSelection = TextRange(newBefore.length, newBefore.length + selected.length)
+                value.copy(text = newText, selection = newSelection)
+            } else {
+                val canUnwrapInner = when (prefix) {
+                    "*" -> {
+                        val leadStars = selected.takeWhile { it == '*' }.length
+                        val trailStars = selected.takeLastWhile { it == '*' }.length
+                        selected.length > leadStars + trailStars && (leadStars % 2 == 1) && (trailStars % 2 == 1)
+                    }
+                    "**" -> {
+                        val leadStars = selected.takeWhile { it == '*' }.length
+                        val trailStars = selected.takeLastWhile { it == '*' }.length
+                        selected.length > leadStars + trailStars && leadStars >= 2 && trailStars >= 2
+                    }
+                    else -> selected.startsWith(prefix) && selected.endsWith(suffix) && selected.length >= prefix.length + suffix.length
+                }
+
+                if (canUnwrapInner) {
+                    val unwrapped = selected.removePrefix(prefix).removeSuffix(suffix)
+                    val newText = before + unwrapped + after
+                    val newSelection = TextRange(min, min + unwrapped.length)
+                    value.copy(text = newText, selection = newSelection)
+                } else {
+                    val newText = before + prefix + selected + suffix + after
+                    val newSelection = TextRange(min + prefix.length, min + prefix.length + selected.length)
+                    value.copy(text = newText, selection = newSelection)
+                }
+            }
         } else {
             val pos = selection.start.coerceIn(0, text.length)
             val newText = text.substring(0, pos) + prefix + suffix + text.substring(pos)

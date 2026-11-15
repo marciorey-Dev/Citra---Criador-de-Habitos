@@ -19,8 +19,6 @@ import com.example.data.local.NotificationSettings
 import com.example.data.local.SavedTimerSnapshot
 import com.example.data.model.*
 import com.example.data.repository.CitraRepository
-import com.example.data.auth.AuthRepository
-import com.example.data.inbox.InboxRepository
 import com.example.notifications.NextAlarmScheduler
 import com.example.notifications.NotificationHelper
 import com.example.ui.theme.ThemeAccent
@@ -62,26 +60,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val repository = CitraRepository(application, database)
     val musicPlayer = LocalMusicPlayer(application)
     val preferencesManager = PreferencesManager(application)
-    val authRepository = AuthRepository.getInstance(application)
-    val inboxRepository = InboxRepository.getInstance(application)
 
-    // Inbox & Direct Note Messaging States
-    private val _inboxMessages = MutableStateFlow<List<InboxMessage>>(emptyList())
-    val inboxMessages: StateFlow<List<InboxMessage>> = _inboxMessages.asStateFlow()
+    // Local Offline Profile & First-Launch Onboarding States
+    val hasCompletedOnboarding: StateFlow<Boolean> = preferencesManager.hasCompletedOnboarding
+    val localDisplayName: StateFlow<String> = preferencesManager.userDisplayName
+    val localPhotoPath: StateFlow<String?> = preferencesManager.userPhotoPath
 
-    private val _sentMessages = MutableStateFlow<List<InboxMessage>>(emptyList())
-    val sentMessages: StateFlow<List<InboxMessage>> = _sentMessages.asStateFlow()
+    fun setLocalDisplayName(name: String) {
+        preferencesManager.setUserDisplayName(name)
+    }
 
-    private val _unreadInboxCount = MutableStateFlow(0)
-    val unreadInboxCount: StateFlow<Int> = _unreadInboxCount.asStateFlow()
+    fun setLocalPhotoPath(path: String?) {
+        preferencesManager.setUserPhotoPath(path)
+    }
 
-    private val _isInboxRefreshing = MutableStateFlow(false)
-    val isInboxRefreshing: StateFlow<Boolean> = _isInboxRefreshing.asStateFlow()
-
-    private val _recipientLookupState = MutableStateFlow<RecipientLookupState>(RecipientLookupState.Idle)
-    val recipientLookupState: StateFlow<RecipientLookupState> = _recipientLookupState.asStateFlow()
-
-    private var recipientSearchJob: Job? = null
+    fun completeOnboarding(displayName: String, photoPath: String?) {
+        if (displayName.isNotBlank()) {
+            preferencesManager.setUserDisplayName(displayName)
+        }
+        if (!photoPath.isNullOrBlank()) {
+            preferencesManager.setUserPhotoPath(photoPath)
+        }
+        preferencesManager.setOnboardingCompleted(true)
+    }
 
     // Inspiring citrus quotes
     val citrusQuotes = listOf(
@@ -102,6 +103,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val keepScreenOn: StateFlow<Boolean> = preferencesManager.keepScreenOn
     val notificationSettings: StateFlow<NotificationSettings> = preferencesManager.settings
     val hasSeenTutorial: StateFlow<Boolean> = preferencesManager.hasSeenTutorial
+    val timerContinuousMode: StateFlow<Boolean> = preferencesManager.timerContinuousMode
+    val timerTapToToggle: StateFlow<Boolean> = preferencesManager.timerTapToToggle
+    val timerAllowSwipe: StateFlow<Boolean> = preferencesManager.timerAllowSwipe
+    val habitRewardPoints: StateFlow<Int> = preferencesManager.habitRewardPoints
+
+    fun setTimerContinuousMode(enabled: Boolean) {
+        preferencesManager.setTimerContinuousMode(enabled)
+    }
+
+    fun setTimerTapToToggle(enabled: Boolean) {
+        preferencesManager.setTimerTapToToggle(enabled)
+    }
+
+    fun setTimerAllowSwipe(enabled: Boolean) {
+        preferencesManager.setTimerAllowSwipe(enabled)
+    }
 
     // Persistent Theme Mode: null = system, true = dark, false = light
     val isDarkTheme: StateFlow<Boolean?> = preferencesManager.themeMode
@@ -205,11 +222,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.setThemeMode(next)
     }
 
-    val syncEnabled: StateFlow<Boolean> = preferencesManager.syncEnabled
-    fun setSyncEnabled(enabled: Boolean) {
-        preferencesManager.setSyncEnabled(enabled)
-    }
-
     val appBgUri: StateFlow<String?> = preferencesManager.appBgUri
     val appBgBlur: StateFlow<Float> = preferencesManager.appBgBlur
     val appBgBrightness: StateFlow<Float> = preferencesManager.appBgBrightness
@@ -264,8 +276,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val unlockedAchievementsCount: StateFlow<Int> = repository.unlockedAchievementsCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val hasSocialNotifications: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
-
     // Flexible Pomodoro State (remembers last used session size)
     private val _pomodoroState = MutableStateFlow(
         FlexiblePomodoroState(
@@ -305,8 +315,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pendingOpenNoteFromFinances: StateFlow<Note?> = _pendingOpenNoteFromFinances.asStateFlow()
     fun clearPendingOpenNoteFromFinances() { _pendingOpenNoteFromFinances.value = null }
 
-    fun getSavedToolbarPosition(): Pair<Float, Float> = preferencesManager.getSavedToolbarPosition()
-    fun saveToolbarPosition(x: Float, y: Float) = preferencesManager.saveToolbarPosition(x, y)
+    val noteToolbarPosition: StateFlow<String> = preferencesManager.noteToolbarPosition
+    fun setNoteToolbarPosition(position: String) = preferencesManager.setNoteToolbarPosition(position)
 
     // Calendar selected date (YYYY-MM-DD)
     val todayString: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -357,17 +367,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getLastNoteEditorMode(): String = preferencesManager.getLastNoteEditorMode()
     fun setLastNoteEditorMode(mode: String) = preferencesManager.setLastNoteEditorMode(mode)
 
-    // Sync Frequency and Timestamp
-    val syncFrequency: StateFlow<String> = preferencesManager.syncFrequency
-    fun setSyncFrequency(frequency: String) = preferencesManager.setSyncFrequency(frequency)
-    private val _lastSyncTimestamp = MutableStateFlow(preferencesManager.getLastSyncTimestamp())
-    val lastSyncTimestamp: StateFlow<Long> = _lastSyncTimestamp.asStateFlow()
-
-    fun updateLastSyncTimestamp(timestamp: Long = System.currentTimeMillis()) {
-        preferencesManager.setLastSyncTimestamp(timestamp)
-        _lastSyncTimestamp.value = timestamp
-    }
-
     // Modo Sem Perturbações (Distraction-Free Focus Mode)
     val focusDistractionFreeEnabled: StateFlow<Boolean> = preferencesManager.focusDistractionFreeEnabled
     val focusAllowedPackages: StateFlow<Set<String>> = preferencesManager.focusAllowedPackages
@@ -415,284 +414,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.seedInitialDataIfNeeded()
         }
-        viewModelScope.launch {
-            authRepository.currentUser.collect { user ->
-                if (user != null && !user.isGuest) {
-                    refreshInbox()
-                } else {
-                    _inboxMessages.value = emptyList()
-                    _sentMessages.value = emptyList()
-                    _unreadInboxCount.value = 0
-                }
-            }
-        }
-        refreshInbox()
-    }
-
-    // --- Inbox & Direct Note Messaging Methods ---
-    fun searchRecipient(query: String, preferUsernameLookup: Boolean = false) {
-        recipientSearchJob?.cancel()
-        val trimmed = query.trim()
-        if (trimmed.removePrefix("@").isBlank()) {
-            _recipientLookupState.value = RecipientLookupState.Idle
-            return
-        }
-        _recipientLookupState.value = RecipientLookupState.Loading
-        recipientSearchJob = viewModelScope.launch {
-            delay(350L) // debounce
-            val result = inboxRepository.searchRecipient(trimmed, preferUsernameLookup)
-            _recipientLookupState.value = result
-        }
-    }
-
-    fun resetRecipientLookup() {
-        recipientSearchJob?.cancel()
-        _recipientLookupState.value = RecipientLookupState.Idle
-    }
-
-    fun refreshInbox() {
-        val user = authRepository.currentUser.value
-        val uid = if (user != null && !user.isGuest) user.uid else ""
-        if (uid.isBlank()) {
-            _inboxMessages.value = emptyList()
-            _sentMessages.value = emptyList()
-            _unreadInboxCount.value = 0
-            return
-        }
-        viewModelScope.launch {
-            _isInboxRefreshing.value = true
-            inboxRepository.fetchInboxMessages(uid).collect { list ->
-                _inboxMessages.value = list
-                _unreadInboxCount.value = list.count { !it.isRead }
-                _isInboxRefreshing.value = false
-            }
-        }
-        viewModelScope.launch {
-            inboxRepository.fetchSentMessages(uid).collect { list ->
-                _sentMessages.value = list
-            }
-        }
-    }
-
-    fun markInboxMessageRead(message: InboxMessage) {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest) return
-        if (message.isRead) return
-        _inboxMessages.update { list ->
-            list.map { if (it.id == message.id) it.copy(isRead = true) else it }
-        }
-        _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
-        viewModelScope.launch {
-            inboxRepository.markAsRead(user.uid, message)
-        }
-    }
-
-    fun downloadInboxNote(message: InboxMessage, onSuccess: () -> Unit = {}) {
-        val user = authRepository.currentUser.value
-        if (user == null || user.isGuest) {
-            viewModelScope.launch {
-                _userMessage.emit("Entre com uma conta para baixar notas da caixa de entrada.")
-            }
-            return
-        }
-        if (message.isOfficialDev || message.isBroadcast) {
-            viewModelScope.launch {
-                _userMessage.emit("Comunicados oficiais da equipe são apenas para leitura.")
-            }
-            return
-        }
-        viewModelScope.launch {
-            saveNote(
-                id = 0L,
-                title = message.title,
-                content = message.contentMarkdown,
-                category = message.category.ifBlank { "Recebidas" },
-                iconEmoji = "📬"
-            )
-            inboxRepository.markAsDownloaded(user.uid, message)
-            _inboxMessages.update { list ->
-                list.map { if (it.id == message.id) it.copy(isDownloaded = true, isRead = true) else it }
-            }
-            _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
-            _userMessage.emit("Nota salva no seu bloco de notas!")
-            onSuccess()
-        }
-    }
-
-    fun deleteInboxMessage(message: InboxMessage) {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest) return
-        _inboxMessages.update { list -> list.filter { it.id != message.id } }
-        if (!message.isRead) {
-            _unreadInboxCount.update { (it - 1).coerceAtLeast(0) }
-        }
-        viewModelScope.launch {
-            inboxRepository.deleteMessage(user.uid, message)
-            _userMessage.emit("Mensagem removida da caixa de entrada.")
-        }
-    }
-
-    fun deleteSelectedInboxMessages(selected: List<InboxMessage>) {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest || selected.isEmpty()) return
-        val idsToRemove = selected.map { it.id }.toSet()
-        _inboxMessages.update { list ->
-            val remaining = list.filter { it.id !in idsToRemove }
-            _unreadInboxCount.value = remaining.count { !it.isRead }
-            remaining
-        }
-        viewModelScope.launch {
-            inboxRepository.deleteMessages(user.uid, selected)
-            _userMessage.emit("${selected.size} mensagem(ns) removida(s).")
-        }
-    }
-
-    fun clearInbox() {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest) return
-        val currentList = _inboxMessages.value
-        _inboxMessages.value = emptyList()
-        _unreadInboxCount.value = 0
-        viewModelScope.launch {
-            inboxRepository.clearInbox(user.uid, currentList)
-            _userMessage.emit("Caixa de entrada limpa.")
-        }
-    }
-
-    fun deleteSentMessage(message: InboxMessage) {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest) return
-        _sentMessages.update { list -> list.filter { it.id != message.id } }
-        viewModelScope.launch {
-            inboxRepository.deleteSentMessage(user.uid, message.id)
-            _userMessage.emit("Envio removido do histórico.")
-        }
-    }
-
-    fun deleteSelectedSentMessages(selected: List<InboxMessage>) {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest || selected.isEmpty()) return
-        val ids = selected.map { it.id }.toSet()
-        _sentMessages.update { list -> list.filter { it.id !in ids } }
-        viewModelScope.launch {
-            inboxRepository.deleteSentMessages(user.uid, ids.toList())
-            _userMessage.emit("${selected.size} envio(s) removido(s).")
-        }
-    }
-
-    fun clearSentMessages() {
-        val user = authRepository.currentUser.value ?: return
-        if (user.isGuest) return
-        val ids = _sentMessages.value.map { it.id }
-        _sentMessages.value = emptyList()
-        viewModelScope.launch {
-            inboxRepository.deleteSentMessages(user.uid, ids)
-            _userMessage.emit("Mensagens enviadas esvaziadas.")
-        }
-    }
-
-    fun sendNoteMessage(
-        recipientUid: String?,
-        recipientInfo: RecipientInfo? = null,
-        isBroadcast: Boolean,
-        title: String,
-        content: String,
-        category: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val user = authRepository.currentUser.value
-        if (user == null || user.isGuest) {
-            onError("Você precisa entrar com uma conta para enviar notas.")
-            return
-        }
-
-        val authUser = authRepository.auth?.currentUser
-        val email = authUser?.email ?: user.email
-        val isDev = InboxRepository.isDeveloper(email, user.uid)
-
-        val message = InboxMessage(
-            id = java.util.UUID.randomUUID().toString(),
-            senderUid = user.uid,
-            senderDisplayName = user.displayName,
-            senderUsername = user.username,
-            senderPhotoUrl = user.photoUrl,
-            senderEmail = email,
-            recipientUid = recipientUid.orEmpty(),
-            recipientDisplayName = recipientInfo?.displayName.orEmpty(),
-            recipientUsername = recipientInfo?.username.orEmpty(),
-            recipientPhotoUrl = recipientInfo?.photoUrl,
-            isOfficialDev = isDev,
-            title = title.ifBlank { "Sem título" },
-            contentMarkdown = content,
-            category = category.ifBlank { "Geral" },
-            sentAtMillis = System.currentTimeMillis(),
-            isRead = false,
-            isDownloaded = false,
-            isBroadcast = isBroadcast
-        )
-
-        viewModelScope.launch {
-            if (isBroadcast) {
-                if (!isDev) {
-                    onError("Apenas contas de desenvolvedor podem enviar comunicados globais.")
-                    return@launch
-                }
-                val res = inboxRepository.sendBroadcastMessage(message)
-                if (res.isSuccess) {
-                    refreshInbox()
-                    _userMessage.emit("Comunicado global enviado com sucesso!")
-                    onSuccess()
-                } else {
-                    onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar comunicado")
-                }
-            } else {
-                if (recipientUid.isNullOrBlank()) {
-                    onError("Destinatário não especificado")
-                    return@launch
-                }
-                val res = inboxRepository.sendDirectMessage(recipientUid, message, recipientInfo)
-                if (res.isSuccess) {
-                    refreshInbox()
-                    _userMessage.emit("Nota enviada com sucesso!")
-                    onSuccess()
-                } else {
-                    onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar nota")
-                }
-            }
-        }
-    }
-
-    fun sendBugReport(
-        title: String,
-        description: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val user = authRepository.currentUser.value
-        if (user == null || user.isGuest) {
-            onError("Você precisa entrar com uma conta para relatar bugs.")
-            return
-        }
-        val authUser = authRepository.auth?.currentUser
-        viewModelScope.launch {
-            val res = inboxRepository.sendBugReport(
-                reporterUid = user.uid,
-                reporterDisplayName = user.displayName,
-                reporterUsername = user.username,
-                reporterPhotoUrl = user.photoUrl,
-                reporterEmail = authUser?.email ?: user.email,
-                title = title,
-                description = description
-            )
-            if (res.isSuccess) {
-                refreshInbox()
-                _userMessage.emit("Relato de bug enviado aos desenvolvedores! Obrigado.")
-                onSuccess()
-            } else {
-                onError(res.exceptionOrNull()?.localizedMessage ?: "Erro ao enviar relato de bug")
-            }
-        }
     }
 
     fun triggerAutoBackup() {
@@ -727,6 +448,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         System.currentTimeMillis() - (snapshot.stopwatchAccumulatedSeconds * 1000L)
                     }
+                    if (timerJob?.isActive == true && _pomodoroState.value.isRunning && _pomodoroState.value.isStopwatchMode && stopwatchStartTimeMillis == startTs) {
+                        return
+                    }
                     stopwatchStartTimeMillis = startTs
                     val elapsed = ((System.currentTimeMillis() - startTs) / 1000L).toInt().coerceAtLeast(0)
                     _pomodoroState.update {
@@ -759,9 +483,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     snapshot.lastTimestamp + (snapshot.remainingSeconds * 1000L)
                 }
-                timerTargetEndTimeMillis = targetEnd
                 val now = System.currentTimeMillis()
                 val remainingSec = ((targetEnd - now + 999L) / 1000L).toInt()
+
+                if (timerJob?.isActive == true && _pomodoroState.value.isRunning && timerTargetEndTimeMillis == targetEnd && remainingSec > 0) {
+                    return
+                }
+                timerTargetEndTimeMillis = targetEnd
 
                 if (remainingSec > 0) {
                     _pomodoroState.update {
@@ -1158,41 +886,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         timerTargetEndTimeMillis = 0L
         stopwatchStartTimeMillis = 0L
         val state = _pomodoroState.value
+        val isContinuous = preferencesManager.timerContinuousMode.value
 
         if (state.currentPhase == PomodoroPhase.FOCUS) {
-            // Break is NOT mandatory to consider a cycle finished
-            viewModelScope.launch {
-                val session = FocusSession(
-                    category = state.selectedCategory,
-                    durationMinutes = state.focusMinutes,
-                    breakMinutes = 0,
-                    cycleCount = state.currentCycle,
-                    linkedTaskId = state.linkedTask?.id,
-                    linkedTaskTitle = state.linkedTask?.title
-                )
-                repository.recordFocusSession(session)
-                spawnTimerCitraBall(state.focusMinutes, completedSessionKey)
+            val breakSec = state.breakMinutes * 60
+            // Atomically claim focus session completion so AlarmReceiver and foreground timerJob/onResume NEVER double-insert
+            val claimed = preferencesManager.tryClaimFocusSessionCompletion(
+                targetEndTimeMillis = completedSessionKey,
+                nextBreakSeconds = breakSec
+            )
 
-                val awardMessage = when {
-                    state.focusMinutes >= 120 -> "🌟 Incrível! Você ganhou o Citra Dourado (120 min)!"
-                    state.focusMinutes >= 60 -> "🍋 Parabéns! Você ganhou o Citra Amarelo (60 min)!"
-                    else -> "🍊 Novo Citra criado no menu do timer!"
-                }
-                _userMessage.emit(awardMessage)
-
-                if (state.linkedTask != null) {
-                    val updatedTask = state.linkedTask.copy(
-                        focusMinutesCompleted = state.linkedTask.focusMinutesCompleted + state.focusMinutes
+            if (claimed) {
+                viewModelScope.launch {
+                    val session = FocusSession(
+                        category = state.selectedCategory,
+                        durationMinutes = state.focusMinutes,
+                        breakMinutes = 0,
+                        cycleCount = state.currentCycle,
+                        linkedTaskId = state.linkedTask?.id,
+                        linkedTaskTitle = state.linkedTask?.title
                     )
-                    repository.updateTask(updatedTask)
-                }
+                    repository.recordFocusSession(session)
+                    spawnTimerCitraBall(state.focusMinutes, completedSessionKey)
 
-                if (state.linkedHabit != null) {
-                    val isAlreadyDone = state.linkedHabit.completedDatesCsv.split(",")
-                        .any { it.trim() == todayString }
-                    if (!isAlreadyDone) {
-                        repository.toggleHabitToday(state.linkedHabit)
-                        _userMessage.emit("Hábito '${state.linkedHabit.title}' marcado como feito hoje!")
+                    val awardMessage = when {
+                        state.focusMinutes >= 120 -> "🌟 Incrível! Você ganhou o Citra Dourado (120 min)!"
+                        state.focusMinutes >= 60 -> "🍋 Parabéns! Você ganhou o Citra Amarelo (60 min)!"
+                        else -> "🍊 Novo Citra criado no menu do timer!"
+                    }
+                    _userMessage.emit(awardMessage)
+
+                    if (state.linkedHabit != null) {
+                        val isAlreadyDone = state.linkedHabit.completedDatesCsv.split(",")
+                            .any { it.trim() == todayString }
+                        if (!isAlreadyDone) {
+                            repository.toggleHabitToday(state.linkedHabit)
+                            _userMessage.emit("Hábito '${state.linkedHabit.title}' marcado como feito hoje!")
+                        }
                     }
                 }
             }
@@ -1202,7 +932,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             musicPlayer.stop()
 
             val vibEnabled = notificationSettings.value.vibrate
-            val breakSec = state.breakMinutes * 60
             _pomodoroState.update {
                 it.copy(
                     isRunning = false,
@@ -1214,15 +943,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             persistTimerState()
 
-            NotificationHelper.showInstantNotification(
-                context = getApplication(),
-                id = 101,
-                channelId = NotificationHelper.CHANNEL_ALERTS,
-                title = "Sessão ${state.currentCycle} de ${state.totalCycles} Concluída!",
-                message = "Excelente dedicação de ${state.focusMinutes}m! Pausa de ${state.breakMinutes}m pronta.",
-                customSoundUriString = notificationSettings.value.pomodoroSoundUri,
-                vibratePhone = vibEnabled
-            )
+            if (claimed) {
+                NotificationHelper.showInstantNotification(
+                    context = getApplication(),
+                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
+                    channelId = NotificationHelper.CHANNEL_ALERTS,
+                    title = "Sessão ${state.currentCycle} de ${state.totalCycles} Concluída!",
+                    message = "Excelente dedicação de ${state.focusMinutes}m! Pausa de ${state.breakMinutes}m pronta.",
+                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
+                    vibratePhone = vibEnabled
+                )
+            }
+
+            if (isContinuous) {
+                startPomodoro()
+            }
         } else {
             timerJob?.cancel()
             timerJob = null
@@ -1246,13 +981,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 NotificationHelper.showInstantNotification(
                     context = getApplication(),
-                    id = 103,
+                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
                     channelId = NotificationHelper.CHANNEL_ALERTS,
                     title = "Pausa Concluída",
-                    message = "Pronto para o Ciclo $nextCycle de ${state.totalCycles} de foco?",
+                    message = if (isContinuous) "Iniciando Ciclo $nextCycle de ${state.totalCycles} automaticamente!" else "Pronto para o Ciclo $nextCycle de ${state.totalCycles} de foco?",
                     customSoundUriString = notificationSettings.value.pomodoroSoundUri,
                     vibratePhone = vibEnabled
                 )
+
+                if (isContinuous) {
+                    startPomodoro()
+                }
             } else {
                 val focusSec = state.focusMinutes * 60
                 val randomQuote = getRandomQuote()
@@ -1272,7 +1011,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 NotificationHelper.showInstantNotification(
                     context = getApplication(),
-                    id = 102,
+                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
                     channelId = NotificationHelper.CHANNEL_ALERTS,
                     title = "🎉 Ciclos Concluídos!",
                     message = "Parabéns! Todos os ${state.totalCycles} ciclos foram finalizados com êxito.",
@@ -1641,10 +1380,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleHabitToday(habit: Habit) {
         viewModelScope.launch {
             vibrate(40)
-            val isDone = repository.toggleHabitToday(habit)
+            val (isDone, consecutiveDays) = repository.toggleHabitTodayWithConsecutiveDays(habit)
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             if (isDone) {
-                _userMessage.emit("Hábito cumprido hoje! Sequência de ${habit.currentStreak + 1} dias!")
+                val points = if (consecutiveDays >= 2) {
+                    (10 + (consecutiveDays - 1) * 5).coerceAtMost(100)
+                } else {
+                    10
+                }
+                preferencesManager.addHabitRewardPoints(points)
+                val msg = if (consecutiveDays >= 2) {
+                    "🌟 $consecutiveDays dias seguidos em '${habit.title}'! +$points pts de recompensa pela constância!"
+                } else {
+                    "✨ '${habit.title}' cumprido hoje! +$points pts pela dedicação!"
+                }
+                _userMessage.emit(msg)
             } else {
                 _userMessage.emit("Hábito desmarcado para hoje.")
             }
@@ -1874,8 +1624,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val parsed = BackupManager.parseNotesJson(jsonString)
-                val count = repository.upsertNotesFromCloud(parsed)
-                _userMessage.emit("$count anotações sincronizadas sem duplicatas!")
+                val count = repository.upsertNotesLocally(parsed)
+                _userMessage.emit("$count anotações importadas sem duplicatas!")
             } catch (e: Exception) {
                 _userMessage.emit("Erro ao importar anotações.")
             }
@@ -1893,114 +1643,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 BackupManager.restoreFinancesJson(database.financeDao(), jsonString)
             } catch (_: Exception) {}
         }
-    }
-
-    fun getSettingsMapForCloud(): Map<String, Any> {
-        val notif = notificationSettings.value
-        val map = mutableMapOf<String, Any>(
-            "themeAccent" to themeAccent.value.name,
-            "defaultStartTab" to defaultStartTab.value,
-            "keepScreenOn" to keepScreenOn.value,
-            "financesEnabled" to financesEnabled.value,
-            "financeDefaultCurrency" to preferencesManager.financeDefaultCurrency.value,
-            "financeHideValues" to preferencesManager.financeHideValues.value,
-            "syncEnabled" to syncEnabled.value,
-            "syncFrequency" to syncFrequency.value,
-            // Sounds & Notifications
-            "taskSound" to notif.taskSound,
-            "taskSoundUri" to notif.taskSoundUri,
-            "habitSound" to notif.habitSound,
-            "habitSoundUri" to notif.habitSoundUri,
-            "pomodoroSound" to notif.pomodoroSound,
-            "pomodoroSoundUri" to notif.pomodoroSoundUri,
-            "achievementSound" to notif.achievementSound,
-            "alertSound" to notif.alertSound,
-            "vibrate" to notif.vibrate,
-            "headsUpBanner" to notif.headsUpBanner,
-            "notifyAchievements" to notif.notifyAchievements,
-            "notifyMissedHabits" to notif.notifyMissedHabits,
-            "ambientBreakMusicInApp" to notif.ambientBreakMusicInApp,
-            "ambientMusicVolume" to notif.ambientMusicVolume,
-            "overrideSilentMode" to notif.overrideSilentMode
-        )
-        isDarkTheme.value?.let { map["themeMode"] = it }
-        return map
-    }
-
-    fun applyCloudSettings(settings: Map<String, Any>?) {
-        if (settings == null) return
-        try {
-            // Theme Accent
-            val accentName = settings["themeAccent"] as? String
-            if (!accentName.isNullOrBlank()) {
-                try {
-                    preferencesManager.setThemeAccent(ThemeAccent.valueOf(accentName))
-                } catch (_: Exception) {}
-            }
-
-            // Theme Mode
-            if (settings.containsKey("themeMode")) {
-                val modeVal = settings["themeMode"]
-                if (modeVal is Boolean) {
-                    preferencesManager.setThemeMode(modeVal)
-                }
-            }
-
-            // Default Start Tab
-            val startTab = settings["defaultStartTab"] as? String
-            if (!startTab.isNullOrBlank()) {
-                preferencesManager.setDefaultStartTab(startTab)
-            }
-
-            // Keep Screen On
-            val keepOn = settings["keepScreenOn"] as? Boolean
-            if (keepOn != null) {
-                preferencesManager.setKeepScreenOn(keepOn)
-            }
-
-            // Finances Enabled
-            val finEnabled = settings["financesEnabled"] as? Boolean
-            if (finEnabled != null) {
-                preferencesManager.setFinancesEnabled(finEnabled)
-            }
-
-            // Finance currency & visibility
-            val finCurrency = settings["financeDefaultCurrency"] as? String
-            if (!finCurrency.isNullOrBlank()) {
-                preferencesManager.setFinanceDefaultCurrency(finCurrency)
-            }
-            val finHide = settings["financeHideValues"] as? Boolean
-            if (finHide != null) {
-                preferencesManager.setFinanceHideValues(finHide)
-            }
-
-            // Notification / Sounds
-            val currentNotif = notificationSettings.value
-            val updatedNotif = currentNotif.copy(
-                taskSound = (settings["taskSound"] as? String) ?: currentNotif.taskSound,
-                taskSoundUri = (settings["taskSoundUri"] as? String) ?: currentNotif.taskSoundUri,
-                habitSound = (settings["habitSound"] as? String) ?: currentNotif.habitSound,
-                habitSoundUri = (settings["habitSoundUri"] as? String) ?: currentNotif.habitSoundUri,
-                pomodoroSound = (settings["pomodoroSound"] as? String) ?: currentNotif.pomodoroSound,
-                pomodoroSoundUri = (settings["pomodoroSoundUri"] as? String) ?: currentNotif.pomodoroSoundUri,
-                achievementSound = (settings["achievementSound"] as? String) ?: currentNotif.achievementSound,
-                alertSound = (settings["alertSound"] as? String) ?: currentNotif.alertSound,
-                vibrate = (settings["vibrate"] as? Boolean) ?: currentNotif.vibrate,
-                headsUpBanner = (settings["headsUpBanner"] as? Boolean) ?: currentNotif.headsUpBanner,
-                notifyAchievements = (settings["notifyAchievements"] as? Boolean) ?: currentNotif.notifyAchievements,
-                notifyMissedHabits = (settings["notifyMissedHabits"] as? Boolean) ?: currentNotif.notifyMissedHabits,
-                ambientBreakMusicInApp = (settings["ambientBreakMusicInApp"] as? Boolean) ?: currentNotif.ambientBreakMusicInApp,
-                ambientMusicVolume = ((settings["ambientMusicVolume"] as? Number)?.toFloat()) ?: currentNotif.ambientMusicVolume,
-                overrideSilentMode = (settings["overrideSilentMode"] as? Boolean) ?: currentNotif.overrideSilentMode
-            )
-            preferencesManager.updateSettings(updatedNotif)
-
-            // Sync settings
-            val syncEn = settings["syncEnabled"] as? Boolean
-            if (syncEn != null) preferencesManager.setSyncEnabled(syncEn)
-            val syncFreq = settings["syncFrequency"] as? String
-            if (!syncFreq.isNullOrBlank()) preferencesManager.setSyncFrequency(syncFreq)
-        } catch (_: Exception) {}
     }
 
     fun getVersionsForNote(noteId: Long): Flow<List<NoteVersion>> = repository.getVersionsForNote(noteId)
@@ -2073,10 +1715,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val financeHideValues: StateFlow<Boolean> = preferencesManager.financeHideValues
     val financePinCode: StateFlow<String?> = preferencesManager.financePinCode
     val financeBiometricEnabled: StateFlow<Boolean> = preferencesManager.financeBiometricEnabled
-    val lastFinanceSyncTimestamp: StateFlow<Long> = preferencesManager.lastFinanceSyncTimestamp
-
-    private val _pendingCloudFinanceRestoreJson = MutableStateFlow<String?>(null)
-    val pendingCloudFinanceRestoreJson: StateFlow<String?> = _pendingCloudFinanceRestoreJson.asStateFlow()
 
     val financeCategories: StateFlow<List<FinanceCategory>> =
         database.financeDao().getActiveCategories()
@@ -2137,7 +1775,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         com.example.data.backup.FinanceLinkWorker.syncSchedule(getApplication(), enabled)
         if (enabled) {
             ensureDefaultFinanceCategories()
-            checkCloudFinanceBackupAvailable()
             runDueFinanceLinksOnStartup()
             processDueRecurringRules()
         }
@@ -2162,81 +1799,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.setFinancesEnabled(true)
         ensureDefaultFinanceCategories()
         com.example.data.backup.FinanceLinkWorker.syncSchedule(getApplication(), true)
-        checkCloudFinanceBackupAvailable()
-        backupFinancesNow(showToast = false)
-    }
-
-    fun checkCloudFinanceBackupAvailable() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val authRepo = com.example.data.auth.AuthRepository.getInstance(getApplication())
-                val user = authRepo.currentUser.value
-                if (user != null && !user.isGuest) {
-                    val cloudJson = authRepo.fetchCloudFinances()
-                    if (!cloudJson.isNullOrBlank()) {
-                        _pendingCloudFinanceRestoreJson.value = cloudJson
-                    }
-                }
-            } catch (_: Exception) {}
-        }
-    }
-
-    fun confirmRestoreCloudFinances() {
-        val json = _pendingCloudFinanceRestoreJson.value ?: return
-        _pendingCloudFinanceRestoreJson.value = null
-        viewModelScope.launch(Dispatchers.IO) {
-            val ok = com.example.data.backup.FinanceCloudSyncManager.mergeAndRestoreFromCloudJson(
-                jsonStr = json,
-                database = database,
-                prefs = preferencesManager,
-                restoreSettings = true
-            )
-            if (ok) {
-                preferencesManager.setLastFinanceSyncTimestamp(System.currentTimeMillis())
-                com.example.data.backup.FinanceLinkWorker.syncSchedule(
-                    getApplication(),
-                    preferencesManager.financesEnabled.value
-                )
-                _userMessage.emit("Dados de finanças restaurados da nuvem!")
-            } else {
-                _userMessage.emit("Não foi possível restaurar o backup de finanças.")
-            }
-        }
-    }
-
-    fun dismissCloudFinanceRestore() {
-        _pendingCloudFinanceRestoreJson.value = null
-    }
-
-    fun backupFinancesNow(showToast: Boolean = true) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val authRepo = com.example.data.auth.AuthRepository.getInstance(getApplication())
-            val user = authRepo.currentUser.value
-            if (user == null || user.isGuest) {
-                if (showToast) {
-                    _userMessage.emit("Ligue uma conta Google para fazer backup na nuvem.")
-                }
-                return@launch
-            }
-            val json = com.example.data.backup.FinanceCloudSyncManager.exportFinancesToJson(
-                database = database,
-                prefs = preferencesManager
-            )
-            val ok = authRepo.syncFinancesToCloud(json)
-            if (ok) {
-                preferencesManager.setLastFinanceSyncTimestamp(System.currentTimeMillis())
-                if (showToast) {
-                    _userMessage.emit("Backup de finanças guardado na nuvem!")
-                }
-            } else if (showToast) {
-                _userMessage.emit("Falha ao enviar backup de finanças. Tente novamente.")
-            }
-        }
     }
 
     fun setFinanceDefaultCurrency(currencyCode: String) {
         preferencesManager.setFinanceDefaultCurrency(currencyCode)
-        backupFinancesNow(showToast = false)
     }
 
     fun setFinanceCurrentBalance(desiredBalanceMinor: Long) {
@@ -2244,18 +1810,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (it.type == FinanceEntryType.INCOME.id) it.totalAmountMinor else -it.totalAmountMinor
         }
         preferencesManager.setFinanceBaseBalanceMinor(desiredBalanceMinor - netEntries)
-        backupFinancesNow(showToast = false)
     }
 
     fun setFinanceHideValues(hide: Boolean) {
         preferencesManager.setFinanceHideValues(hide)
-        backupFinancesNow(showToast = false)
     }
 
     fun setFinanceLock(pinCode: String?, biometricEnabled: Boolean) {
         preferencesManager.setFinancePinCode(pinCode?.takeIf { it.isNotBlank() })
         preferencesManager.setFinanceBiometricEnabled(biometricEnabled)
-        backupFinancesNow(showToast = false)
     }
 
     fun saveFinanceEntry(entry: FinanceEntry, isNew: Boolean) {
@@ -2266,7 +1829,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 database.financeDao().updateEntry(entry.copy(updatedAt = now))
             }
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2283,7 +1845,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             _userMessage.emit("Lançamento '${entry.name}' duplicado.")
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2291,7 +1852,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().softDeleteEntry(entry.id, System.currentTimeMillis())
             _userMessage.emit("Lançamento '${entry.name}' removido.")
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2300,7 +1860,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             database.financeDao().insertCategory(
                 category.copy(updatedAt = System.currentTimeMillis())
             )
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2309,7 +1868,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             database.financeDao().updateCategory(
                 category.copy(isArchived = archived, updatedAt = System.currentTimeMillis())
             )
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2383,7 +1941,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _pendingOpenNoteFromFinances.value = finalNote
             }
             emitLinkOutcomeMessage(outcome)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2395,7 +1952,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isManualTrigger = true
             )
             emitLinkOutcomeMessage(outcome)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2416,7 +1972,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             database.financeDao().updateLink(
                 link.copy(status = nextStatus, updatedAt = System.currentTimeMillis())
             )
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2424,7 +1979,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val outcome = com.example.data.backup.FinanceLinkExecutor.recreateMarkersForPausedLink(getApplication(), link)
             emitLinkOutcomeMessage(outcome)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2432,7 +1986,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             val outcome = com.example.data.backup.FinanceLinkExecutor.recreateNoteForPausedLink(getApplication(), link)
             emitLinkOutcomeMessage(outcome)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2440,7 +1993,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().deleteLinkById(link.id)
             _userMessage.emit("Vínculo removido.")
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2472,14 +2024,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveFinanceWallet(wallet: FinanceWallet) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().insertWallet(wallet.copy(updatedAt = System.currentTimeMillis()))
-            backupFinancesNow(showToast = false)
         }
     }
 
     fun deleteFinanceWallet(wallet: FinanceWallet) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().deleteWalletById(wallet.id)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2520,7 +2070,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             database.financeDao().insertEntries(listOf(outEntry, inEntry))
             val curr = FinanceCurrency.fromCode(currencyCode)
             _userMessage.emit("Transferido ${formatFinanceAmount(amountMinor, curr)} de $fromWallet para $toWallet.")
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2537,14 +2086,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             _userMessage.emit("Taxa guardada: 1 $fromCurrency = $rate $toCurrency")
-            backupFinancesNow(showToast = false)
         }
     }
 
     fun deleteFinanceExchangeRate(rate: FinanceExchangeRate) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().deleteExchangeRateById(rate.id)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2558,14 +2105,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             database.financeDao().insertBudget(budget)
             checkBudgetAlerts()
-            backupFinancesNow(showToast = false)
         }
     }
 
     fun deleteFinanceBudget(budget: FinanceBudget) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().deleteBudgetById(budget.id)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2621,14 +2166,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().insertRecurringRule(rule.copy(updatedAt = System.currentTimeMillis()))
             processDueRecurringRules()
-            backupFinancesNow(showToast = false)
         }
     }
 
     fun deleteFinanceRecurringRule(rule: FinanceRecurringRule) {
         viewModelScope.launch(Dispatchers.IO) {
             database.financeDao().deleteRecurringRuleById(rule.id)
-            backupFinancesNow(showToast = false)
         }
     }
 
@@ -2693,8 +2236,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (insertedCount > 0) {
                 _userMessage.emit("$insertedCount lançamento(s) recorrente(s) registado(s).")
                 checkBudgetAlerts()
-                backupFinancesNow(showToast = false)
-            }
+                }
         }
     }
 
@@ -2719,7 +2261,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _userMessage.emit(msg)
             checkBudgetAlerts()
-            backupFinancesNow(showToast = false)
         }
     }
 }

@@ -212,17 +212,26 @@ fun CategoryNoteStack(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                val excerpt = coverNote.content
-                                    .lines()
-                                    .firstOrNull { it.isNotBlank() && !it.startsWith("#") }
-                                    ?.take(70) ?: "Toque para abrir e ver notas..."
-                                Text(
-                                    text = excerpt,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = coverColors.onBackgroundColor.copy(alpha = 0.65f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                if (coverNote.content.isNotBlank()) {
+                                    NoteReadingPreview(
+                                        content = coverNote.content,
+                                        maxElements = 1,
+                                        maxTotalLines = 1,
+                                        compact = true,
+                                        textColor = coverColors.onBackgroundColor,
+                                        secondaryTextColor = coverColors.onBackgroundColor.copy(alpha = 0.72f),
+                                        accentColor = coverColors.accentColor,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Toque para abrir e ver notas...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = coverColors.onBackgroundColor.copy(alpha = 0.65f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
 
@@ -414,17 +423,16 @@ fun CategoryNoteStack(
                                             )
                                         }
 
-                                        val cleanExcerpt = note.content
-                                            .lines()
-                                            .firstOrNull { it.isNotBlank() && !it.startsWith("#") }
-                                            ?.take(90) ?: ""
-                                        if (cleanExcerpt.isNotBlank()) {
-                                            Text(
-                                                text = cleanExcerpt,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = paperColors.onBackgroundColor.copy(alpha = 0.7f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                        if (note.content.isNotBlank()) {
+                                            NoteReadingPreview(
+                                                content = note.content,
+                                                maxElements = 1,
+                                                maxTotalLines = 1,
+                                                compact = true,
+                                                textColor = paperColors.onBackgroundColor,
+                                                secondaryTextColor = paperColors.onBackgroundColor.copy(alpha = 0.72f),
+                                                accentColor = paperColors.accentColor,
+                                                modifier = Modifier.fillMaxWidth()
                                             )
                                         }
 

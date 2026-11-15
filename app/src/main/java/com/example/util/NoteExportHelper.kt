@@ -174,6 +174,117 @@ object NoteExportHelper {
         return text.replace(Regex("<[^>]+>|\\*\\*|\\*|~~|==|`|\\$|\\\\ce\\{|\\}"), "").length
     }
 
+    fun formatCodeSpannable(code: String, language: String = "kotlin"): CharSequence {
+        val normalized = code.ifBlank { " " }
+        val sb = SpannableStringBuilder(normalized)
+        val spans = CodeHighlighter.tokenize(normalized, language)
+        for (span in spans) {
+            sb.setSpan(
+                ForegroundColorSpan(span.type.colorInt),
+                span.start,
+                span.endExclusive,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            when {
+                span.type.isBold && span.type.isItalic -> {
+                    sb.setSpan(StyleSpan(Typeface.BOLD_ITALIC), span.start, span.endExclusive, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                span.type.isBold -> {
+                    sb.setSpan(StyleSpan(Typeface.BOLD), span.start, span.endExclusive, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                span.type.isItalic -> {
+                    sb.setSpan(StyleSpan(Typeface.ITALIC), span.start, span.endExclusive, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+        }
+        return sb
+    }
+
+    fun renderCodeHtml(code: String, language: String = "kotlin"): String {
+        if (code.isEmpty()) return ""
+        val spans = CodeHighlighter.tokenize(code, language)
+        val sb = StringBuilder()
+        var cursor = 0
+        for (span in spans) {
+            if (span.start > cursor) {
+                sb.append(escapeHtml(code.substring(cursor, span.start)))
+            }
+            val weightCss = if (span.type.isBold) "font-weight:bold;" else ""
+            val styleCss = if (span.type.isItalic) "font-style:italic;" else ""
+            sb.append("<span style=\"color:#${span.type.colorHex};$weightCss$styleCss\">")
+            sb.append(escapeHtml(code.substring(span.start, span.endExclusive)))
+            sb.append("</span>")
+            cursor = span.endExclusive
+        }
+        if (cursor < code.length) {
+            sb.append(escapeHtml(code.substring(cursor)))
+        }
+        return sb.toString()
+    }
+
+    private fun renderCodeDocxRuns(code: String, language: String = "kotlin"): String {
+        val spans = CodeHighlighter.tokenize(code, language)
+        val sb = StringBuilder()
+        var spanIdx = 0
+        var lineStart = 0
+        val lines = code.lines()
+
+        for ((lIdx, line) in lines.withIndex()) {
+            val lineEnd = lineStart + line.length
+            var cursor = lineStart
+
+            // Advance past any spans that ended before this line
+            while (spanIdx < spans.size && spans[spanIdx].endExclusive <= lineStart) {
+                spanIdx++
+            }
+
+            var localSpanIdx = spanIdx
+            while (localSpanIdx < spans.size && spans[localSpanIdx].start < lineEnd) {
+                val span = spans[localSpanIdx]
+                val segStart = maxOf(span.start, lineStart)
+                val segEnd = minOf(span.endExclusive, lineEnd)
+                if (segStart > cursor) {
+                    val plain = code.substring(cursor, segStart)
+                    sb.append("<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
+                    sb.append("<w:sz w:val=\"19\"/><w:color w:val=\"F8FAFC\"/></w:rPr>")
+                    sb.append("<w:t xml:space=\"preserve\">${escapeXml(plain)}</w:t></w:r>")
+                }
+                if (segEnd > segStart) {
+                    val tokenText = code.substring(segStart, segEnd)
+                    sb.append("<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
+                    if (span.type.isBold) sb.append("<w:b/>")
+                    if (span.type.isItalic) sb.append("<w:i/>")
+                    sb.append("<w:sz w:val=\"19\"/><w:color w:val=\"${span.type.colorHex}\"/></w:rPr>")
+                    sb.append("<w:t xml:space=\"preserve\">${escapeXml(tokenText)}</w:t></w:r>")
+                }
+                cursor = maxOf(cursor, segEnd)
+                if (span.endExclusive <= lineEnd) {
+                    localSpanIdx++
+                    spanIdx = localSpanIdx
+                } else {
+                    break
+                }
+            }
+
+            if (cursor < lineEnd) {
+                val tail = code.substring(cursor, lineEnd)
+                sb.append("<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
+                sb.append("<w:sz w:val=\"19\"/><w:color w:val=\"F8FAFC\"/></w:rPr>")
+                sb.append("<w:t xml:space=\"preserve\">${escapeXml(tail)}</w:t></w:r>")
+            } else if (line.isEmpty()) {
+                sb.append("<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
+                sb.append("<w:sz w:val=\"19\"/><w:color w:val=\"F8FAFC\"/></w:rPr>")
+                sb.append("<w:t xml:space=\"preserve\"> </w:t></w:r>")
+            }
+
+            if (lIdx < lines.size - 1) {
+                sb.append("<w:r><w:br/></w:r>")
+            }
+            lineStart = lineEnd + 1
+        }
+        return sb.toString()
+    }
+
     fun formatSpannable(rawText: String, baseColor: Int = Color.parseColor("#0F172A"), themeColor: Int = Color.parseColor("#F97316"), defaultBold: Boolean = false): CharSequence {
         if (rawText.isEmpty()) return ""
         val sb = SpannableStringBuilder()
@@ -590,17 +701,10 @@ object NoteExportHelper {
                 }
 
                 is CodeBlock -> {
-                    docSb.append("<w:p><w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F1F5F9\"/>")
+                    docSb.append("<w:p><w:pPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"0F172A\"/>")
                     docSb.append("<w:ind w:left=\"240\" w:right=\"240\"/>")
                     docSb.append("<w:spacing w:before=\"120\" w:after=\"120\"/></w:pPr>")
-                    val lines = block.code.lines()
-                    for ((lIdx, line) in lines.withIndex()) {
-                        docSb.append("<w:r><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
-                        docSb.append("<w:sz w:val=\"19\"/><w:color w:val=\"0F172A\"/></w:rPr>")
-                        docSb.append("<w:t xml:space=\"preserve\">${escapeXml(line)}</w:t>")
-                        if (lIdx < lines.size - 1) docSb.append("<w:br/>")
-                        docSb.append("</w:r>")
-                    }
+                    docSb.append(renderCodeDocxRuns(block.code, block.language))
                     docSb.append("</w:p>\n")
                 }
 
@@ -981,7 +1085,7 @@ object NoteExportHelper {
         }
 
         val codePaint = TextPaint().apply {
-            color = Color.parseColor("#0F172A")
+            color = Color.parseColor("#F8FAFC")
             textSize = 10f
             typeface = Typeface.MONOSPACE
             isAntiAlias = true
@@ -1108,17 +1212,18 @@ object NoteExportHelper {
                 }
 
                 is CodeBlock -> {
-                    val codeLayout = createStaticLayout(block.code.ifBlank { " " }, codePaint, contentWidth - 24)
+                    val highlightedCode = formatCodeSpannable(block.code, block.language)
+                    val codeLayout = createStaticLayout(highlightedCode, codePaint, contentWidth - 24)
                     val bgHeight = codeLayout.height + 20f
                     checkNewPage(bgHeight + 10f)
 
                     val bgPaint = Paint().apply {
-                        color = Color.parseColor("#F1F5F9")
+                        color = Color.parseColor("#0F172A")
                         style = Paint.Style.FILL
                         isAntiAlias = true
                     }
                     val borderPaint = Paint().apply {
-                        color = Color.parseColor("#CBD5E1")
+                        color = Color.parseColor("#1E293B")
                         style = Paint.Style.STROKE
                         strokeWidth = 1f
                         isAntiAlias = true
@@ -1488,7 +1593,7 @@ object NoteExportHelper {
                 }
                 is BulletBlock -> sb.append("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
                 is QuoteBlock -> sb.append("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
-                is CodeBlock -> sb.append("<pre><code class=\"language-${block.language}\">${escapeHtml(block.code)}</code></pre>\n")
+                is CodeBlock -> sb.append("<pre><code class=\"language-${escapeHtml(block.language)}\">${renderCodeHtml(block.code, block.language)}</code></pre>\n")
                 is MathBlock -> {
                     val rendered = escapeHtml(LatexFormulaRenderer.renderFormulaToText(block.formula))
                     sb.append("<div class=\"math\">$$ $rendered $$</div>\n")
@@ -1667,7 +1772,7 @@ object NoteExportHelper {
             isAntiAlias = true
         }
         val codeTextPaint = TextPaint().apply {
-            color = Color.parseColor("#0F172A")
+            color = Color.parseColor("#F8FAFC")
             textSize = 16f
             typeface = Typeface.MONOSPACE
             isAntiAlias = true
@@ -1737,7 +1842,8 @@ object NoteExportHelper {
                     measuredHeight += maxOf(32f, layout.height.toFloat()) + 16f
                 }
                 is CodeBlock -> {
-                    val layout = createStaticLayout(block.code.ifBlank { " " }, codeTextPaint, contentWidth - 32)
+                    val highlightedCode = formatCodeSpannable(block.code, block.language)
+                    val layout = createStaticLayout(highlightedCode, codeTextPaint, contentWidth - 32)
                     measuredHeight += layout.height + 24f + 14f
                 }
                 is ImageBlock -> {
@@ -1944,9 +2050,10 @@ object NoteExportHelper {
                     y += itemH + 16f
                 }
                 is CodeBlock -> {
-                    val layout = createStaticLayout(block.code.ifBlank { " " }, codeTextPaint, contentWidth - 32)
+                    val highlightedCode = formatCodeSpannable(block.code, block.language)
+                    val layout = createStaticLayout(highlightedCode, codeTextPaint, contentWidth - 32)
                     val boxH = layout.height + 24f
-                    val cBg = Paint().apply { color = Color.parseColor("#F1F5F9"); isAntiAlias = true }
+                    val cBg = Paint().apply { color = Color.parseColor("#0F172A"); isAntiAlias = true }
                     canvas.drawRoundRect(RectF(padding, y, width - padding, y + boxH), 10f, 10f, cBg)
 
                     canvas.save()
@@ -2342,7 +2449,7 @@ object NoteExportHelper {
                     }
                     is BulletBlock -> writer.write("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
                     is QuoteBlock -> writer.write("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
-                    is CodeBlock -> writer.write("<pre><code class=\"language-${block.language}\">${escapeHtml(block.code)}</code></pre>\n")
+                    is CodeBlock -> writer.write("<pre><code class=\"language-${escapeHtml(block.language)}\">${renderCodeHtml(block.code, block.language)}</code></pre>\n")
                     is MathBlock -> writer.write("<div class=\"math\">$$ ${escapeHtml(block.formula)} $$</div>\n")
                     is TableBlock -> {
                         writer.write("<table><thead><tr>")
