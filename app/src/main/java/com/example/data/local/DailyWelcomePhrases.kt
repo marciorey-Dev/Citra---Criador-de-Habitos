@@ -42,7 +42,7 @@ object DailyWelcomePhrasesCatalog {
         WelcomePhrase("mot_15", "Comece antes de estar pronto.", WelcomePhraseCategory.MOTIVACIONAIS),
         WelcomePhrase("mot_16", "O hoje constrói o amanhã.", WelcomePhraseCategory.MOTIVACIONAIS),
         WelcomePhrase("mot_17", "Respire. Priorize. Execute.", WelcomePhraseCategory.MOTIVACIONAIS),
-        WelcomePhrase("mot_18", "Mantenha a chama acesa. 🔥", WelcomePhraseCategory.MOTIVACIONAIS),
+        WelcomePhrase("mot_18", "Mantenha o ritmo vivo. ✨", WelcomePhraseCategory.MOTIVACIONAIS),
         WelcomePhrase("mot_19", "Seu ritmo, sua vitória.", WelcomePhraseCategory.MOTIVACIONAIS),
         WelcomePhrase("mot_20", "Falta pouco. Continue.", WelcomePhraseCategory.MOTIVACIONAIS),
         WelcomePhrase("mot_21", "Uma tarefa de cada vez.", WelcomePhraseCategory.MOTIVACIONAIS),
@@ -193,7 +193,7 @@ object DailyWelcomePhrasesCatalog {
 
         // 🍊 Citra
         WelcomePhrase("cit_1", "Hora de focar. Bora?", WelcomePhraseCategory.CITRA),
-        WelcomePhrase("cit_2", "Sua sequência 🔥 espera você.", WelcomePhraseCategory.CITRA),
+        WelcomePhrase("cit_2", "Seus hábitos de hoje esperam você. ✨", WelcomePhraseCategory.CITRA),
         WelcomePhrase("cit_3", "Bom dia! Tarefa de hoje?", WelcomePhraseCategory.CITRA),
         WelcomePhrase("cit_4", "Boa noite! Fechou o dia?", WelcomePhraseCategory.CITRA),
         WelcomePhrase("cit_5", "Hábitos de hoje: já marcou?", WelcomePhraseCategory.CITRA),

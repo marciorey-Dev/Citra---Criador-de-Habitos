@@ -18,7 +18,7 @@
             android:layout_width="18dp"
             android:layout_height="18dp"
             android:contentDescription="@string/app_name"
-            android:src="@drawable/ic_widget_fire" />
+            android:src="@drawable/ic_widget_check_on" />
 
         <TextView
             android:id="@+id/widget_habits_header_title"
@@ -101,7 +101,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
-                android:text="🔥 3d"
+                android:text="✨ 3d"
                 android:textColor="#FF9E40"
                 android:textSize="11sp" />
 
@@ -143,7 +143,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
-                android:text="🔥 0d"
+                android:text="✨ 0d"
                 android:textColor="#FF9E40"
                 android:textSize="11sp" />
 
@@ -185,7 +185,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
-                android:text="🔥 1d"
+                android:text="✨ 1d"
                 android:textColor="#FF9E40"
                 android:textSize="11sp" />
 
@@ -226,7 +226,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
-                android:text="🔥 5d"
+                android:text="✨ 5d"
                 android:textColor="#FF9E40"
                 android:textSize="11sp" />
 

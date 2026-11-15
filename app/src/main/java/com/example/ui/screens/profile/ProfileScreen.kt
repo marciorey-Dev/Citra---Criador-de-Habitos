@@ -760,7 +760,7 @@ fun ProfileScreen(
             )
             "habits" -> Triple(
                 "Apagar Todos os Hábitos",
-                "Tem certeza que deseja apagar todos os hábitos e histórico de sequências? Esta ação não pode ser desfeita.",
+                "Tem certeza que deseja apagar todos os hábitos e histórico de dias cumpridos? Esta ação não pode ser desfeita.",
                 { viewModel.deleteAllHabits(); Toast.makeText(context, "Todos os hábitos foram removidos.", Toast.LENGTH_SHORT).show() }
             )
             "notes" -> Triple(

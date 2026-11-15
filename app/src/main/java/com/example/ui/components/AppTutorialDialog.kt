@@ -49,7 +49,7 @@ fun AppTutorialDialog(
             iconEmoji = "✨",
             title = "2. Cultivando Hábitos Diários",
             description = "Em Hábitos, defina rotinas com horário fixo diário. Você receberá uma notificação sonora com 10 minutos de antecedência.",
-            tip = "Faça o check-in diário para manter sua chama de sequência (Streak 🔥) crescendo!"
+            tip = "Faça o check-in diário para manter seus dias consecutivos crescendo!"
         ),
         TutorialStep(
             iconEmoji = "📝",

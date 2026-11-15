@@ -60,6 +60,9 @@ fun TimerScreen(
     onNavigateToTasks: () -> Unit
 ) {
     val pomodoroState by viewModel.pomodoroState.collectAsState()
+    val timerContinuousMode by viewModel.timerContinuousMode.collectAsState()
+    val timerTapToToggle by viewModel.timerTapToToggle.collectAsState()
+    val timerAllowSwipe by viewModel.timerAllowSwipe.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val citraTimerBallsJson by viewModel.citraTimerBallsJson.collectAsState()
     val isDistractionFreeEnabled by viewModel.focusDistractionFreeEnabled.collectAsState()
@@ -368,6 +371,13 @@ fun TimerScreen(
                     .size(276.dp)
                     .scale(dialScale)
                     .tutorialTarget("timer_circle_display")
+                    .then(
+                        if (isSessionActive && timerTapToToggle) {
+                            Modifier.clickable { viewModel.toggleStartPausePomodoro() }
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(4.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -1067,6 +1077,56 @@ fun TimerScreen(
                             )
                         }
                     }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                // Continuous mode switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Ciclos Contínuos", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Text("Avançar automaticamente entre foco e pausa sem parar", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = timerContinuousMode,
+                        onCheckedChange = { viewModel.setTimerContinuousMode(it) }
+                    )
+                }
+
+                // Tap-to-toggle switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Pausar/Retomar ao tocar no timer", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Text("Toque no círculo central para pausar ou retomar", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = timerTapToToggle,
+                        onCheckedChange = { viewModel.setTimerTapToToggle(it) }
+                    )
+                }
+
+                // Allow swipe switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Deslizar para trocar de tela", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Text("Permitir gesto horizontal no timer para mudar de aba", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = timerAllowSwipe,
+                        onCheckedChange = { viewModel.setTimerAllowSwipe(it) }
+                    )
                 }
 
                 Button(

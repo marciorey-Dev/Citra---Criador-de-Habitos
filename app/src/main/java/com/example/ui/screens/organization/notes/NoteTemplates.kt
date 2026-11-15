@@ -319,7 +319,7 @@ ${'$'}${'$'}
 - [ ] 
 - [ ] 
 
-## 🔥 Hábitos
+## ✨ Hábitos
 - [ ] Água
 - [ ] Leitura
 - [ ] Exercício

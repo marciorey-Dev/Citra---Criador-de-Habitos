@@ -162,7 +162,7 @@ fun HabitsSubTab(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                imageVector = Icons.Default.LocalFireDepartment,
+                                imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                                 modifier = Modifier.size(44.dp)
@@ -281,7 +281,7 @@ fun HabitsSubTab(
     if (habitToDelete != null) {
         ConfirmDeleteDialog(
             title = "Excluir Hábito",
-            message = "Deseja realmente excluir '${habitToDelete!!.title}'? Todo o histórico de sequências deste hábito será removido.",
+            message = "Deseja realmente excluir '${habitToDelete!!.title}'? Todo o histórico de dias cumpridos deste hábito será removido.",
             onConfirm = {
                 viewModel.deleteHabit(habitToDelete!!)
                 habitToDelete = null
@@ -523,13 +523,13 @@ fun HabitItemCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Icon(
-                            imageVector = Icons.Default.LocalFireDepartment,
+                            imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
-                            text = "Sequência: ${habit.calculateWeeklyStreak()} dias",
+                            text = "${habit.calculateWeeklyStreak()} dias seguidos",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

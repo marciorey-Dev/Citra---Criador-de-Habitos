@@ -176,7 +176,7 @@ object NextAlarmScheduler {
                                     type = TYPE_HABIT_EXACT,
                                     entityId = habit.id,
                                     title = "Hora do Hábito: ${habit.title}",
-                                    message = "Hora de praticar seu hábito! Mantenha sua sequência ativa.",
+                                    message = "Hora de praticar seu hábito! Mantenha a constância hoje.",
                                     soundUri = sound,
                                     loopAlarm = false
                                 )

@@ -701,7 +701,7 @@ object NotificationHelper {
         val intentExact = Intent(context, CitraNotificationReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, TYPE_HABIT)
             putExtra(EXTRA_TITLE, "Hora do Hábito: $title")
-            putExtra(EXTRA_MESSAGE, "Hora exata de praticar seu hábito! Mantenha sua sequência ativa.")
+            putExtra(EXTRA_MESSAGE, "Hora exata de praticar seu hábito! Mantenha a constância hoje.")
             putExtra(EXTRA_ID, (habitId + 60000).toInt())
             putExtra(EXTRA_SOUND_URI, effectiveSound)
             putExtra(EXTRA_HABIT_ID, habitId)
@@ -789,7 +789,7 @@ object NotificationHelper {
         val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, TYPE_HABIT)
             putExtra(EXTRA_TITLE, if (isAdvance) "Hábito em $leadMinutes min: $title" else "Hora do Hábito: $title")
-            putExtra(EXTRA_MESSAGE, if (isAdvance) "Horário programado: $timeString. Prepare-se para seu hábito!" else "Hora exata de praticar seu hábito! Mantenha sua sequência ativa.")
+            putExtra(EXTRA_MESSAGE, if (isAdvance) "Horário programado: $timeString. Prepare-se para seu hábito!" else "Hora exata de praticar seu hábito! Mantenha a constância hoje.")
             putExtra(EXTRA_ID, requestCode)
             putExtra(EXTRA_SOUND_URI, effectiveSound)
             putExtra(EXTRA_HABIT_ID, habitId)

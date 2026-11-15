@@ -1127,13 +1127,13 @@ private fun TimelineHabitCard(
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.LocalFireDepartment,
+                            imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
-                            text = "${habit.currentStreak}d",
+                            text = "${habit.currentStreak}d seguidos",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )

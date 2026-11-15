@@ -855,7 +855,7 @@ fun HomeScreen(
                                     Spacer(modifier = Modifier.height(14.dp))
 
                                     Text(
-                                        text = "🔥 ${habit.currentStreak} dias",
+                                        text = "✨ ${habit.currentStreak} dias seguidos",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isDone) {

@@ -37,7 +37,7 @@ object CitraTutorialData {
             ),
             CitraTutorialStep(
                 title = "Hábitos Diários",
-                text = "Cultive sua rotina e faça check-in diário para manter sua sequência de chamas (Streaks) sempre ativa.",
+                text = "Cultive sua rotina e faça check-in diário para manter seus dias consecutivos sempre em alta.",
                 targetKey = "home_habits_shortcut",
                 preferBelow = false
             ),
@@ -111,8 +111,8 @@ object CitraTutorialData {
                 preferBelow = true
             ),
             CitraTutorialStep(
-                title = "Chama de Sequência",
-                text = "A chama indica quantos dias seguidos você cumpriu o hábito. Não deixe o fogo se apagar!",
+                title = "Dias Consecutivos",
+                text = "Cada dia cumprido reforça sua constância. Mantenha o ritmo firme!",
                 targetKey = "habits_streak_counter",
                 preferBelow = true
             )

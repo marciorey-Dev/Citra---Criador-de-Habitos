@@ -7,7 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Checklist
-import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,7 +42,7 @@ fun OrganizationScreen(
     val isNoteEditorOpen by viewModel.isNoteEditorOpen.collectAsState()
     val tabs = listOf(
         Triple("Tarefas", Icons.Default.Checklist, "organization_tab_tasks"),
-        Triple("Hábitos", Icons.Default.LocalFireDepartment, "organization_tab_habits"),
+        Triple("Hábitos", Icons.Default.AutoAwesome, "organization_tab_habits"),
         Triple("Calendário", Icons.Default.CalendarMonth, "organization_tab_calendar")
     )
 

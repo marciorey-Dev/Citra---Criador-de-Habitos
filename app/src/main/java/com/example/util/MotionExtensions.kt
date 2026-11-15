@@ -1,5 +1,6 @@
 package com.example.util
 
+import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -11,7 +12,9 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -20,7 +23,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * High-performance Squash & Stretch (Compress & Elastic Bounce) modifier with tactile haptic feedback.
@@ -49,22 +54,23 @@ fun Modifier.squashBounce(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "squashBounceAnim"
+        label = "squashScale"
     )
 
-    this.graphicsLayer {
-        scaleX = scale
-        scaleY = scale
-    }
+    this
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
 }
 
 /**
- * Clickable modifier combining Squash & Stretch animation with full click handling and haptics.
+ * Clickable wrapper that also triggers the squash bounce effect.
  */
 fun Modifier.squashBounceClickable(
+    enabled: Boolean = true,
     pressedScale: Float = 0.93f,
     enableHaptic: Boolean = true,
-    enabled: Boolean = true,
     onClick: () -> Unit
 ): Modifier = composed {
     val interactionSource = remember { MutableInteractionSource() }
@@ -85,7 +91,7 @@ fun Modifier.squashBounceClickable(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "squashBounceClickScale"
+        label = "squashClickableScale"
     )
 
     this
@@ -100,10 +106,6 @@ fun Modifier.squashBounceClickable(
             onClick = onClick
         )
 }
-
-import android.os.SystemClock
-import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.mutableIntStateOf
 
 val LocalScreenEntranceKey = compositionLocalOf { 0 }
 val LocalScreenEnteredAtMillis = compositionLocalOf { 0L }
@@ -145,9 +147,9 @@ fun Modifier.staggeredEntrance(
         val fadeSpec = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
         val slideSpec = tween<Float>(durationMillis = 240, easing = FastOutSlowInEasing)
         // Animate alpha & offset smoothly together
-        kotlinx.coroutines.coroutineScope {
-            kotlinx.coroutines.launch { alpha.animateTo(1f, animationSpec = fadeSpec) }
-            kotlinx.coroutines.launch { offsetY.animateTo(0f, animationSpec = slideSpec) }
+        coroutineScope {
+            launch { alpha.animateTo(1f, animationSpec = fadeSpec) }
+            launch { offsetY.animateTo(0f, animationSpec = slideSpec) }
         }
     }
 
@@ -156,4 +158,3 @@ fun Modifier.staggeredEntrance(
         this.translationY = offsetY.value * density
     }
 }
-

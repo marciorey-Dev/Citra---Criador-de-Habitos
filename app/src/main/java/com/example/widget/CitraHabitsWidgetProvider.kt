@@ -83,7 +83,7 @@ class CitraHabitsWidgetProvider : AppWidgetProvider() {
 
                 val prefix = if (habit.iconEmoji.isNotBlank()) "${habit.iconEmoji} " else "🎯 "
                 views.setTextViewText(habitTitleIds[i], "$prefix${habit.title}")
-                views.setTextViewText(habitStreakIds[i], "🔥 ${habit.currentStreak}d")
+                views.setTextViewText(habitStreakIds[i], "✨ ${habit.currentStreak}d")
 
                 val checkIcon = if (isDoneToday) R.drawable.ic_widget_check_on else R.drawable.ic_widget_check_off
                 views.setImageViewResource(habitCheckIds[i], checkIcon)
