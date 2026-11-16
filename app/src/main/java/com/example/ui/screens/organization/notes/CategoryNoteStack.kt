@@ -28,6 +28,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Note
+import com.example.data.model.NoteDocumentType
+import com.example.data.model.isDocxDocument
+import com.example.data.model.isExternalDocument
+import com.example.data.model.isPdfDocument
+import com.example.data.model.resolvedDocumentType
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -204,36 +209,80 @@ fun CategoryNoteStack(
                             }
                         }
 
-                        // Preview of the latest note in this category
+                        // Preview of the latest note or external doc in this category
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             if (coverNote != null) {
-                                Text(
-                                    text = coverNote.title.ifBlank { "Sem título" },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = coverColors.onBackgroundColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (coverNote.content.isNotBlank()) {
-                                    NoteReadingPreview(
-                                        content = coverNote.content,
-                                        maxElements = 1,
-                                        maxTotalLines = 1,
-                                        compact = true,
-                                        textColor = coverColors.onBackgroundColor,
-                                        secondaryTextColor = coverColors.onBackgroundColor.copy(alpha = 0.72f),
-                                        accentColor = coverColors.accentColor,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                } else {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (coverNote.isExternalDocument) {
+                                        val isPdf = coverNote.isPdfDocument
+                                        val docAccent = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = docAccent.copy(alpha = 0.16f)
+                                        ) {
+                                            Text(
+                                                text = if (isPdf) "PDF" else "DOCX",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = docAccent,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
                                     Text(
-                                        text = "Toque para abrir e ver notas...",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = coverColors.onBackgroundColor.copy(alpha = 0.65f),
+                                        text = coverNote.title.ifBlank { "Sem título" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = coverColors.onBackgroundColor,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
+                                }
+                                when (coverNote.resolvedDocumentType) {
+                                    NoteDocumentType.PDF -> {
+                                        Text(
+                                            text = "Documento PDF · Somente leitura",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFFDC2626).copy(alpha = 0.85f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    NoteDocumentType.DOCX -> {
+                                        Text(
+                                            text = "Documento .docx · Somente leitura",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF2563EB).copy(alpha = 0.85f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    NoteDocumentType.MARKDOWN -> {
+                                        if (coverNote.content.isNotBlank()) {
+                                            NoteReadingPreview(
+                                                content = coverNote.content,
+                                                maxElements = 1,
+                                                maxTotalLines = 1,
+                                                compact = true,
+                                                textColor = coverColors.onBackgroundColor,
+                                                secondaryTextColor = coverColors.onBackgroundColor.copy(alpha = 0.72f),
+                                                accentColor = coverColors.accentColor,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Toque para abrir e ver notas...",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = coverColors.onBackgroundColor.copy(alpha = 0.65f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -422,27 +471,77 @@ fun CategoryNoteStack(
                                                     modifier = Modifier.size(13.dp)
                                                 )
                                             }
+                                            if (note.isExternalDocument) {
+                                                val isPdf = note.isPdfDocument
+                                                val docAccent = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = docAccent.copy(alpha = 0.16f)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
+                                                            contentDescription = null,
+                                                            tint = docAccent,
+                                                            modifier = Modifier.size(11.dp)
+                                                        )
+                                                        Text(
+                                                            text = if (isPdf) "PDF" else "DOCX",
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = docAccent
+                                                        )
+                                                    }
+                                                }
+                                            }
                                             Text(
                                                 text = note.title.ifBlank { "Sem título" },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold,
                                                 color = paperColors.onBackgroundColor,
                                                 maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                         }
 
-                                        if (note.content.isNotBlank()) {
-                                            NoteReadingPreview(
-                                                content = note.content,
-                                                maxElements = 1,
-                                                maxTotalLines = 1,
-                                                compact = true,
-                                                textColor = paperColors.onBackgroundColor,
-                                                secondaryTextColor = paperColors.onBackgroundColor.copy(alpha = 0.72f),
-                                                accentColor = paperColors.accentColor,
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
+                                        when (note.resolvedDocumentType) {
+                                            NoteDocumentType.PDF -> {
+                                                Text(
+                                                    text = "Somente leitura · Toque para abrir PDF",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color(0xFFDC2626).copy(alpha = 0.85f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            NoteDocumentType.DOCX -> {
+                                                Text(
+                                                    text = "Somente leitura · Toque para abrir .docx",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color(0xFF2563EB).copy(alpha = 0.85f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            NoteDocumentType.MARKDOWN -> {
+                                                if (note.content.isNotBlank()) {
+                                                    NoteReadingPreview(
+                                                        content = note.content,
+                                                        maxElements = 1,
+                                                        maxTotalLines = 1,
+                                                        compact = true,
+                                                        textColor = paperColors.onBackgroundColor,
+                                                        secondaryTextColor = paperColors.onBackgroundColor.copy(alpha = 0.72f),
+                                                        accentColor = paperColors.accentColor,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    )
+                                                }
+                                            }
                                         }
 
                                         Text(

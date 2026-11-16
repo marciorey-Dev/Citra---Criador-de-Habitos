@@ -339,9 +339,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedCalendarDate = MutableStateFlow(todayString)
     val selectedCalendarDate: StateFlow<String> = _selectedCalendarDate.asStateFlow()
 
-    // Notes category filter
+    // Notes category & document type filters
     private val _selectedNoteCategoryFilter = MutableStateFlow("Todas")
     val selectedNoteCategoryFilter: StateFlow<String> = _selectedNoteCategoryFilter.asStateFlow()
+
+    private val _selectedNoteDocumentFilter = MutableStateFlow(
+        com.example.ui.screens.organization.notes.NoteDocumentFilter.ALL
+    )
+    val selectedNoteDocumentFilter: StateFlow<com.example.ui.screens.organization.notes.NoteDocumentFilter> =
+        _selectedNoteDocumentFilter.asStateFlow()
+
+    fun setSelectedNoteDocumentFilter(filter: com.example.ui.screens.organization.notes.NoteDocumentFilter) {
+        _selectedNoteDocumentFilter.value = filter
+    }
 
     // Feedback channel
     private val _userMessage = MutableSharedFlow<String>()
@@ -1108,6 +1118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val cleanTitle = task.title.trim()
                 if (cleanTitle.isNotEmpty()) {
                     for (note in notes.value) {
+                        if (note.isExternalDocument) continue
                         val lines = note.content.lines().toMutableList()
                         var noteModified = false
                         for (i in lines.indices) {
@@ -1215,17 +1226,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun importMultipleMarkdownFiles(uris: List<Uri>, context: Context) {
+    fun importMultipleMarkdownFiles(
+        uris: List<Uri>,
+        context: Context,
+        preferredCategory: String? = null
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
-            var successCount = 0
+            var importedNotesCount = 0
+            var linkedDocsCount = 0
+            var skippedDuplicatesCount = 0
             var errorCount = 0
 
-            val existingTitles = repository.getAllNotesSync().map { it.title.trim().lowercase() }.toSet()
+            val currentNotes = repository.getAllNotesSync()
+            val existingTitles = currentNotes.filter { !it.isExternalDocument }
+                .map { it.title.trim().lowercase() }.toMutableSet()
+            val existingExternalUris = currentNotes.mapNotNull { it.externalUri?.trim() }.toMutableSet()
+            val resolvedCategory = preferredCategory
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && !it.equals("Todas", ignoreCase = true) }
+                ?: "Geral"
 
             for (uri in uris) {
                 try {
-                    val filename = queryFileName(context, uri) ?: "Nota_${System.currentTimeMillis()}"
+                    com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, uri)
+                    val filename = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, uri)
+                        ?: queryFileName(context, uri)
+                        ?: "Documento_${System.currentTimeMillis()}"
                     val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+
+                    val externalDocType = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(
+                        context = context,
+                        uri = uri,
+                        displayName = filename
+                    )
+                    if (externalDocType != null) {
+                        val uriStr = uri.toString()
+                        if (existingExternalUris.contains(uriStr)) {
+                            skippedDuplicatesCount++
+                            continue
+                        }
+                        val docIcon = if (externalDocType == NoteDocumentType.PDF) "📄" else "📘"
+                        val docLinkNote = Note(
+                            uuid = java.util.UUID.randomUUID().toString(),
+                            title = rawTitle,
+                            content = "",
+                            category = resolvedCategory,
+                            iconEmoji = docIcon,
+                            documentType = externalDocType.id,
+                            externalUri = uriStr,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        repository.insertNote(docLinkNote)
+                        existingExternalUris.add(uriStr)
+                        linkedDocsCount++
+                        continue
+                    }
 
                     val rawContent = context.contentResolver.openInputStream(uri)?.use { stream ->
                         stream.bufferedReader(Charsets.UTF_8).readText()
@@ -1240,8 +1295,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 val parsedNotes = BackupManager.parseNotesJson(rawContent, context)
                                 for (n in parsedNotes) {
                                     repository.upsertNoteByUuid(n)
-                                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, n.title, n.content, uuid = n.uuid)
-                                    successCount++
+                                    if (!n.isExternalDocument) {
+                                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, n.title, n.content, uuid = n.uuid)
+                                    }
+                                    importedNotesCount++
                                 }
                                 for (t in backupData.tasks) {
                                     repository.insertTask(t.copy(id = 0L))
@@ -1266,7 +1323,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     if (item != null) {
                                         val nTitle = item.optString("title", "Nota ${i + 1}")
                                         val nContent = item.optString("content", item.optString("body", item.toString(2)))
-                                        val nCat = item.optString("category", "Geral")
+                                        val nCat = item.optString("category", resolvedCategory)
                                         val nUuid = item.optString("uuid").ifBlank { java.util.UUID.randomUUID().toString() }
                                         repository.upsertNoteByUuid(
                                             Note(
@@ -1278,7 +1335,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                             )
                                         )
                                         com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, nTitle, nContent, uuid = nUuid)
-                                        successCount++
+                                        importedNotesCount++
                                         anyImported = true
                                     }
                                 }
@@ -1291,42 +1348,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(markdownContent)
 
                         val existingByUuid = if (fileUuid != null) repository.getNoteByUuid(fileUuid) else null
-                        if (existingByUuid != null) {
+                        if (existingByUuid != null && !existingByUuid.isExternalDocument) {
                             repository.updateNote(existingByUuid.copy(title = rawTitle, content = cleanContent, updatedAt = System.currentTimeMillis()))
                             com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, rawTitle, cleanContent, uuid = existingByUuid.uuid)
-                            successCount++
+                            importedNotesCount++
                         } else {
                             val finalTitle = if (existingTitles.contains(rawTitle.lowercase())) {
                                 "$rawTitle (${System.currentTimeMillis().toString().takeLast(4)})"
                             } else {
                                 rawTitle
                             }
+                            existingTitles.add(finalTitle.lowercase())
                             val newUuid = fileUuid ?: java.util.UUID.randomUUID().toString()
                             repository.insertNote(
                                 Note(
                                     uuid = newUuid,
                                     title = finalTitle,
                                     content = cleanContent,
-                                    category = "Geral",
+                                    category = resolvedCategory,
                                     updatedAt = System.currentTimeMillis()
                                 )
                             )
                             com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, cleanContent, uuid = newUuid)
-                            successCount++
+                            importedNotesCount++
                         }
                     } else {
                         errorCount++
                     }
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     errorCount++
                 }
             }
 
-            val msg = if (errorCount > 0) {
-                "$successCount ficheiros importados, $errorCount com erro"
-            } else {
-                "$successCount ficheiros importados e integrados com sucesso!"
+            if (linkedDocsCount > 0 || importedNotesCount > 0) {
+                com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             }
+
+            val parts = mutableListOf<String>()
+            if (linkedDocsCount > 0) {
+                parts.add("$linkedDocsCount documento(s) vinculado(s) por caminho")
+            }
+            if (importedNotesCount > 0) {
+                parts.add("$importedNotesCount nota(s) importada(s)")
+            }
+            if (skippedDuplicatesCount > 0) {
+                parts.add("$skippedDuplicatesCount já vinculado(s)")
+            }
+            if (errorCount > 0) {
+                parts.add("$errorCount com erro")
+            }
+            val msg = if (parts.isEmpty()) "Nenhum arquivo importado." else parts.joinToString(" • ") + "!"
             _userMessage.emit(msg)
         }
     }
@@ -1483,6 +1554,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isDeleted = false,
                 isArchived = isArchived || (existing?.isArchived == true),
                 noteColor = noteColor ?: existing?.noteColor,
+                documentType = existing?.documentType ?: NoteDocumentType.MARKDOWN.id,
+                externalUri = existing?.externalUri,
                 updatedAt = System.currentTimeMillis()
             )
             val resultId = if (id == 0L) {
@@ -1492,17 +1565,167 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 id
             }
 
-            // Sync to Citra Docs, cleaning old file if title changed
-            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                context = getApplication(),
-                title = finalTitle,
-                content = cleanContent,
-                uuid = resolvedUuid,
-                oldTitle = previousTitle
-            )
+            if (!note.isExternalDocument) {
+                // Sync to Citra Docs, cleaning old file if title changed
+                com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                    context = getApplication(),
+                    title = finalTitle,
+                    content = cleanContent,
+                    uuid = resolvedUuid,
+                    oldTitle = previousTitle
+                )
+            }
 
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             onSaved?.invoke(resultId)
+        }
+    }
+
+    fun updateNoteCategory(note: Note, newCategory: String, onUpdated: ((Note) -> Unit)? = null) {
+        val cleanCategory = newCategory.trim().ifBlank { "Geral" }
+        viewModelScope.launch {
+            val updated = note.copy(
+                category = cleanCategory,
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.updateNote(updated)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            onUpdated?.invoke(updated)
+            _userMessage.emit("Categoria alterada para '$cleanCategory'.")
+        }
+    }
+
+    fun relinkExternalDocumentUri(
+        note: Note,
+        newUri: Uri,
+        context: Context,
+        onUpdated: ((Note) -> Unit)? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, newUri)
+            val displayName = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, newUri)
+            val detected = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(context, newUri, displayName)
+            val cleanTitle = displayName?.substringBeforeLast(".")?.ifBlank { note.title } ?: note.title
+            val updated = note.copy(
+                title = cleanTitle,
+                externalUri = newUri.toString(),
+                documentType = detected?.id ?: note.documentType,
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.updateNote(updated)
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                onUpdated?.invoke(updated)
+            }
+            _userMessage.emit("Caminho do documento atualizado!")
+        }
+    }
+
+    fun convertExternalDocumentToEditableNote(
+        docNote: Note,
+        context: Context,
+        onConverted: (Note) -> Unit,
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val uriString = docNote.externalUri
+            if (uriString.isNullOrBlank()) {
+                val err = "Caminho do arquivo não encontrado."
+                _userMessage.emit(err)
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onError(err) }
+                return@launch
+            }
+
+            val markdownResult: Pair<String?, String?> = try {
+                val stream = com.example.util.ExternalDocumentUriHelper.openInputStream(context, uriString)
+                if (stream == null) {
+                    null to "Não foi possível abrir o arquivo externo. Verifique se ele ainda existe ou re-vincule o caminho."
+                } else {
+                    stream.use { input ->
+                        when (docNote.resolvedDocumentType) {
+                            NoteDocumentType.PDF -> {
+                                when (val res = com.example.util.PdfDocumentEngine.extractMarkdown(context, input)) {
+                                    is com.example.util.PdfConversionResult.Success -> res.markdown to null
+                                    is com.example.util.PdfConversionResult.Error -> null to res.message
+                                }
+                            }
+                            NoteDocumentType.DOCX -> {
+                                val res = com.example.util.DocxDocumentEngine.convertToMarkdown(input) { bytes, ext ->
+                                    saveDocxExtractedImage(context, bytes, ext)
+                                }
+                                when (res) {
+                                    is com.example.util.DocxConversionResult.Success -> res.markdown to null
+                                    is com.example.util.DocxConversionResult.Error -> null to res.message
+                                }
+                            }
+                            NoteDocumentType.MARKDOWN -> docNote.content to null
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                null to (e.message ?: "Erro inesperado ao converter o documento.")
+            }
+
+            val extractedMd = markdownResult.first
+            val errorMsg = markdownResult.second
+            if (errorMsg != null || extractedMd == null) {
+                val finalErr = errorMsg ?: "Falha ao converter documento."
+                _userMessage.emit(finalErr)
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onError(finalErr) }
+                return@launch
+            }
+
+            val existingTitles = repository.getAllNotesSync()
+                .filter { !it.isExternalDocument }
+                .map { it.title.trim().lowercase() }
+                .toSet()
+
+            val baseTitle = docNote.title.ifBlank { "Documento Convertido" }
+            val finalTitle = if (existingTitles.contains(baseTitle.lowercase())) {
+                "$baseTitle (Nota)"
+            } else {
+                baseTitle
+            }
+            val finalContent = extractedMd.ifBlank { "# $finalTitle\n\n*(Documento sem texto extraível)*" }
+            val newUuid = java.util.UUID.randomUUID().toString()
+            val newNote = Note(
+                id = 0L,
+                uuid = newUuid,
+                title = finalTitle,
+                content = finalContent,
+                category = docNote.category.ifBlank { "Geral" },
+                iconEmoji = "📝",
+                isPinned = docNote.isPinned,
+                noteColor = docNote.noteColor,
+                documentType = NoteDocumentType.MARKDOWN.id,
+                externalUri = null,
+                updatedAt = System.currentTimeMillis()
+            )
+            val newId = repository.insertNote(newNote)
+            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                context = context,
+                title = finalTitle,
+                content = finalContent,
+                uuid = newUuid
+            )
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            val savedNote = newNote.copy(id = newId)
+            _userMessage.emit("Convertido para a nota '$finalTitle'!")
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                onConverted(savedNote)
+            }
+        }
+    }
+
+    private fun saveDocxExtractedImage(context: Context, bytes: ByteArray, ext: String): String? {
+        return try {
+            val dir = com.example.util.MediaStorageHelper.getCitraPicFolder(context)
+            val safeExt = ext.lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "gif") } ?: "jpg"
+            val destFile = File(dir, "citra_docx_${System.currentTimeMillis()}_${java.util.UUID.randomUUID().toString().take(6)}.$safeExt")
+            destFile.writeBytes(bytes)
+            destFile.absolutePath
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -1510,7 +1733,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.moveToTrash(note)
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
-            _userMessage.emit("Anotação movida para a Lixeira (30 dias).")
+            val msg = if (note.isExternalDocument) {
+                "Vínculo movido para a Lixeira (seu arquivo original permanece intacto)."
+            } else {
+                "Anotação movida para a Lixeira (30 dias)."
+            }
+            _userMessage.emit(msg)
         }
     }
 
@@ -1537,9 +1765,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun permanentlyDeleteNote(note: Note, context: Context? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = context ?: getApplication()
-            com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
+            if (note.isExternalDocument) {
+                val remaining = repository.getAllNotesSync().filter { it.id != note.id }
+                com.example.util.ExternalDocumentUriHelper.releasePersistableReadPermissionIfUnused(
+                    ctx,
+                    note.externalUri,
+                    remaining
+                )
+            } else {
+                com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
+            }
             repository.permanentlyDeleteNote(note)
-            _userMessage.emit("Anotação excluída definitivamente do Citra e dos arquivos do dispositivo.")
+            val msg = if (note.isExternalDocument) {
+                "Vínculo removido do Citra (arquivo original preservado)."
+            } else {
+                "Anotação excluída definitivamente do Citra e dos arquivos do dispositivo."
+            }
+            _userMessage.emit(msg)
         }
     }
 
@@ -1549,10 +1791,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (currentTrash.isEmpty()) return@launch
             val ctx = context ?: getApplication()
             currentTrash.forEach { note ->
-                com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
+                if (!note.isExternalDocument) {
+                    com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
+                }
                 repository.permanentlyDeleteNote(note)
             }
-            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} anotações excluídas do Citra e do disco).")
+            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} itens removidos).")
         }
     }
 

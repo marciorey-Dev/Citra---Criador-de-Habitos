@@ -180,6 +180,8 @@ object BackupManager {
                 put("backgroundBrightness", n.backgroundBrightness)
                 put("isDeleted", n.isDeleted)
                 put("deletedAt", n.deletedAt ?: JSONObject.NULL)
+                put("documentType", n.documentType)
+                put("externalUri", n.externalUri ?: JSONObject.NULL)
                 put("updatedAt", n.updatedAt)
             }
             notesArray.put(obj)
@@ -467,6 +469,8 @@ object BackupManager {
                         backgroundBrightness = obj.optDouble("backgroundBrightness", 0.6).toFloat(),
                         isDeleted = obj.optBoolean("isDeleted", false),
                         deletedAt = if (obj.isNull("deletedAt")) null else obj.optLong("deletedAt"),
+                        documentType = obj.optString("documentType", NoteDocumentType.MARKDOWN.id),
+                        externalUri = if (obj.isNull("externalUri")) null else obj.optString("externalUri").takeIf { it.isNotBlank() },
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                     )
                 )
@@ -668,6 +672,8 @@ object BackupManager {
                 put("backgroundBrightness", n.backgroundBrightness)
                 put("isDeleted", n.isDeleted)
                 put("deletedAt", n.deletedAt ?: JSONObject.NULL)
+                put("documentType", n.documentType)
+                put("externalUri", n.externalUri ?: JSONObject.NULL)
                 put("updatedAt", n.updatedAt)
             }
             arr.put(obj)
@@ -707,6 +713,8 @@ object BackupManager {
                         backgroundBrightness = obj.optDouble("backgroundBrightness", 0.5).toFloat(),
                         isDeleted = obj.optBoolean("isDeleted", false),
                         deletedAt = if (obj.isNull("deletedAt")) null else obj.optLong("deletedAt"),
+                        documentType = obj.optString("documentType", NoteDocumentType.MARKDOWN.id),
+                        externalUri = if (obj.isNull("externalUri")) null else obj.optString("externalUri").takeIf { it.isNotBlank() },
                         updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
                     )
                 )

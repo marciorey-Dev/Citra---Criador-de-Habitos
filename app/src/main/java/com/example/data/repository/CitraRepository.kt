@@ -204,16 +204,18 @@ class CitraRepository(
                         uuid = noteUuid
                     )
                     noteDao.updateNote(merged)
-                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                        context = context,
-                        title = merged.title,
-                        content = merged.content,
-                        uuid = merged.uuid,
-                        oldTitle = existing.title
-                    )
+                    if (!merged.isExternalDocument) {
+                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                            context = context,
+                            title = merged.title,
+                            content = merged.content,
+                            uuid = merged.uuid,
+                            oldTitle = existing.title
+                        )
+                    }
                 }
             } else {
-                val existingByTitle = noteDao.getNoteByTitle(incomingNote.title)
+                val existingByTitle = if (incomingNote.isExternalDocument) null else noteDao.getNoteByTitle(incomingNote.title)?.takeIf { !it.isExternalDocument }
                 if (existingByTitle != null) {
                     val merged = incomingNote.copy(
                         id = existingByTitle.id,
@@ -229,12 +231,14 @@ class CitraRepository(
                     )
                 } else {
                     noteDao.insertNote(incomingNote.copy(id = 0L, uuid = noteUuid))
-                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                        context = context,
-                        title = incomingNote.title,
-                        content = incomingNote.content,
-                        uuid = noteUuid
-                    )
+                    if (!incomingNote.isExternalDocument) {
+                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                            context = context,
+                            title = incomingNote.title,
+                            content = incomingNote.content,
+                            uuid = noteUuid
+                        )
+                    }
                     count++
                 }
             }
@@ -260,9 +264,15 @@ class CitraRepository(
             }
         }
 
-        // 2. Deduplicate by identical normalized title & content (from earlier duplication loops)
+        // 2. Deduplicate by identical normalized title & content (skip external links with shared empty content unless same externalUri)
         val refreshed = noteDao.getAllNotesSync()
-        val byContent = refreshed.groupBy { "${it.title.trim().lowercase()}:::${it.content.trim()}" }
+        val byContent = refreshed.groupBy {
+            if (it.isExternalDocument) {
+                "${it.documentType}:::${it.externalUri.orEmpty().trim()}"
+            } else {
+                "${it.title.trim().lowercase()}:::${it.content.trim()}"
+            }
+        }
         byContent.forEach { (_, dupes) ->
             if (dupes.size > 1) {
                 val winner = dupes.maxByOrNull { it.updatedAt } ?: dupes.first()

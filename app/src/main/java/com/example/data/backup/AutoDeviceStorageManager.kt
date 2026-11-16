@@ -105,11 +105,15 @@ object AutoDeviceStorageManager {
                     put("backgroundBrightness", n.backgroundBrightness)
                     put("isDeleted", n.isDeleted)
                     put("deletedAt", n.deletedAt ?: JSONObject.NULL)
+                    put("documentType", n.documentType)
+                    put("externalUri", n.externalUri ?: JSONObject.NULL)
                     put("updatedAt", n.updatedAt)
 
-                    val attachments = com.example.util.MediaStorageHelper.extractMediaAttachmentsForNote(context, n.content)
-                    if (attachments.length() > 0) {
-                        put("attachments", attachments)
+                    if (!n.isExternalDocument) {
+                        val attachments = com.example.util.MediaStorageHelper.extractMediaAttachmentsForNote(context, n.content)
+                        if (attachments.length() > 0) {
+                            put("attachments", attachments)
+                        }
                     }
                 })
             }
@@ -248,6 +252,8 @@ object AutoDeviceStorageManager {
                         backgroundBrightness = o.optDouble("backgroundBrightness", 0.5).toFloat(),
                         isDeleted = o.optBoolean("isDeleted", false),
                         deletedAt = if (o.isNull("deletedAt")) null else o.optLong("deletedAt"),
+                        documentType = o.optString("documentType", NoteDocumentType.MARKDOWN.id),
+                        externalUri = if (o.isNull("externalUri")) null else o.optString("externalUri").takeIf { it.isNotBlank() },
                         updatedAt = o.optLong("updatedAt", System.currentTimeMillis())
                     )
 

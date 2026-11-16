@@ -43,14 +43,23 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.data.model.Note
+import com.example.data.model.NoteDocumentType
 import com.example.data.model.NoteVersion
 import com.example.data.model.TaskPriority
+import com.example.data.model.isDocxDocument
+import com.example.data.model.isExternalDocument
+import com.example.data.model.isPdfDocument
 import com.example.data.model.isReadyForMainList
+import com.example.data.model.resolvedDocumentType
 import com.example.ui.MainViewModel
 import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.CategoryNoteStack
+import com.example.ui.screens.organization.notes.ExternalDocxReaderScreen
+import com.example.ui.screens.organization.notes.ExternalPdfReaderScreen
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
+import com.example.ui.screens.organization.notes.NoteCategoryPickerDialog
+import com.example.ui.screens.organization.notes.NoteDocumentFilter
 import com.example.ui.screens.organization.notes.NoteEditorMode
 import com.example.ui.screens.organization.notes.NoteLayoutMode
 import com.example.ui.screens.organization.notes.NoteReadingPreview
@@ -59,10 +68,12 @@ import com.example.ui.screens.organization.notes.PaperNoteColors
 import com.example.ui.screens.organization.notes.PaperNotePalette
 import com.example.ui.screens.organization.notes.PaperNoteSurface
 import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
+import com.example.ui.screens.organization.notes.filterNotesByDocumentType
 import com.example.ui.screens.organization.notes.groupNotesByCategory
 import com.example.ui.screens.organization.notes.sortNotes
 import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
+import com.example.util.ExternalDocumentUriHelper
 import com.example.util.NoteExportHelper
 import java.text.SimpleDateFormat
 import java.util.*
@@ -96,10 +107,16 @@ fun NotesSubTab(
     val trashNotes by viewModel.trashNotes.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val selectedCategoryFilter by viewModel.selectedNoteCategoryFilter.collectAsState()
+    val selectedDocumentFilter by viewModel.selectedNoteDocumentFilter.collectAsState()
     val openCreateTrigger by viewModel.openCreateNoteTrigger.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var activeNoteToEdit by remember { mutableStateOf<Note?>(null) }
+    var activePdfToRead by remember { mutableStateOf<Note?>(null) }
+    var activeDocxToRead by remember { mutableStateOf<Note?>(null) }
+    var isConvertingExternalDoc by remember { mutableStateOf(false) }
+    var noteForCategoryPicker by remember { mutableStateOf<Note?>(null) }
+    var noteAwaitingRelink by remember { mutableStateOf<Note?>(null) }
     var isCreatingNew by remember { mutableStateOf(false) }
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteForSubmenu by remember { mutableStateOf<Note?>(null) }
@@ -113,11 +130,63 @@ fun NotesSubTab(
     var showSortMenu by remember { mutableStateOf(false) }
     val expandedCategoryStacks = remember { mutableStateMapOf<String, Boolean>() }
 
+    val openNoteItem: (Note) -> Unit = { target ->
+        when (target.resolvedDocumentType) {
+            NoteDocumentType.PDF -> {
+                activeNoteToEdit = null
+                isCreatingNew = false
+                activeDocxToRead = null
+                activePdfToRead = target
+            }
+            NoteDocumentType.DOCX -> {
+                activeNoteToEdit = null
+                isCreatingNew = false
+                activePdfToRead = null
+                activeDocxToRead = target
+            }
+            NoteDocumentType.MARKDOWN -> {
+                activePdfToRead = null
+                activeDocxToRead = null
+                activeNoteToEdit = target
+                isCreatingNew = false
+            }
+        }
+    }
+
     val importMultipleNotesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
+        contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            viewModel.importMultipleMarkdownFiles(uris, context)
+            viewModel.importMultipleMarkdownFiles(
+                uris = uris,
+                context = context,
+                preferredCategory = selectedCategoryFilter
+            )
+        }
+    }
+
+    val linkExternalDocsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importMultipleMarkdownFiles(
+                uris = uris,
+                context = context,
+                preferredCategory = selectedCategoryFilter
+            )
+        }
+    }
+
+    val relinkExternalDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        val target = noteAwaitingRelink
+        noteAwaitingRelink = null
+        if (uri != null && target != null) {
+            viewModel.relinkExternalDocumentUri(target, uri, context) { updated ->
+                if (activePdfToRead?.id == updated.id) activePdfToRead = updated
+                if (activeDocxToRead?.id == updated.id) activeDocxToRead = updated
+            }
         }
     }
 
@@ -126,32 +195,39 @@ fun NotesSubTab(
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
         if (openCreateTrigger) {
+            activePdfToRead = null
+            activeDocxToRead = null
             isCreatingNew = true
             viewModel.resetCreateNoteTrigger()
         }
     }
 
-    // Respond to notification / social click to open specific note
+    // Respond to notification / social click to open specific note or linked document
     LaunchedEffect(noteToOpen) {
         noteToOpen?.let { note ->
-            activeNoteToEdit = note
-            isCreatingNew = false
+            openNoteItem(note)
             viewModel.clearNoteToOpen()
         }
     }
 
     // Filter notes by search query AND category AND 72h rule
-    val filteredNotes = remember(notes, searchQuery, selectedCategoryFilter) {
+    val categoryAndSearchNotes = remember(notes, searchQuery, selectedCategoryFilter) {
         notes.filter { note ->
             val isReady = note.isReadyForMainList()
             val matchesCategory = (selectedCategoryFilter == "Todas" || note.category.equals(selectedCategoryFilter, ignoreCase = true))
             val matchesSearch = if (searchQuery.isBlank()) true else {
                 note.title.contains(searchQuery, ignoreCase = true) ||
                     note.content.contains(searchQuery, ignoreCase = true) ||
-                    note.category.contains(searchQuery, ignoreCase = true)
+                    note.category.contains(searchQuery, ignoreCase = true) ||
+                    (note.externalUri?.contains(searchQuery, ignoreCase = true) == true)
             }
             isReady && matchesCategory && matchesSearch
         }
+    }
+
+    // Apply Document Type filter (ALL, NOTES, PDF, DOCX)
+    val filteredNotes = remember(categoryAndSearchNotes, selectedDocumentFilter) {
+        filterNotesByDocumentType(categoryAndSearchNotes, selectedDocumentFilter)
     }
 
     // Sorted notes: Pinned notes ALWAYS stay at top, combined with primary sort + secondary asc/desc
@@ -174,15 +250,110 @@ fun NotesSubTab(
 
     val pomodoroState by viewModel.pomodoroState.collectAsState()
     val isEditingNote = isCreatingNew || activeNoteToEdit != null
+    val isFullScreenOverlayOpen = isEditingNote || activePdfToRead != null || activeDocxToRead != null
 
-    LaunchedEffect(isEditingNote) {
-        viewModel.setNoteEditorOpen(isEditingNote)
+    LaunchedEffect(isFullScreenOverlayOpen) {
+        viewModel.setNoteEditorOpen(isFullScreenOverlayOpen)
     }
 
     DisposableEffect(Unit) {
         onDispose {
             viewModel.setNoteEditorOpen(false)
         }
+    }
+
+    // Full-screen Read-Only PDF Reader
+    activePdfToRead?.let { pdfNote ->
+        ExternalPdfReaderScreen(
+            note = pdfNote,
+            categories = categories,
+            isConverting = isConvertingExternalDoc,
+            onClose = {
+                activePdfToRead = null
+                viewModel.setNoteEditorOpen(false)
+            },
+            onChangeCategory = { newCat ->
+                viewModel.updateNoteCategory(pdfNote, newCat) { updated ->
+                    activePdfToRead = updated
+                }
+            },
+            onCreateCategory = { name, emoji -> viewModel.addCustomCategory(name, emoji) },
+            onRelinkClick = {
+                noteAwaitingRelink = pdfNote
+                relinkExternalDocLauncher.launch(arrayOf("application/pdf"))
+            },
+            onRemoveLink = {
+                activePdfToRead = null
+                noteToDelete = pdfNote
+            },
+            onConvertToNote = {
+                if (!isConvertingExternalDoc) {
+                    isConvertingExternalDoc = true
+                    viewModel.convertExternalDocumentToEditableNote(
+                        docNote = pdfNote,
+                        context = context,
+                        onConverted = { convertedNote ->
+                            isConvertingExternalDoc = false
+                            activePdfToRead = null
+                            activeNoteToEdit = convertedNote
+                            isCreatingNew = false
+                        },
+                        onError = {
+                            isConvertingExternalDoc = false
+                        }
+                    )
+                }
+            }
+        )
+        return
+    }
+
+    // Full-screen Read-Only .docx Reader
+    activeDocxToRead?.let { docxNote ->
+        ExternalDocxReaderScreen(
+            note = docxNote,
+            categories = categories,
+            isConverting = isConvertingExternalDoc,
+            onClose = {
+                activeDocxToRead = null
+                viewModel.setNoteEditorOpen(false)
+            },
+            onChangeCategory = { newCat ->
+                viewModel.updateNoteCategory(docxNote, newCat) { updated ->
+                    activeDocxToRead = updated
+                }
+            },
+            onCreateCategory = { name, emoji -> viewModel.addCustomCategory(name, emoji) },
+            onRelinkClick = {
+                noteAwaitingRelink = docxNote
+                relinkExternalDocLauncher.launch(
+                    arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                )
+            },
+            onRemoveLink = {
+                activeDocxToRead = null
+                noteToDelete = docxNote
+            },
+            onConvertToNote = {
+                if (!isConvertingExternalDoc) {
+                    isConvertingExternalDoc = true
+                    viewModel.convertExternalDocumentToEditableNote(
+                        docNote = docxNote,
+                        context = context,
+                        onConverted = { convertedNote ->
+                            isConvertingExternalDoc = false
+                            activeDocxToRead = null
+                            activeNoteToEdit = convertedNote
+                            isCreatingNew = false
+                        },
+                        onError = {
+                            isConvertingExternalDoc = false
+                        }
+                    )
+                }
+            }
+        )
+        return
     }
 
     val allTasks by viewModel.tasks.collectAsState()
@@ -314,8 +485,7 @@ fun NotesSubTab(
                     }
                 } else null,
                 onOpenLinkedNote = { note ->
-                    activeNoteToEdit = note
-                    isCreatingNew = false
+                    openNoteItem(note)
                 },
                 initialMode = NoteEditorMode.LIVE_PREVIEW,
                 onModeChanged = null,
@@ -498,20 +668,22 @@ fun NotesSubTab(
                     }
                 }
 
-                // Import Multiple Notes Circular Button
+                // Import Notes & Link PDF/.docx Circular Button
                 Surface(
                     shape = CircleShape,
                     color = surfaceContainerLow,
                     modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                        .clickable { importMultipleNotesLauncher.launch("*/*") }
+                        .clickable {
+                            importMultipleNotesLauncher.launch(ExternalDocumentUriHelper.ALL_IMPORT_AND_LINK_MIME_TYPES)
+                        }
                         .testTag("notes_import_multiple_btn")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.FileOpen,
-                            contentDescription = "Importar Ficheiros Suportados (.md, .txt, .json, .html, .tex)",
+                            contentDescription = "Importar notas ou vincular PDF / .docx",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
@@ -632,6 +804,108 @@ fun NotesSubTab(
                                 text = "Pasta",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 2b. Document Type Filter Strip (Todos, Notas, PDFs, .docx) + Quick Link Button
+            val allDocCount = categoryAndSearchNotes.size
+            val mdDocCount = categoryAndSearchNotes.count { it.resolvedDocumentType == NoteDocumentType.MARKDOWN }
+            val pdfDocCount = categoryAndSearchNotes.count { it.resolvedDocumentType == NoteDocumentType.PDF }
+            val docxDocCount = categoryAndSearchNotes.count { it.resolvedDocumentType == NoteDocumentType.DOCX }
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("notes_doc_filter_bar")
+            ) {
+                items(NoteDocumentFilter.entries) { filter ->
+                    val count = when (filter) {
+                        NoteDocumentFilter.ALL -> allDocCount
+                        NoteDocumentFilter.NOTES -> mdDocCount
+                        NoteDocumentFilter.PDF -> pdfDocCount
+                        NoteDocumentFilter.DOCX -> docxDocCount
+                    }
+                    val isSelected = selectedDocumentFilter == filter
+                    val chipColor = when {
+                        isSelected && filter == NoteDocumentFilter.PDF -> Color(0xFFDC2626)
+                        isSelected && filter == NoteDocumentFilter.DOCX -> Color(0xFF2563EB)
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        else -> surfaceContainerLow
+                    }
+                    val contentCol = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                    val chipIcon = when (filter) {
+                        NoteDocumentFilter.ALL -> Icons.Default.Apps
+                        NoteDocumentFilter.NOTES -> Icons.Default.Description
+                        NoteDocumentFilter.PDF -> Icons.Default.PictureAsPdf
+                        NoteDocumentFilter.DOCX -> Icons.Default.Article
+                    }
+                    Surface(
+                        shape = CircleShape,
+                        color = chipColor,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { viewModel.setSelectedNoteDocumentFilter(filter) }
+                            .testTag("notes_doc_filter_${filter.name.lowercase()}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = chipIcon,
+                                contentDescription = null,
+                                tint = contentCol,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = filter.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                color = contentCol
+                            )
+                            Text(
+                                text = "$count",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = contentCol.copy(alpha = if (isSelected) 0.9f else 0.65f)
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable {
+                                linkExternalDocsLauncher.launch(ExternalDocumentUriHelper.DOCUMENT_PICKER_MIME_TYPES)
+                            }
+                            .testTag("notes_link_external_doc_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AttachFile,
+                                contentDescription = "Vincular PDF ou .docx",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "+ PDF / .docx",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                     }
@@ -954,7 +1228,7 @@ fun NotesSubTab(
                         items(sortedNotes, key = { it.id }) { note ->
                             SquareNoteCard(
                                 note = note,
-                                onClick = { activeNoteToEdit = note },
+                                onClick = { openNoteItem(note) },
                                 onLongClick = { noteForSubmenu = note },
                                 onTogglePin = { viewModel.togglePinNote(note) },
                                 onDelete = { noteToDelete = note }
@@ -990,7 +1264,7 @@ fun NotesSubTab(
                         items(sortedNotes, key = { it.id }) { note ->
                             SmallSquareNoteCard(
                                 note = note,
-                                onClick = { activeNoteToEdit = note },
+                                onClick = { openNoteItem(note) },
                                 onLongClick = { noteForSubmenu = note },
                                 onTogglePin = { viewModel.togglePinNote(note) },
                                 onDelete = { noteToDelete = note }
@@ -1023,7 +1297,7 @@ fun NotesSubTab(
                         items(sortedNotes, key = { it.id }) { note ->
                             ListNoteCard(
                                 note = note,
-                                onClick = { activeNoteToEdit = note },
+                                onClick = { openNoteItem(note) },
                                 onLongClick = { noteForSubmenu = note },
                                 onTogglePin = { viewModel.togglePinNote(note) },
                                 onDelete = { noteToDelete = note }
@@ -1127,7 +1401,7 @@ fun NotesSubTab(
                                 onToggleExpand = {
                                     expandedCategoryStacks[stackKey] = !(expandedCategoryStacks[stackKey] ?: false)
                                 },
-                                onNoteClick = { activeNoteToEdit = it },
+                                onNoteClick = { openNoteItem(it) },
                                 onNoteLongClick = { noteForSubmenu = it },
                                 onTogglePin = { viewModel.togglePinNote(it) },
                                 onDeleteNote = { noteToDelete = it }
@@ -1176,14 +1450,35 @@ fun NotesSubTab(
         )
     }
 
-    // Confirmation dialog before deleting note
+    // Category Picker Dialog for notes, PDFs, and .docx documents
+    noteForCategoryPicker?.let { target ->
+        NoteCategoryPickerDialog(
+            currentCategory = target.category,
+            categories = categories,
+            onSelectCategory = { newCategory ->
+                viewModel.updateNoteCategory(target, newCategory)
+            },
+            onCreateCategory = { name, emoji ->
+                viewModel.addCustomCategory(name, emoji)
+            },
+            onDismiss = { noteForCategoryPicker = null }
+        )
+    }
+
+    // Confirmation dialog before deleting note or unlinking external document
     if (noteToDelete != null) {
+        val target = noteToDelete!!
+        val isExternal = target.isExternalDocument
         ConfirmDeleteDialog(
-            title = "Mover para a Lixeira",
-            message = "Deseja mover a anotação '${noteToDelete!!.title}' para a lixeira? Ela ficará disponível por 30 dias para restauração.",
-            confirmButtonText = "Mover para Lixeira",
+            title = if (isExternal) "Remover Vínculo" else "Mover para a Lixeira",
+            message = if (isExternal) {
+                "Deseja remover o vínculo com '${target.title}' da lista? O arquivo original no seu aparelho não será apagado."
+            } else {
+                "Deseja mover a anotação '${target.title}' para a lixeira? Ela ficará disponível por 30 dias para restauração."
+            },
+            confirmButtonText = if (isExternal) "Mover Vínculo" else "Mover para Lixeira",
             onConfirm = {
-                viewModel.moveNoteToTrash(noteToDelete!!)
+                viewModel.moveNoteToTrash(target)
                 noteToDelete = null
             },
             onDismiss = { noteToDelete = null }
@@ -1197,6 +1492,33 @@ fun NotesSubTab(
             onDismiss = { noteForSubmenu = null },
             onTogglePin = { viewModel.togglePinNote(note) },
             onDelete = { noteToDelete = note },
+            onChangeCategory = { noteForCategoryPicker = note },
+            onOpenReadOnly = if (note.isExternalDocument) {
+                { openNoteItem(note) }
+            } else null,
+            onConvertToNote = if (note.isExternalDocument) {
+                {
+                    viewModel.convertExternalDocumentToEditableNote(
+                        docNote = note,
+                        context = context,
+                        onConverted = { converted ->
+                            activeNoteToEdit = converted
+                            isCreatingNew = false
+                        }
+                    )
+                }
+            } else null,
+            onRelinkExternal = if (note.isExternalDocument) {
+                {
+                    noteAwaitingRelink = note
+                    val mime = if (note.isPdfDocument) {
+                        arrayOf("application/pdf")
+                    } else {
+                        arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                    }
+                    relinkExternalDocLauncher.launch(mime)
+                }
+            } else null,
             onDuplicate = {
                 viewModel.saveNote(
                     id = 0L,
@@ -1207,7 +1529,8 @@ fun NotesSubTab(
                     isPinned = false,
                     backgroundImageUri = note.backgroundImageUri,
                     backgroundBlur = note.backgroundBlur,
-                    backgroundBrightness = note.backgroundBrightness
+                    backgroundBrightness = note.backgroundBrightness,
+                    noteColor = note.noteColor
                 )
             }
         )
@@ -1482,8 +1805,8 @@ fun SquareNoteCard(
                     }
                 }
 
-                // Embedded Image Preview (86.dp height)
-                if (previewImageUri != null) {
+                // Embedded Image Preview (86.dp height) for regular notes
+                if (previewImageUri != null && !note.isExternalDocument) {
                     AsyncImage(
                         model = previewImageUri,
                         contentDescription = note.title,
@@ -1493,6 +1816,47 @@ fun SquareNoteCard(
                             .height(86.dp)
                             .clip(RoundedCornerShape(12.dp))
                     )
+                }
+
+                // External PDF / DOCX hero pill badge inside SquareNoteCard
+                if (note.isExternalDocument) {
+                    val isPdf = note.isPdfDocument
+                    val docAccent = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = docAccent.copy(alpha = 0.12f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, docAccent.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
+                                contentDescription = if (isPdf) "Documento PDF" else "Documento Word",
+                                tint = docAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (isPdf) "PDF · Somente leitura" else ".DOCX · Somente leitura",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = docAccent
+                                )
+                                Text(
+                                    text = ExternalDocumentUriHelper.formatReadablePath(note.externalUri),
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Note Title - high contrast according to app theme
@@ -1508,7 +1872,7 @@ fun SquareNoteCard(
                 )
 
                 // Note Reading-Mode Preview (styled headings, lists, checklists, quotes, inline formatting)
-                if (note.content.isNotBlank()) {
+                if (!note.isExternalDocument && note.content.isNotBlank()) {
                     NoteReadingPreview(
                         content = note.content,
                         maxElements = if (previewImageUri != null) 2 else 4,
@@ -1518,6 +1882,15 @@ fun SquareNoteCard(
                         secondaryTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         accentColor = paperColors.accentColor,
                         modifier = Modifier.fillMaxWidth()
+                    )
+                } else if (note.isExternalDocument) {
+                    Text(
+                        text = "Toque para ler ou converter para nota editável",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1647,13 +2020,34 @@ fun SmallSquareNoteCard(
                     )
                 }
 
-                if (note.isPinned) {
-                    Icon(
-                        imageVector = Icons.Filled.PushPin,
-                        contentDescription = "Fixada",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(13.dp)
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    if (note.isExternalDocument) {
+                        val isPdf = note.isPdfDocument
+                        val docColor = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = docColor.copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = if (isPdf) "PDF" else "DOCX",
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = docColor,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    if (note.isPinned) {
+                        Icon(
+                            imageVector = Icons.Filled.PushPin,
+                            contentDescription = "Fixada",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                 }
             }
 
@@ -1855,17 +2249,56 @@ fun ListNoteCard(
                     )
                 }
 
+                if (note.isExternalDocument) {
+                    val isPdf = note.isPdfDocument
+                    val docColor = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = docColor.copy(alpha = 0.16f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
+                                contentDescription = null,
+                                tint = docColor,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = if (isPdf) "PDF" else "DOCX",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = docColor
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.width(10.dp))
 
-                Text(
-                    text = note.title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = note.title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (note.isExternalDocument) {
+                        Text(
+                            text = "Somente leitura · ${ExternalDocumentUriHelper.formatReadablePath(note.externalUri)}",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2124,19 +2557,32 @@ fun NoteSubmenuDialog(
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
-    onDuplicate: () -> Unit
+    onDuplicate: () -> Unit,
+    onChangeCategory: (() -> Unit)? = null,
+    onOpenReadOnly: (() -> Unit)? = null,
+    onConvertToNote: (() -> Unit)? = null,
+    onRelinkExternal: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val primaryColor = MaterialTheme.colorScheme.primary
+    val isExternal = note.isExternalDocument
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.Default.Description,
+                    imageVector = when {
+                        note.isPdfDocument -> Icons.Default.PictureAsPdf
+                        note.isDocxDocument -> Icons.Default.Article
+                        else -> Icons.Default.Description
+                    },
                     contentDescription = null,
-                    tint = primaryColor,
+                    tint = when {
+                        note.isPdfDocument -> Color(0xFFDC2626)
+                        note.isDocxDocument -> Color(0xFF2563EB)
+                        else -> primaryColor
+                    },
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -2156,6 +2602,89 @@ fun NoteSubmenuDialog(
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                if (isExternal && onOpenReadOnly != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onOpenReadOnly()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = null,
+                                tint = primaryColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Abrir em Modo Leitura", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                if (isExternal && onConvertToNote != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = primaryColor.copy(alpha = 0.08f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onConvertToNote()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 6.dp)
+                            .testTag("submenu_convert_to_note")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.EditNote,
+                                contentDescription = null,
+                                tint = primaryColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Converter para Nota Editável (.md)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = primaryColor
+                            )
+                        }
+                    }
+                }
+
+                // Change Category (works for Markdown notes, PDFs, and .docx documents)
+                if (onChangeCategory != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onChangeCategory()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                            .testTag("submenu_change_category")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Label,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Alterar Categoria (${note.category})", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
                 // Pin / Unpin
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -2176,160 +2705,189 @@ fun NoteSubmenuDialog(
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(if (note.isPinned) "Desafixar nota" else "Fixar nota no topo", style = MaterialTheme.typography.bodyMedium)
+                        Text(if (note.isPinned) "Desafixar do topo" else "Fixar no topo", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+
+                if (isExternal && onRelinkExternal != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onRelinkExternal()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.FolderOpen,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Atualizar Caminho do Arquivo", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
+                if (!isExternal) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
+                    // Export Word
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val uri = NoteExportHelper.exportToDocx(context, note.title, note.category, blocks, primaryColor.toArgb())
+                                NoteExportHelper.shareUri(context, uri, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Exportar Nota em Word (.docx)")
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Article, contentDescription = null, tint = primaryColor, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Exportar em Word (.docx)", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+
+                    // Export PDF
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val uri = NoteExportHelper.exportToPdf(context, note.title, note.category, blocks, primaryColor.toArgb())
+                                NoteExportHelper.shareUri(context, uri, "application/pdf", "Exportar Nota em PDF")
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Exportar em PDF (.pdf)", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+
+                    // Export Markdown
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val uri = NoteExportHelper.exportToMdFile(context, note.title, blocks)
+                                NoteExportHelper.shareUri(context, uri, "text/markdown", "Exportar Nota (.md)")
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Exportar em Markdown (.md)", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+
+                    // Export TXT
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val uri = NoteExportHelper.exportToTxtFile(context, note.title, note.category, blocks)
+                                NoteExportHelper.shareUri(context, uri, "text/plain", "Exportar Nota (.txt)")
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Exportar em Texto Puro (.txt)", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+
+                    // Export HTML
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val uri = NoteExportHelper.exportToHtmlFile(context, note.title, note.category, blocks, primaryColor.toArgb())
+                                NoteExportHelper.shareUri(context, uri, "text/html", "Exportar Página Web (.html)")
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Html, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Exportar Página Web (.html)", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+
+                    // Compartilhar como Imagem
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val uri = NoteExportHelper.shareAsImage(context, note.title, note.category, blocks, primaryColor.toArgb())
+                                NoteExportHelper.shareUri(context, uri, "image/png", "Compartilhar Imagem da Nota")
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Photo, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Compartilhar como Imagem (Card)", style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
                 }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
-                // Export Word
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            val uri = NoteExportHelper.exportToDocx(context, note.title, note.category, blocks, primaryColor.toArgb())
-                            NoteExportHelper.shareUri(context, uri, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Exportar Nota em Word (.docx)")
+                if (!isExternal) {
+                    // Duplicate note
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDuplicate()
+                                onDismiss()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Duplicar Nota", style = MaterialTheme.typography.bodyMedium)
                         }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Article, contentDescription = null, tint = primaryColor, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Exportar em Word (.docx)", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
 
-                // Export PDF
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            val uri = NoteExportHelper.exportToPdf(context, note.title, note.category, blocks, primaryColor.toArgb())
-                            NoteExportHelper.shareUri(context, uri, "application/pdf", "Exportar Nota em PDF")
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Exportar em PDF (.pdf)", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                // Export Markdown
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            val uri = NoteExportHelper.exportToMdFile(context, note.title, blocks)
-                            NoteExportHelper.shareUri(context, uri, "text/markdown", "Exportar Nota (.md)")
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Exportar em Markdown (.md)", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                // Export TXT
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            val uri = NoteExportHelper.exportToTxtFile(context, note.title, note.category, blocks)
-                            NoteExportHelper.shareUri(context, uri, "text/plain", "Exportar Nota (.txt)")
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Exportar em Texto Puro (.txt)", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                // Export HTML
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            val uri = NoteExportHelper.exportToHtmlFile(context, note.title, note.category, blocks, primaryColor.toArgb())
-                            NoteExportHelper.shareUri(context, uri, "text/html", "Exportar Página Web (.html)")
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Html, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Exportar Página Web (.html)", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                // Compartilhar como Imagem
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
-                            val uri = NoteExportHelper.shareAsImage(context, note.title, note.category, blocks, primaryColor.toArgb())
-                            NoteExportHelper.shareUri(context, uri, "image/png", "Compartilhar Imagem da Nota")
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Photo, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Compartilhar como Imagem (Card)", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-                // Duplicate note
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color.Transparent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDuplicate()
-                            onDismiss()
-                        }
-                        .padding(vertical = 8.dp, horizontal = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Duplicar Nota", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-
-                // Move to trash
+                // Move to trash (or remove link)
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = Color.Transparent,
@@ -2344,7 +2902,11 @@ fun NoteSubmenuDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Mover para a Lixeira", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = if (isExternal) "Remover Vínculo (Lixeira)" else "Mover para a Lixeira",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
             }

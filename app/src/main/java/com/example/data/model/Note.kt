@@ -3,6 +3,18 @@ package com.example.data.model
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+enum class NoteDocumentType(val id: String, val label: String) {
+    MARKDOWN("MARKDOWN", "Nota"),
+    PDF("PDF", "PDF"),
+    DOCX("DOCX", "Word (.docx)");
+
+    companion object {
+        fun fromId(id: String?): NoteDocumentType {
+            return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: MARKDOWN
+        }
+    }
+}
+
 @Entity(tableName = "notes")
 data class Note(
     @PrimaryKey(autoGenerate = true)
@@ -21,8 +33,22 @@ data class Note(
     val deletedAt: Long? = null,
     val isArchived: Boolean = false,
     val noteColor: String? = null,
+    val documentType: String = NoteDocumentType.MARKDOWN.id,
+    val externalUri: String? = null,
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+val Note.resolvedDocumentType: NoteDocumentType
+    get() = NoteDocumentType.fromId(documentType)
+
+val Note.isExternalDocument: Boolean
+    get() = resolvedDocumentType != NoteDocumentType.MARKDOWN
+
+val Note.isPdfDocument: Boolean
+    get() = resolvedDocumentType == NoteDocumentType.PDF
+
+val Note.isDocxDocument: Boolean
+    get() = resolvedDocumentType == NoteDocumentType.DOCX
 
 fun Note.isReadyForMainList(now: Long = System.currentTimeMillis()): Boolean {
     val dateStr = associatedDate ?: return true

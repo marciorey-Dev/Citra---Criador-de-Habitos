@@ -32,13 +32,23 @@ class CitraNotePreviewWidgetProvider : AppWidgetProvider() {
                     val views = RemoteViews(context.packageName, R.layout.widget_note_preview)
 
                     if (targetNote != null) {
+                        val docType = com.example.data.model.NoteDocumentType.fromId(targetNote.documentType)
                         val isPinned = targetNote.isPinned
-                        val headerLabel = if (isPinned) "📌 Nota Fixada" else "📝 Nota Recente"
+                        val headerLabel = when {
+                            isPinned -> "📌 Item Fixado"
+                            docType == com.example.data.model.NoteDocumentType.PDF -> "📄 PDF Externo"
+                            docType == com.example.data.model.NoteDocumentType.DOCX -> "📘 Word (.docx) Externo"
+                            else -> "📝 Nota Recente"
+                        }
                         views.setTextViewText(R.id.widget_note_header_title, headerLabel)
                         views.setTextViewText(R.id.widget_note_category_chip, targetNote.category.ifBlank { "Geral" })
                         views.setTextViewText(R.id.widget_note_title, targetNote.title.ifBlank { "Sem título" })
 
-                        val cleanBody = CitraWidgetHelper.cleanMarkdown(targetNote.content)
+                        val cleanBody = when (docType) {
+                            com.example.data.model.NoteDocumentType.PDF -> "Documento PDF externo (somente leitura no Citra). Toque para abrir ou converter em nota."
+                            com.example.data.model.NoteDocumentType.DOCX -> "Documento Word (.docx) externo (somente leitura no Citra). Toque para abrir ou converter em nota."
+                            else -> CitraWidgetHelper.cleanMarkdown(targetNote.content)
+                        }
                         views.setTextViewText(
                             R.id.widget_note_body,
                             cleanBody.ifBlank { "Nota vazia. Toque para editar..." }

@@ -1,6 +1,33 @@
 package com.example.ui.screens.organization.notes
 
 import com.example.data.model.Note
+import com.example.data.model.NoteDocumentType
+import com.example.data.model.resolvedDocumentType
+
+enum class NoteDocumentFilter(val label: String) {
+    ALL("Todos"),
+    NOTES("Notas"),
+    PDF("PDFs"),
+    DOCX(".docx");
+
+    companion object {
+        fun fromName(name: String?): NoteDocumentFilter {
+            return entries.firstOrNull { it.name == name } ?: ALL
+        }
+    }
+}
+
+fun filterNotesByDocumentType(
+    notes: List<Note>,
+    filter: NoteDocumentFilter
+): List<Note> {
+    return when (filter) {
+        NoteDocumentFilter.ALL -> notes
+        NoteDocumentFilter.NOTES -> notes.filter { it.resolvedDocumentType == NoteDocumentType.MARKDOWN }
+        NoteDocumentFilter.PDF -> notes.filter { it.resolvedDocumentType == NoteDocumentType.PDF }
+        NoteDocumentFilter.DOCX -> notes.filter { it.resolvedDocumentType == NoteDocumentType.DOCX }
+    }
+}
 
 enum class NoteSortOption(
     val label: String,
