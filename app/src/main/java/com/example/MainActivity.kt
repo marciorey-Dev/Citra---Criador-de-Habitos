@@ -399,17 +399,6 @@ class MainActivity : ComponentActivity() {
                 val organizationSubTab by viewModel.organizationSubTab.collectAsState()
                 val timerAllowSwipe by viewModel.timerAllowSwipe.collectAsState()
 
-                // Track per-page entrance trigger token & timestamp so navigating via buttons
-                // replays a brief, fluid staircase fade-in animation on the destination screen.
-                val pageVisitTokens = remember { mutableStateMapOf<Int, Int>() }
-                val pageEnteredAt = remember { mutableStateMapOf<Int, Long>() }
-
-                LaunchedEffect(pagerState.currentPage) {
-                    val p = pagerState.currentPage
-                    pageVisitTokens[p] = (pageVisitTokens[p] ?: 0) + 1
-                    pageEnteredAt[p] = android.os.SystemClock.uptimeMillis()
-                }
-
                 // Trigger guided tutorial when entering each area for the first time
                 LaunchedEffect(pagerState.currentPage, organizationSubTab, screens) {
                     when (screens.getOrNull(pagerState.currentPage)) {
@@ -791,69 +780,62 @@ class MainActivity : ComponentActivity() {
                         userScrollEnabled = !isNoteEditorOpen && !isTimerLockedFromSwipe,
                         modifier = Modifier.fillMaxSize()
                     ) { page ->
-                        val pageToken = pageVisitTokens[page] ?: 0
-                        val enteredAtMs = pageEnteredAt[page] ?: 0L
-                        CompositionLocalProvider(
-                            com.example.util.LocalScreenEntranceKey provides pageToken,
-                            com.example.util.LocalScreenEnteredAtMillis provides enteredAtMs
-                        ) {
-                            when (screens[page]) {
-                                Screen.Home -> HomeScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToTimer = {
-                                        coroutineScope.launch { pagerState.scrollToPage(1) }
-                                    },
-                                    onNavigateToOrganization = {
-                                        coroutineScope.launch { pagerState.scrollToPage(2) }
-                                    },
-                                    onQuickAddTask = {
-                                        showQuickAddTaskDialog = true
-                                    },
-                                    onQuickAddNote = {
-                                        viewModel.triggerCreateNote()
-                                        val notesPageIndex = screens.indexOf(Screen.Notes)
-                                        if (notesPageIndex >= 0) {
-                                            coroutineScope.launch { pagerState.scrollToPage(notesPageIndex) }
-                                        }
+                        when (screens[page]) {
+                            Screen.Home -> HomeScreen(
+                                viewModel = viewModel,
+                                onNavigateToTimer = {
+                                    coroutineScope.launch { pagerState.scrollToPage(1) }
+                                },
+                                onNavigateToOrganization = {
+                                    coroutineScope.launch { pagerState.scrollToPage(2) }
+                                },
+                                onQuickAddTask = {
+                                    showQuickAddTaskDialog = true
+                                },
+                                onQuickAddNote = {
+                                    viewModel.triggerCreateNote()
+                                    val notesPageIndex = screens.indexOf(Screen.Notes)
+                                    if (notesPageIndex >= 0) {
+                                        coroutineScope.launch { pagerState.scrollToPage(notesPageIndex) }
                                     }
-                                )
-                                Screen.Timer -> TimerScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToTasks = {
-                                        coroutineScope.launch { pagerState.scrollToPage(2) }
+                                }
+                            )
+                            Screen.Timer -> TimerScreen(
+                                viewModel = viewModel,
+                                onNavigateToTasks = {
+                                    coroutineScope.launch { pagerState.scrollToPage(2) }
+                                }
+                            )
+                            Screen.Organization -> OrganizationScreen(
+                                viewModel = viewModel,
+                                onNavigateToTimerWithTask = {
+                                    coroutineScope.launch { pagerState.scrollToPage(1) }
+                                }
+                            )
+                            Screen.Notes -> NotesSubTab(
+                                viewModel = viewModel
+                            )
+                            Screen.Profile -> ProfileScreen(
+                                viewModel = viewModel,
+                                onOpenSettings = { showSettingsDialog = true },
+                                onNavigateToNotes = {
+                                    val notesIndex = screens.indexOf(Screen.Notes)
+                                    if (notesIndex >= 0) {
+                                        coroutineScope.launch { pagerState.scrollToPage(notesIndex) }
                                     }
-                                )
-                                Screen.Organization -> OrganizationScreen(
-                                    viewModel = viewModel,
-                                    onNavigateToTimerWithTask = {
-                                        coroutineScope.launch { pagerState.scrollToPage(1) }
-                                    }
-                                )
-                                Screen.Notes -> NotesSubTab(
-                                    viewModel = viewModel
-                                )
-                                Screen.Profile -> ProfileScreen(
-                                    viewModel = viewModel,
-                                    onOpenSettings = { showSettingsDialog = true },
-                                    onNavigateToNotes = {
-                                        val notesIndex = screens.indexOf(Screen.Notes)
-                                        if (notesIndex >= 0) {
-                                            coroutineScope.launch { pagerState.scrollToPage(notesIndex) }
-                                        }
-                                    }
-                                )
-                                Screen.Calendar -> CalendarScreen(
-                                    viewModel = viewModel,
-                                    onStartPomodoroForTask = {
-                                        viewModel.linkTaskToPomodoro(it)
-                                        coroutineScope.launch { pagerState.scrollToPage(1) }
-                                    }
-                                )
-                                Screen.Finances -> com.example.ui.screens.finances.FinancesScreen(
-                                    viewModel = viewModel,
-                                    onOpenFinanceSettings = { showSettingsDialog = true }
-                                )
-                            }
+                                }
+                            )
+                            Screen.Calendar -> CalendarScreen(
+                                viewModel = viewModel,
+                                onStartPomodoroForTask = {
+                                    viewModel.linkTaskToPomodoro(it)
+                                    coroutineScope.launch { pagerState.scrollToPage(1) }
+                                }
+                            )
+                            Screen.Finances -> com.example.ui.screens.finances.FinancesScreen(
+                                viewModel = viewModel,
+                                onOpenFinanceSettings = { showSettingsDialog = true }
+                            )
                         }
                     }
                 }

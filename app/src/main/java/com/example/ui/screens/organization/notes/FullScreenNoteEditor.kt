@@ -152,9 +152,8 @@ fun FullScreenNoteEditor(
     val snackbarHostState = remember { SnackbarHostState() }
     val noteScrollState = rememberScrollState()
 
-    // Formatting toolbar: locked to TOP (default, above categories, hides on scroll down / returns on scroll up) or BOTTOM (flush with keyboard/page margin)
+    // Formatting toolbar: fixed at TOP above categories (hides on scroll down, returns on scroll up)
     val preferencesManager = remember(viewModel, context) { viewModel?.preferencesManager ?: PreferencesManager(context) }
-    val toolbarPosition by preferencesManager.noteToolbarPosition.collectAsState()
     var isTopToolbarVisible by remember { mutableStateOf(true) }
     var topToolbarPrimaryHeightPx by remember { mutableIntStateOf(0) }
     var previousScrollValue by remember { mutableIntStateOf(0) }
@@ -226,8 +225,9 @@ fun FullScreenNoteEditor(
         }
     }
 
-    // Detect any missing media on opening note and alert user
+    // Detect any missing media on opening note/pasting without blocking UI thread
     LaunchedEffect(editorValue.text, bgUri, initialNote?.id) {
+        kotlinx.coroutines.delay(200)
         withContext(Dispatchers.IO) {
             val missing = mutableListOf<String>()
             if (!bgUri.isNullOrBlank() && !MediaStorageHelper.isMediaFileValid(context, bgUri)) {
@@ -283,9 +283,10 @@ fun FullScreenNoteEditor(
     }
 
     fun pushHistory() {
+        val maxHistory = if (editorValue.text.length > 20_000) 15 else 80
         if (undoStack.isEmpty() || undoStack.last().text != editorValue.text) {
             undoStack.add(editorValue)
-            if (undoStack.size > 80) undoStack.removeAt(0)
+            while (undoStack.size > maxHistory) undoStack.removeAt(0)
         }
         redoStack.clear()
         lastSnapshotValue = editorValue
@@ -346,8 +347,26 @@ fun FullScreenNoteEditor(
         }
     }
 
-    val readingBlocks = remember(editorValue.text) {
-        SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
+    var blockIndexToReplaceForImage by remember { mutableStateOf<Int?>(null) }
+    var blockIndexToReplaceForAudio by remember { mutableStateOf<Int?>(null) }
+    var fullscreenBlockIndex by remember { mutableStateOf<Int?>(null) }
+
+    val readingBlocks = remember(
+        editorValue.text,
+        editorMode,
+        fullscreenBlockIndex,
+        blockIndexToReplaceForImage,
+        blockIndexToReplaceForAudio
+    ) {
+        if (editorMode == NoteEditorMode.READING ||
+            fullscreenBlockIndex != null ||
+            blockIndexToReplaceForImage != null ||
+            blockIndexToReplaceForAudio != null
+        ) {
+            SmoothMarkdownConverter.markdownToBlocks(editorValue.text)
+        } else {
+            emptyList()
+        }
     }
 
     fun findBlockCharOffset(blockIdx: Int): Int {
@@ -632,8 +651,6 @@ fun FullScreenNoteEditor(
     // Media Replacement State
     var tokenToReplaceForImage by remember { mutableStateOf<MediaTokenInfo?>(null) }
     var tokenToReplaceForAudio by remember { mutableStateOf<MediaTokenInfo?>(null) }
-    var blockIndexToReplaceForImage by remember { mutableStateOf<Int?>(null) }
-    var blockIndexToReplaceForAudio by remember { mutableStateOf<Int?>(null) }
 
     val replaceImagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -736,7 +753,6 @@ fun FullScreenNoteEditor(
     var showAdvancedToolbar by remember { mutableStateOf(false) }
     var checklistItemToConvert by remember { mutableStateOf<String?>(null) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
-    var fullscreenBlockIndex by remember { mutableStateOf<Int?>(null) }
     var showCreateTableDialog by remember { mutableStateOf(false) }
     var showAudioExportWarningDialog by remember { mutableStateOf(false) }
     var showVersionHistoryDialog by remember { mutableStateOf(false) }
@@ -754,21 +770,6 @@ fun FullScreenNoteEditor(
     // Parse active media tokens for interactive widgets in Live Preview
     val parsedMediaTokens = remember(editorValue.text) {
         ObsidianMarkdownEngine.parseMediaTokens(editorValue.text)
-    }
-
-    val missingMediaTokens = remember(parsedMediaTokens, bgUri) {
-        val missing = mutableListOf<String>()
-        if (bgUri != null && !MediaStorageHelper.isMediaFileValid(context, bgUri)) {
-            missing.add("Imagem de fundo não encontrada")
-        }
-        for (token in parsedMediaTokens) {
-            if (token.url.isNotBlank() && !MediaStorageHelper.isMediaFileValid(context, token.url)) {
-                val name = token.titleOrAlt.ifBlank { token.url.substringAfterLast("/") }
-                val type = if (token.isAudio) "Áudio" else "Imagem"
-                missing.add("$type: \"$name\"")
-            }
-        }
-        missing
     }
 
     // Universal file import launcher (converts HTML, TXT, JSON, CITRADOC, TEX, MD to Markdown)
@@ -996,33 +997,6 @@ fun FullScreenNoteEditor(
                                 )
                             }
 
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (toolbarPosition == "TOP") "Menu de formatação: Acima (mudar p/ Abaixo)"
-                                        else "Menu de formatação: Abaixo (mudar p/ Acima)"
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (toolbarPosition == "TOP") Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop,
-                                        contentDescription = null,
-                                        tint = primaryColor
-                                    )
-                                },
-                                onClick = {
-                                    showMenu = false
-                                    val nextPos = if (toolbarPosition == "TOP") "BOTTOM" else "TOP"
-                                    preferencesManager.setNoteToolbarPosition(nextPos)
-                                    if (nextPos == "TOP") isTopToolbarVisible = true
-                                    Toast.makeText(
-                                        context,
-                                        if (nextPos == "TOP") "Menu fixado na parte superior" else "Menu fixado junto ao teclado",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            )
-
                             HorizontalDivider()
 
                             // EXPORT MENU OPTIONS (DOCX, PDF, MD, TXT, HTML, Image Card)
@@ -1175,14 +1149,11 @@ fun FullScreenNoteEditor(
             }
 
             val density = LocalDensity.current
-            val imeBottomPx = WindowInsets.ime.getBottom(density)
-            val navBottomPx = WindowInsets.navigationBars.getBottom(density)
-            val isKeyboardOpen = imeBottomPx > navBottomPx + with(density) { 40.dp.roundToPx() }
 
-            LaunchedEffect(noteScrollState, toolbarPosition, editorMode) {
+            LaunchedEffect(noteScrollState, editorMode) {
                 isTopToolbarVisible = true
                 previousScrollValue = noteScrollState.value
-                if (toolbarPosition != "TOP" || editorMode == NoteEditorMode.READING) {
+                if (editorMode == NoteEditorMode.READING) {
                     return@LaunchedEffect
                 }
                 snapshotFlow { noteScrollState.value }
@@ -1209,7 +1180,7 @@ fun FullScreenNoteEditor(
                     .padding(top = 8.dp, bottom = 140.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (toolbarPosition == "TOP" && editorMode != NoteEditorMode.READING) {
+                if (editorMode != NoteEditorMode.READING) {
                     val topReserveDp = if (topToolbarPrimaryHeightPx > 0) {
                         with(density) { topToolbarPrimaryHeightPx.toDp() } + 2.dp
                     } else {
@@ -1266,7 +1237,7 @@ fun FullScreenNoteEditor(
 
                 // 2. Editorial Timestamp & Reading Pulse
                 val wordCount = remember(editorValue.text) {
-                    editorValue.text.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                    countWordsFast(editorValue.text)
                 }
                 val readMinutes = remember(wordCount) {
                     (wordCount / 180).coerceAtLeast(1)
@@ -1461,33 +1432,36 @@ fun FullScreenNoteEditor(
                                     val isLargeChange = textDiff > 1
 
                                     if (undoStack.isEmpty() || isWordBoundary || isTimeElapsed || isLargeChange) {
+                                        val maxHistory = if (newVal.text.length > 20_000) 15 else 80
                                         if (undoStack.isEmpty() || undoStack.last().text != editorValue.text) {
                                             undoStack.add(editorValue)
-                                            if (undoStack.size > 80) undoStack.removeAt(0)
+                                            while (undoStack.size > maxHistory) undoStack.removeAt(0)
                                         }
                                         redoStack.clear()
                                         lastSnapshotValue = newVal
                                     }
                                     lastTypingTime = now
 
-                                    // Detect checklist toggles in live preview mode
-                                    val oldLines = editorValue.text.lines()
-                                    val newLines = newVal.text.lines()
-                                    if (oldLines.size == newLines.size) {
-                                        for (i in oldLines.indices) {
-                                            val o = oldLines[i].trim()
-                                            val n = newLines[i].trim()
-                                            if (o != n) {
-                                                val oChecked = o.startsWith("- [x]", ignoreCase = true) || o.startsWith("* [x]", ignoreCase = true)
-                                                val nChecked = n.startsWith("- [x]", ignoreCase = true) || n.startsWith("* [x]", ignoreCase = true)
-                                                val oUnchecked = o.startsWith("- [ ]") || o.startsWith("* [ ]")
-                                                val nUnchecked = n.startsWith("- [ ]") || n.startsWith("* [ ]")
-                                                if (oUnchecked && nChecked) {
-                                                    val text = n.substring(5).removePrefix("~~").removeSuffix("~~").trim()
-                                                    onToggleChecklistTaskSync?.invoke(text, true)
-                                                } else if (oChecked && nUnchecked) {
-                                                    val text = n.substring(5).removePrefix("~~").removeSuffix("~~").trim()
-                                                    onToggleChecklistTaskSync?.invoke(text, false)
+                                    // Detect single-line checklist toggles in live preview mode without allocating line lists on large pastes
+                                    if (textDiff in 1..6 && newVal.text.length < 30_000 && editorValue.text.length < 30_000) {
+                                        val oldLines = editorValue.text.lines()
+                                        val newLines = newVal.text.lines()
+                                        if (oldLines.size == newLines.size) {
+                                            for (i in oldLines.indices) {
+                                                val o = oldLines[i].trim()
+                                                val n = newLines[i].trim()
+                                                if (o != n) {
+                                                    val oChecked = o.startsWith("- [x]", ignoreCase = true) || o.startsWith("* [x]", ignoreCase = true)
+                                                    val nChecked = n.startsWith("- [x]", ignoreCase = true) || n.startsWith("* [x]", ignoreCase = true)
+                                                    val oUnchecked = o.startsWith("- [ ]") || o.startsWith("* [ ]")
+                                                    val nUnchecked = n.startsWith("- [ ]") || n.startsWith("* [ ]")
+                                                    if (oUnchecked && nChecked) {
+                                                        val text = n.substring(5).removePrefix("~~").removeSuffix("~~").trim()
+                                                        onToggleChecklistTaskSync?.invoke(text, true)
+                                                    } else if (oChecked && nUnchecked) {
+                                                        val text = n.substring(5).removePrefix("~~").removeSuffix("~~").trim()
+                                                        onToggleChecklistTaskSync?.invoke(text, false)
+                                                    }
                                                 }
                                             }
                                         }
@@ -1503,13 +1477,18 @@ fun FullScreenNoteEditor(
                             cursorBrush = SolidColor(primaryColor),
                             visualTransformation = remember(editorValue.selection, isDarkBg, primaryColor, textColor) {
                                 VisualTransformation { text ->
-                                    val styled = ObsidianMarkdownEngine.buildLivePreviewAnnotatedString(
-                                        text = text.text,
-                                        selection = editorValue.selection,
-                                        primaryColor = primaryColor,
-                                        textColor = textColor,
-                                        isDarkBg = isDarkBg
-                                    )
+                                    val styled = try {
+                                        val result = ObsidianMarkdownEngine.buildLivePreviewAnnotatedString(
+                                            text = text.text,
+                                            selection = editorValue.selection,
+                                            primaryColor = primaryColor,
+                                            textColor = textColor,
+                                            isDarkBg = isDarkBg
+                                        )
+                                        if (result.length == text.text.length) result else text
+                                    } catch (_: Throwable) {
+                                        text
+                                    }
                                     TransformedText(styled, OffsetMapping.Identity)
                                 }
                             },
@@ -2162,21 +2141,14 @@ fun FullScreenNoteEditor(
             }
 
             @Composable
-            fun FormattingToolbarCard(isTopMode: Boolean) {
-                val toolbarShape = if (isTopMode) {
-                    RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
-                } else {
-                    RoundedCornerShape(
-                        topStart = if (isKeyboardOpen) 12.dp else 16.dp,
-                        topEnd = if (isKeyboardOpen) 12.dp else 16.dp
-                    )
-                }
+            fun FormattingToolbarCard() {
+                val toolbarShape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
 
                 Surface(
                     shape = toolbarShape,
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
                     tonalElevation = 6.dp,
-                    shadowElevation = if (isTopMode) 6.dp else 8.dp,
+                    shadowElevation = 6.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), toolbarShape)
@@ -2186,29 +2158,12 @@ fun FullScreenNoteEditor(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .onSizeChanged {
-                                    if (isTopMode) topToolbarPrimaryHeightPx = it.height
+                                    topToolbarPrimaryHeightPx = it.height
                                 }
                                 .padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            IconButton(
-                                onClick = {
-                                    val nextPos = if (isTopMode) "BOTTOM" else "TOP"
-                                    preferencesManager.setNoteToolbarPosition(nextPos)
-                                    if (nextPos == "TOP") isTopToolbarVisible = true
-                                },
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .testTag("toolbar_position_toggle_btn")
-                            ) {
-                                Icon(
-                                    imageVector = if (isTopMode) Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop,
-                                    contentDescription = if (isTopMode) "Fixar menu junto ao teclado" else "Fixar menu no topo",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                             Text(
                                 text = "Formatação Markdown",
                                 fontSize = 12.sp,
@@ -2222,7 +2177,7 @@ fun FullScreenNoteEditor(
                                 modifier = Modifier.size(28.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (isTopMode) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                    imageVector = Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Expandir menu",
                                     modifier = Modifier.size(18.dp)
                                 )
@@ -2254,27 +2209,6 @@ fun FullScreenNoteEditor(
                                             for (toolId in secondModuleTools) {
                                                 RenderToolbarToolItem(toolId)
                                             }
-
-                                            VerticalDivider(
-                                                modifier = Modifier
-                                                    .height(18.dp)
-                                                    .padding(horizontal = 4.dp),
-                                                color = MaterialTheme.colorScheme.outlineVariant
-                                            )
-
-                                            ToolbarToolButton(
-                                                label = if (isTopMode) "Menu Abaixo" else "Menu Acima",
-                                                icon = if (isTopMode) Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop
-                                            ) {
-                                                val nextPos = if (isTopMode) "BOTTOM" else "TOP"
-                                                preferencesManager.setNoteToolbarPosition(nextPos)
-                                                if (nextPos == "TOP") isTopToolbarVisible = true
-                                                Toast.makeText(
-                                                    context,
-                                                    if (nextPos == "TOP") "Menu fixado na parte superior" else "Menu fixado junto ao teclado",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
                                         }
                                     }
                                 }
@@ -2286,39 +2220,20 @@ fun FullScreenNoteEditor(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .onSizeChanged {
-                                            if (isTopMode) topToolbarPrimaryHeightPx = it.height
+                                            topToolbarPrimaryHeightPx = it.height
                                         }
                                         .horizontalScroll(rememberScrollState())
                                         .padding(horizontal = 8.dp, vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    // Position snap toggle (TOP <-> BOTTOM only; free drag disabled)
-                                    IconButton(
-                                        onClick = {
-                                            val nextPos = if (isTopMode) "BOTTOM" else "TOP"
-                                            preferencesManager.setNoteToolbarPosition(nextPos)
-                                            if (nextPos == "TOP") isTopToolbarVisible = true
-                                        },
-                                        modifier = Modifier
-                                            .size(30.dp)
-                                            .testTag("toolbar_position_toggle_btn")
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isTopMode) Icons.Default.VerticalAlignBottom else Icons.Default.VerticalAlignTop,
-                                            contentDescription = if (isTopMode) "Fixar menu junto ao teclado" else "Fixar menu no topo",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-
                                     // Minimize toggle
                                     IconButton(
                                         onClick = { isToolbarMinimized = true },
                                         modifier = Modifier.size(28.dp)
                                     ) {
                                         Icon(
-                                            imageVector = if (isTopMode) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            imageVector = Icons.Default.KeyboardArrowUp,
                                             contentDescription = "Minimizar",
                                             modifier = Modifier.size(16.dp),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2355,7 +2270,7 @@ fun FullScreenNoteEditor(
                                     ) {
                                         Icon(
                                             imageVector = if (showAdvancedToolbar) {
-                                                if (isTopMode) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown
+                                                Icons.Default.KeyboardArrowUp
                                             } else {
                                                 Icons.Default.Tune
                                             },
@@ -2367,21 +2282,16 @@ fun FullScreenNoteEditor(
                                 }
                             }
 
-                            if (isTopMode) {
-                                PrimaryModuleRow()
-                                SecondaryModuleRow()
-                            } else {
-                                SecondaryModuleRow()
-                                PrimaryModuleRow()
-                            }
+                            PrimaryModuleRow()
+                            SecondaryModuleRow()
                         }
                     }
                 }
             }
 
-            // POSIÇÃO 1 (Padrão): Superior, afixada acima das categorias — some ao rolar para baixo e volta ao rolar uma vez para cima
+            // Menu de formatação fixado na parte superior acima das categorias — some ao rolar para baixo e volta ao rolar para cima
             AnimatedVisibility(
-                visible = toolbarPosition == "TOP" && editorMode != NoteEditorMode.READING && isTopToolbarVisible,
+                visible = editorMode != NoteEditorMode.READING && isTopToolbarVisible,
                 enter = slideInVertically { -it } + fadeIn(),
                 exit = slideOutVertically { -it } + fadeOut(),
                 modifier = Modifier
@@ -2390,27 +2300,12 @@ fun FullScreenNoteEditor(
                     .zIndex(10f)
                     .testTag("note_toolbar_top_container")
             ) {
-                FormattingToolbarCard(isTopMode = true)
-            }
-
-            // POSIÇÃO 2: Inferior, colada diretamente acima do teclado quando ativo ou na margem inferior da página quando fechado
-            AnimatedVisibility(
-                visible = toolbarPosition == "BOTTOM" && editorMode != NoteEditorMode.READING,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .imePadding()
-                    .zIndex(10f)
-                    .testTag("note_toolbar_bottom_container")
-            ) {
-                FormattingToolbarCard(isTopMode = false)
+                FormattingToolbarCard()
             }
 
             // CitraRecord recording HUD
             if (isRecordingAudio) {
-                val recordHudBottomPadding = if (toolbarPosition == "BOTTOM" && editorMode != NoteEditorMode.READING) 68.dp else 20.dp
+                val recordHudBottomPadding = 20.dp
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.errorContainer,
@@ -3333,4 +3228,19 @@ private fun ToolbarToolButton(
         Spacer(modifier = Modifier.width(3.dp))
         Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
+}
+
+private fun countWordsFast(text: String): Int {
+    if (text.isEmpty()) return 0
+    var count = 0
+    var inWord = false
+    for (i in 0 until text.length) {
+        if (text[i].isWhitespace()) {
+            inWord = false
+        } else if (!inWord) {
+            inWord = true
+            count++
+        }
+    }
+    return count
 }

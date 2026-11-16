@@ -40,24 +40,66 @@ data class MediaTokenInfo(
  */
 object ObsidianMarkdownEngine {
 
+    private const val MAX_INLINE_LINE_CHARS = 2_500
+    private const val LARGE_DOC_CHAR_THRESHOLD = 12_000
+    private const val LARGE_DOC_LINE_THRESHOLD = 300
+    private const val CURSOR_WINDOW_CHARS = 6_000
+    private const val MAX_TOTAL_STYLE_SPANS = 3_500
+    private const val MAX_MEDIA_TOKENS = 40
+    private const val MAX_DATA_URI_LENGTH = 512
+
+    private const val FLAG_BOLD = 1
+    private const val FLAG_ITALIC = 2
+    private const val FLAG_STRIKE = 4
+    private const val FLAG_UNDERLINE = 8
+    private const val FLAG_HIGHLIGHT = 16
+    private const val FLAG_QUOTE = 32
+    private const val FLAG_HIDDEN = 64
+
+    private val MEDIA_TOKEN_HIGHLIGHT_REGEX = Regex("(!?\\[(?:audio:)?[^\\]\\n]*\\]\\([^)\\n]*\\))")
+    private val AUDIO_TOKEN_REGEX = Regex("(!?\\[audio:([^\\]\\n]*)\\]\\(([^)\\n]*)\\))")
+    private val IMAGE_TOKEN_REGEX = Regex("(!\\[(?!audio:)([^\\]\\n]*)\\]\\(([^)\\n]*)\\))")
+
+    private fun safeAddStyle(
+        builder: AnnotatedString.Builder,
+        style: SpanStyle,
+        start: Int,
+        end: Int,
+        textLen: Int,
+        spanCounter: IntArray? = null
+    ) {
+        val s = start.coerceIn(0, textLen)
+        val e = end.coerceIn(0, textLen)
+        if (s >= e) return
+        if (spanCounter != null) {
+            if (spanCounter[0] >= MAX_TOTAL_STYLE_SPANS) return
+            spanCounter[0]++
+        }
+        builder.addStyle(style, s, e)
+    }
+
     fun findCursorLine(text: String, cursorOffset: Int): CursorLineInfo {
+        if (text.isEmpty()) return CursorLineInfo(0, 0, 0, "")
         val safeCursor = cursorOffset.coerceIn(0, text.length)
-        val lines = text.split("\n")
-        var currentOffset = 0
-        for ((idx, line) in lines.withIndex()) {
-            val lineLength = line.length
-            val lineEnd = currentOffset + lineLength
-            if (safeCursor in currentOffset..lineEnd || (idx == lines.lastIndex && safeCursor >= lineEnd)) {
+        var lineStart = 0
+        var lineIndex = 0
+        val len = text.length
+        while (lineStart <= len) {
+            val nl = text.indexOf('\n', lineStart)
+            val lineEnd = if (nl == -1) len else nl
+            if (safeCursor in lineStart..lineEnd || (nl == -1 && safeCursor >= lineEnd)) {
                 return CursorLineInfo(
-                    lineIndex = idx,
-                    lineStart = currentOffset,
+                    lineIndex = lineIndex,
+                    lineStart = lineStart,
                     lineEnd = lineEnd,
-                    lineContent = line
+                    lineContent = text.substring(lineStart, lineEnd)
                 )
             }
-            currentOffset = lineEnd + 1 // +1 for the newline character
+            if (nl == -1) break
+            lineStart = nl + 1
+            lineIndex++
         }
-        return CursorLineInfo(0, 0, text.length, text)
+        return CursorLineInfo(0, 0, len, text)
     }
 
     /**
@@ -75,133 +117,195 @@ object ObsidianMarkdownEngine {
     ): AnnotatedString {
         if (text.isEmpty()) return AnnotatedString("")
 
-        val builder = AnnotatedString.Builder(text)
-        val cursor = selection.start.coerceIn(0, text.length)
-        val cursorLine = findCursorLine(text, cursor)
+        return try {
+            val textLen = text.length
+            val builder = AnnotatedString.Builder(text)
+            val cursor = selection.start.coerceIn(0, textLen)
+            val cursorLine = findCursorLine(text, cursor)
 
-        val lines = text.split("\n")
-        var offset = 0
+            val isHugeDoc = textLen > LARGE_DOC_CHAR_THRESHOLD
+            val windowStart = (cursor - CURSOR_WINDOW_CHARS).coerceAtLeast(0)
+            val windowEnd = (cursor + CURSOR_WINDOW_CHARS).coerceAtMost(textLen)
+            val spanCounter = intArrayOf(0)
 
-        for ((idx, line) in lines.withIndex()) {
-            val lineStart = offset
-            val lineEnd = offset + line.length
-            val isActive = (idx == cursorLine.lineIndex)
-            val trimmed = line.trimStart()
-            val indentLen = line.length - trimmed.length
+            var lineStart = 0
+            var idx = 0
+            while (lineStart <= textLen) {
+                val nl = text.indexOf('\n', lineStart)
+                val lineEnd = if (nl == -1) textLen else nl
+                val contentEnd = if (lineEnd > lineStart && text[lineEnd - 1] == '\r') lineEnd - 1 else lineEnd
 
-            when {
-                // H1 - H5 Headers
-                trimmed.startsWith("##### ") -> {
-                    val prefixLen = indentLen + 6
-                    applyHeaderStyle(builder, lineStart, lineEnd, prefixLen, 13, isActive, primaryColor, textColor)
+                val isActive = (idx == cursorLine.lineIndex)
+                var indentEnd = lineStart
+                while (indentEnd < contentEnd && text[indentEnd].isWhitespace()) {
+                    indentEnd++
                 }
-                trimmed.startsWith("#### ") -> {
-                    val prefixLen = indentLen + 5
-                    applyHeaderStyle(builder, lineStart, lineEnd, prefixLen, 15, isActive, primaryColor, textColor)
-                }
-                trimmed.startsWith("### ") -> {
-                    val prefixLen = indentLen + 4
-                    applyHeaderStyle(builder, lineStart, lineEnd, prefixLen, 17, isActive, primaryColor, textColor)
-                }
-                trimmed.startsWith("## ") -> {
-                    val prefixLen = indentLen + 3
-                    applyHeaderStyle(builder, lineStart, lineEnd, prefixLen, 20, isActive, primaryColor, textColor)
-                }
-                trimmed.startsWith("# ") -> {
-                    val prefixLen = indentLen + 2
-                    applyHeaderStyle(builder, lineStart, lineEnd, prefixLen, 24, isActive, primaryColor, textColor)
-                }
+                val indentLen = indentEnd - lineStart
+                val trimmedLen = contentEnd - indentEnd
 
-                // Checklists
-                trimmed.startsWith("- [ ] ") -> {
-                    val prefixEnd = (lineStart + indentLen + 6).coerceAtMost(lineEnd)
-                    builder.addStyle(
-                        SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
-                        lineStart + indentLen,
-                        prefixEnd
-                    )
-                }
-                trimmed.startsWith("- [x] ", ignoreCase = true) -> {
-                    val prefixEnd = (lineStart + indentLen + 6).coerceAtMost(lineEnd)
-                    builder.addStyle(
-                        SpanStyle(color = Color(0xFF10B981), fontWeight = FontWeight.Bold),
-                        lineStart + indentLen,
-                        prefixEnd
-                    )
-                    // Mark finished item with strikethrough and lighter text
-                    if (prefixEnd < lineEnd) {
-                        builder.addStyle(
-                            SpanStyle(textDecoration = TextDecoration.LineThrough, color = textColor.copy(alpha = 0.5f)),
-                            prefixEnd,
-                            lineEnd
-                        )
+                if (trimmedLen > 0 && spanCounter[0] < MAX_TOTAL_STYLE_SPANS) {
+                    val trimmedPreview = text.substring(indentEnd, minOf(contentEnd, indentEnd + 24))
+
+                    when {
+                        // H1 - H5 Headers
+                        trimmedPreview.startsWith("##### ") -> {
+                            applyHeaderStyle(builder, lineStart, contentEnd, indentLen + 6, 13, isActive, primaryColor, textLen, spanCounter)
+                        }
+                        trimmedPreview.startsWith("#### ") -> {
+                            applyHeaderStyle(builder, lineStart, contentEnd, indentLen + 5, 15, isActive, primaryColor, textLen, spanCounter)
+                        }
+                        trimmedPreview.startsWith("### ") -> {
+                            applyHeaderStyle(builder, lineStart, contentEnd, indentLen + 4, 17, isActive, primaryColor, textLen, spanCounter)
+                        }
+                        trimmedPreview.startsWith("## ") -> {
+                            applyHeaderStyle(builder, lineStart, contentEnd, indentLen + 3, 20, isActive, primaryColor, textLen, spanCounter)
+                        }
+                        trimmedPreview.startsWith("# ") -> {
+                            applyHeaderStyle(builder, lineStart, contentEnd, indentLen + 2, 24, isActive, primaryColor, textLen, spanCounter)
+                        }
+
+                        // Checklists
+                        trimmedPreview.startsWith("- [ ] ") -> {
+                            val prefixEnd = (lineStart + indentLen + 6).coerceAtMost(contentEnd)
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
+                                lineStart + indentLen,
+                                prefixEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
+                        trimmedPreview.startsWith("- [x] ", ignoreCase = true) -> {
+                            val prefixEnd = (lineStart + indentLen + 6).coerceAtMost(contentEnd)
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(color = Color(0xFF10B981), fontWeight = FontWeight.Bold),
+                                lineStart + indentLen,
+                                prefixEnd,
+                                textLen,
+                                spanCounter
+                            )
+                            if (prefixEnd < contentEnd) {
+                                safeAddStyle(
+                                    builder,
+                                    SpanStyle(textDecoration = TextDecoration.LineThrough, color = textColor.copy(alpha = 0.5f)),
+                                    prefixEnd,
+                                    contentEnd,
+                                    textLen,
+                                    spanCounter
+                                )
+                            }
+                        }
+
+                        // Bullet Lists
+                        trimmedPreview.startsWith("- ") || trimmedPreview.startsWith("* ") -> {
+                            val prefixEnd = (lineStart + indentLen + 2).coerceAtMost(contentEnd)
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
+                                lineStart + indentLen,
+                                prefixEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
+
+                        // Quotes
+                        trimmedPreview.startsWith("> ") -> {
+                            val prefixEnd = (lineStart + indentLen + 2).coerceAtMost(contentEnd)
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(color = primaryColor.copy(alpha = 0.7f), fontWeight = FontWeight.Bold),
+                                lineStart + indentLen,
+                                prefixEnd,
+                                textLen,
+                                spanCounter
+                            )
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(fontStyle = FontStyle.Italic, color = textColor.copy(alpha = 0.85f)),
+                                prefixEnd,
+                                contentEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
+
+                        // Code block or Math delimiters
+                        trimmedPreview.startsWith("```") || trimmedPreview.startsWith("$$") -> {
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    color = primaryColor,
+                                    background = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                                ),
+                                lineStart,
+                                contentEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
+
+                        // Dividers
+                        trimmedLen == 3 && (trimmedPreview == "---" || trimmedPreview == "***") -> {
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(color = primaryColor.copy(alpha = 0.5f), fontWeight = FontWeight.ExtraBold),
+                                lineStart,
+                                contentEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
+
+                        // Page Break
+                        (trimmedLen == 18 && text.regionMatches(indentEnd, "<!-- pagebreak -->", 0, 18, ignoreCase = true)) ||
+                            (trimmedLen == 15 && text.regionMatches(indentEnd, "---pagebreak---", 0, 15, ignoreCase = true)) -> {
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(
+                                    color = primaryColor,
+                                    fontWeight = FontWeight.Bold,
+                                    background = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                                ),
+                                lineStart,
+                                contentEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
                     }
                 }
 
-                // Bullet Lists
-                trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
-                    val prefixEnd = (lineStart + indentLen + 2).coerceAtMost(lineEnd)
-                    builder.addStyle(
-                        SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
-                        lineStart + indentLen,
-                        prefixEnd
+                // Apply inline formatting if within safe limits
+                val lineLength = contentEnd - lineStart
+                val inCursorWindow = !isHugeDoc && idx < LARGE_DOC_LINE_THRESHOLD ||
+                    (contentEnd >= windowStart && lineStart <= windowEnd)
+                if (lineLength in 1..MAX_INLINE_LINE_CHARS && inCursorWindow && spanCounter[0] < MAX_TOTAL_STYLE_SPANS) {
+                    applyInlineFormattingToRange(
+                        builder = builder,
+                        fullText = text,
+                        start = lineStart,
+                        end = contentEnd,
+                        textLen = textLen,
+                        primaryColor = primaryColor,
+                        textColor = textColor,
+                        isDarkBg = isDarkBg,
+                        spanCounter = spanCounter
                     )
                 }
 
-                // Quotes
-                trimmed.startsWith("> ") -> {
-                    val prefixEnd = (lineStart + indentLen + 2).coerceAtMost(lineEnd)
-                    builder.addStyle(
-                        SpanStyle(color = primaryColor.copy(alpha = 0.7f), fontWeight = FontWeight.Bold),
-                        lineStart + indentLen,
-                        prefixEnd
-                    )
-                    builder.addStyle(
-                        SpanStyle(fontStyle = FontStyle.Italic, color = textColor.copy(alpha = 0.85f)),
-                        prefixEnd,
-                        lineEnd
-                    )
-                }
-
-                // Code block or Math delimiters
-                trimmed.startsWith("```") || trimmed.startsWith("$$") -> {
-                    builder.addStyle(
-                        SpanStyle(fontFamily = FontFamily.Monospace, color = primaryColor, background = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)),
-                        lineStart,
-                        lineEnd
-                    )
-                }
-
-                // Dividers
-                trimmed == "---" || trimmed == "***" -> {
-                    builder.addStyle(
-                        SpanStyle(color = primaryColor.copy(alpha = 0.5f), fontWeight = FontWeight.ExtraBold),
-                        lineStart,
-                        lineEnd
-                    )
-                }
-
-                // Page Break
-                trimmed.equals("<!-- pagebreak -->", ignoreCase = true) || trimmed.equals("---pagebreak---", ignoreCase = true) -> {
-                    builder.addStyle(
-                        SpanStyle(
-                            color = primaryColor,
-                            fontWeight = FontWeight.Bold,
-                            background = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)
-                        ),
-                        lineStart,
-                        lineEnd
-                    )
-                }
+                if (nl == -1) break
+                lineStart = nl + 1
+                idx++
             }
 
-            // Apply inline formatting across this line
-            applyInlineFormattingToRange(builder, text, lineStart, lineEnd, primaryColor, textColor, isDarkBg)
-
-            offset = lineEnd + 1 // +1 for newline
+            builder.toAnnotatedString()
+        } catch (_: Throwable) {
+            AnnotatedString(text)
         }
-
-        return builder.toAnnotatedString()
     }
 
     private fun applyHeaderStyle(
@@ -212,29 +316,34 @@ object ObsidianMarkdownEngine {
         spSize: Int,
         isActive: Boolean,
         primaryColor: Color,
-        textColor: Color
+        textLen: Int,
+        spanCounter: IntArray
     ) {
         val prefixEnd = (lineStart + prefixLen).coerceAtMost(lineEnd)
-        // Prefix (#, ##, etc.)
-        builder.addStyle(
+        safeAddStyle(
+            builder,
             SpanStyle(
                 fontSize = if (isActive) spSize.sp else (spSize - 4).sp,
                 color = if (isActive) primaryColor else primaryColor.copy(alpha = 0.35f),
                 fontWeight = FontWeight.Bold
             ),
             lineStart,
-            prefixEnd
+            prefixEnd,
+            textLen,
+            spanCounter
         )
-        // Header Text
         if (prefixEnd < lineEnd) {
-            builder.addStyle(
+            safeAddStyle(
+                builder,
                 SpanStyle(
                     fontSize = spSize.sp,
                     fontWeight = FontWeight.Bold,
                     color = primaryColor
                 ),
                 prefixEnd,
-                lineEnd
+                lineEnd,
+                textLen,
+                spanCounter
             )
         }
     }
@@ -244,79 +353,77 @@ object ObsidianMarkdownEngine {
         fullText: String,
         start: Int,
         end: Int,
+        textLen: Int,
         primaryColor: Color,
         textColor: Color,
-        isDarkBg: Boolean
+        isDarkBg: Boolean,
+        spanCounter: IntArray
     ) {
-        if (start >= end) return
+        if (start >= end || spanCounter[0] >= MAX_TOTAL_STYLE_SPANS) return
         val chunk = fullText.substring(start, end)
         val analyzed = InlineMarkdownHelper.analyzeInlineSpans(chunk)
         val highlightColor = if (isDarkBg) Color(0xFF6B5800) else Color(0xFFFFF176)
         val codeBg = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFF1F5F9)
 
-        // Apply combined inline style flags per run so Bold + Italic + Strikethrough + Underline + Highlight combine cleanly
         val n = chunk.length
-        val boldArr = BooleanArray(n)
-        val italicArr = BooleanArray(n)
-        val strikeArr = BooleanArray(n)
-        val underlineArr = BooleanArray(n)
-        val highlightArr = BooleanArray(n)
-        val quoteArr = BooleanArray(n)
+        val mask = IntArray(n)
+        for (k in 0 until n) {
+            if (analyzed.hidden[k]) mask[k] = mask[k] or FLAG_HIDDEN
+        }
 
         for (span in analyzed.styleSpans) {
             val s = span.start.coerceIn(0, n)
             val e = span.end.coerceIn(0, n)
+            val bit = when (span.kind) {
+                InlineMarkdownHelper.StyleKind.BOLD -> FLAG_BOLD
+                InlineMarkdownHelper.StyleKind.ITALIC -> FLAG_ITALIC
+                InlineMarkdownHelper.StyleKind.STRIKETHROUGH -> FLAG_STRIKE
+                InlineMarkdownHelper.StyleKind.UNDERLINE -> FLAG_UNDERLINE
+                InlineMarkdownHelper.StyleKind.HIGHLIGHT -> FLAG_HIGHLIGHT
+                InlineMarkdownHelper.StyleKind.QUOTE -> FLAG_QUOTE
+            }
             for (k in s until e) {
-                when (span.kind) {
-                    InlineMarkdownHelper.StyleKind.BOLD -> boldArr[k] = true
-                    InlineMarkdownHelper.StyleKind.ITALIC -> italicArr[k] = true
-                    InlineMarkdownHelper.StyleKind.STRIKETHROUGH -> strikeArr[k] = true
-                    InlineMarkdownHelper.StyleKind.UNDERLINE -> underlineArr[k] = true
-                    InlineMarkdownHelper.StyleKind.HIGHLIGHT -> highlightArr[k] = true
-                    InlineMarkdownHelper.StyleKind.QUOTE -> quoteArr[k] = true
-                }
+                mask[k] = mask[k] or bit
             }
         }
         for (link in analyzed.linkLabels) {
-            for (k in link.labelStart.coerceIn(0, n) until link.labelEnd.coerceIn(0, n)) {
-                underlineArr[k] = true
+            val s = link.labelStart.coerceIn(0, n)
+            val e = link.labelEnd.coerceIn(0, n)
+            for (k in s until e) {
+                mask[k] = mask[k] or FLAG_UNDERLINE
             }
         }
 
         var idx = 0
-        while (idx < n) {
-            val b = boldArr[idx]
-            val it = italicArr[idx]
-            val st = strikeArr[idx]
-            val un = underlineArr[idx]
-            val hl = highlightArr[idx]
-            val qt = quoteArr[idx]
-            val hid = analyzed.hidden[idx]
-
+        while (idx < n && spanCounter[0] < MAX_TOTAL_STYLE_SPANS) {
+            val cur = mask[idx]
             var runEnd = idx + 1
-            while (
-                runEnd < n &&
-                boldArr[runEnd] == b &&
-                italicArr[runEnd] == it &&
-                strikeArr[runEnd] == st &&
-                underlineArr[runEnd] == un &&
-                highlightArr[runEnd] == hl &&
-                quoteArr[runEnd] == qt &&
-                analyzed.hidden[runEnd] == hid
-            ) {
+            while (runEnd < n && mask[runEnd] == cur) {
                 runEnd++
             }
 
-            val decs = mutableListOf<TextDecoration>()
-            if (st) decs.add(TextDecoration.LineThrough)
-            if (un) decs.add(TextDecoration.Underline)
+            if (cur != 0) {
+                val b = (cur and FLAG_BOLD) != 0
+                val it = (cur and FLAG_ITALIC) != 0
+                val st = (cur and FLAG_STRIKE) != 0
+                val un = (cur and FLAG_UNDERLINE) != 0
+                val hl = (cur and FLAG_HIGHLIGHT) != 0
+                val qt = (cur and FLAG_QUOTE) != 0
+                val hid = (cur and FLAG_HIDDEN) != 0
 
-            if (b || it || decs.isNotEmpty() || hl || qt || hid) {
-                builder.addStyle(
+                val deco = when {
+                    st && un -> TextDecoration.combine(listOf(TextDecoration.LineThrough, TextDecoration.Underline))
+                    st -> TextDecoration.LineThrough
+                    un -> TextDecoration.Underline
+                    else -> null
+                }
+
+                safeAddStyle(
+                    builder,
                     SpanStyle(
                         fontWeight = if (b) FontWeight.Bold else null,
                         fontStyle = if (it || qt) FontStyle.Italic else null,
-                        textDecoration = if (decs.isNotEmpty()) TextDecoration.combine(decs) else null,
+                        textDecoration = deco,
                         background = if (hl) highlightColor else Color.Unspecified,
                         color = when {
                             hid -> textColor.copy(alpha = 0.42f)
@@ -328,7 +435,9 @@ object ObsidianMarkdownEngine {
                         }
                     ),
                     start + idx,
-                    start + runEnd
+                    start + runEnd,
+                    textLen,
+                    spanCounter
                 )
             }
             idx = runEnd
@@ -336,34 +445,43 @@ object ObsidianMarkdownEngine {
 
         // Inline links
         for (link in analyzed.linkLabels) {
-            builder.addStyle(
+            if (spanCounter[0] >= MAX_TOTAL_STYLE_SPANS) break
+            safeAddStyle(
+                builder,
                 SpanStyle(
                     color = Color(0xFF3B82F6),
                     textDecoration = TextDecoration.Underline
                 ),
                 start + link.labelStart,
-                start + link.labelEnd
+                start + link.labelEnd,
+                textLen,
+                spanCounter
             )
         }
 
         // Atomic tokens: Inline Code, Math, Bare URLs
         for (atomic in analyzed.atomics) {
+            if (spanCounter[0] >= MAX_TOTAL_STYLE_SPANS) break
             val s = start + atomic.start
             val e = start + atomic.end
             when (atomic.kind) {
-                InlineMarkdownHelper.AtomicKind.CODE -> builder.addStyle(
+                InlineMarkdownHelper.AtomicKind.CODE -> safeAddStyle(
+                    builder,
                     SpanStyle(
                         fontFamily = FontFamily.Monospace,
                         background = codeBg,
                         color = primaryColor
                     ),
                     s,
-                    e
+                    e,
+                    textLen,
+                    spanCounter
                 )
                 InlineMarkdownHelper.AtomicKind.MATH_BLOCK -> {
                     val mathBg = if (isDarkBg) Color(0xFF1E293B) else Color(0xFFFEF3C7)
                     val mathFg = if (isDarkBg) Color(0xFFFDE68A) else Color(0xFF78350F)
-                    builder.addStyle(
+                    safeAddStyle(
+                        builder,
                         SpanStyle(
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.Bold,
@@ -372,13 +490,16 @@ object ObsidianMarkdownEngine {
                             color = mathFg
                         ),
                         s,
-                        e
+                        e,
+                        textLen,
+                        spanCounter
                     )
                 }
                 InlineMarkdownHelper.AtomicKind.MATH_INLINE -> {
                     val mathBg = if (isDarkBg) Color(0xFF334155).copy(alpha = 0.5f) else Color(0xFFF1F5F9)
                     val mathFg = if (isDarkBg) Color(0xFF93C5FD) else Color(0xFF0F172A)
-                    builder.addStyle(
+                    safeAddStyle(
+                        builder,
                         SpanStyle(
                             fontFamily = FontFamily.Serif,
                             fontStyle = FontStyle.Italic,
@@ -387,36 +508,47 @@ object ObsidianMarkdownEngine {
                             color = mathFg
                         ),
                         s,
-                        e
+                        e,
+                        textLen,
+                        spanCounter
                     )
                 }
-                InlineMarkdownHelper.AtomicKind.BARE_URL -> builder.addStyle(
+                InlineMarkdownHelper.AtomicKind.BARE_URL -> safeAddStyle(
+                    builder,
                     SpanStyle(
                         color = Color(0xFF3B82F6),
                         textDecoration = TextDecoration.Underline
                     ),
                     s,
-                    e
+                    e,
+                    textLen,
+                    spanCounter
                 )
             }
         }
 
         // Audio or Image token
-        Regex("(!?\\[(audio:)?(.*?)\\]\\(.*?\\))").findAll(chunk).forEach { match ->
-            val s = start + match.range.first
-            val e = start + match.range.last + 1
-            val isAudio = match.value.contains("[audio:") || match.value.contains("![audio:")
-            val pillBg = if (isAudio) (if (isDarkBg) Color(0xFF064E3B) else Color(0xFFD1FAE5)) else (if (isDarkBg) Color(0xFF1E3A8A) else Color(0xFFDBEAFE))
-            val pillFg = if (isAudio) Color(0xFF10B981) else Color(0xFF3B82F6)
-            builder.addStyle(
-                SpanStyle(
-                    background = pillBg,
-                    color = pillFg,
-                    fontWeight = FontWeight.SemiBold
-                ),
-                s,
-                e
-            )
+        if (chunk.indexOf('[') != -1 && chunk.indexOf('(') != -1) {
+            for (match in MEDIA_TOKEN_HIGHLIGHT_REGEX.findAll(chunk)) {
+                if (spanCounter[0] >= MAX_TOTAL_STYLE_SPANS) break
+                val s = start + match.range.first
+                val e = start + match.range.last + 1
+                val isAudio = match.value.contains("[audio:") || match.value.contains("![audio:")
+                val pillBg = if (isAudio) (if (isDarkBg) Color(0xFF064E3B) else Color(0xFFD1FAE5)) else (if (isDarkBg) Color(0xFF1E3A8A) else Color(0xFFDBEAFE))
+                val pillFg = if (isAudio) Color(0xFF10B981) else Color(0xFF3B82F6)
+                safeAddStyle(
+                    builder,
+                    SpanStyle(
+                        background = pillBg,
+                        color = pillFg,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    s,
+                    e,
+                    textLen,
+                    spanCounter
+                )
+            }
         }
     }
 
@@ -683,68 +815,77 @@ object ObsidianMarkdownEngine {
      * so that interactive widgets (WhatsApp player, resizable side-by-side images) can be shown.
      */
     fun parseMediaTokens(markdown: String): List<MediaTokenInfo> {
-        val list = mutableListOf<MediaTokenInfo>()
-
-        // 1. Audio: ![audio:Title](url) or [audio:Title](url)
-        val audioRegex = Regex("(!?\\[audio:(.*?)\\]\\((.*?)\\))")
-        audioRegex.findAll(markdown).forEach { match ->
-            val raw = match.value
-            val title = match.groupValues[2]
-            val url = match.groupValues[3]
-            list.add(
-                MediaTokenInfo(
-                    isAudio = true,
-                    rawMatch = raw,
-                    titleOrAlt = title,
-                    url = url,
-                    startOffset = match.range.first,
-                    endOffset = match.range.last + 1
-                )
-            )
+        if (markdown.isEmpty() || markdown.indexOf('(') == -1 || markdown.indexOf('[') == -1) {
+            return emptyList()
         }
+        return try {
+            val list = mutableListOf<MediaTokenInfo>()
 
-        // 2. Images: ![alt|size|align|side:text](url) or ![align|size](url) or ![alt](url)
-        val imgRegex = Regex("(!\\[(?!audio:)(.*?)\\]\\((.*?)\\))")
-        imgRegex.findAll(markdown).forEach { match ->
-            val raw = match.value
-            val meta = match.groupValues[2]
-            val url = match.groupValues[3]
-            val parts = meta.split("|")
-
-            var width = 100
-            var align = "center"
-            var alt = ""
-            var side = ""
-
-            for (rawPart in parts) {
-                val part = rawPart.trim()
-                when {
-                    part.endsWith("%") -> width = part.removeSuffix("%").toIntOrNull() ?: 100
-                    part.toIntOrNull() != null -> width = part.toInt()
-                    part.equals("left", ignoreCase = true) || part.equals("right", ignoreCase = true) || part.equals("center", ignoreCase = true) -> align = part.lowercase()
-                    rawPart.startsWith("side:") || part.startsWith("side:") -> {
-                        val rawSide = if (rawPart.startsWith("side:")) rawPart.removePrefix("side:") else part.removePrefix("side:")
-                        side = rawSide.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").replace("&#124;", "|")
-                    }
-                    else -> alt = part
-                }
+            // 1. Audio: ![audio:Title](url) or [audio:Title](url)
+            for (match in AUDIO_TOKEN_REGEX.findAll(markdown)) {
+                if (list.size >= MAX_MEDIA_TOKENS) break
+                val raw = match.value
+                val title = match.groupValues[2]
+                val url = match.groupValues[3]
+                if (url.startsWith("data:", ignoreCase = true) && url.length > MAX_DATA_URI_LENGTH) continue
+                list.add(
+                    MediaTokenInfo(
+                        isAudio = true,
+                        rawMatch = raw,
+                        titleOrAlt = title,
+                        url = url,
+                        startOffset = match.range.first,
+                        endOffset = match.range.last + 1
+                    )
+                )
             }
 
-            list.add(
-                MediaTokenInfo(
-                    isAudio = false,
-                    rawMatch = raw,
-                    titleOrAlt = alt,
-                    url = url,
-                    widthPercent = width.coerceIn(25, 100),
-                    alignment = align,
-                    sideText = side,
-                    startOffset = match.range.first,
-                    endOffset = match.range.last + 1
-                )
-            )
-        }
+            // 2. Images: ![alt|size|align|side:text](url) or ![align|size](url) or ![alt](url)
+            for (match in IMAGE_TOKEN_REGEX.findAll(markdown)) {
+                if (list.size >= MAX_MEDIA_TOKENS) break
+                val raw = match.value
+                val meta = match.groupValues[2]
+                val url = match.groupValues[3]
+                if (url.startsWith("data:", ignoreCase = true) && url.length > MAX_DATA_URI_LENGTH) continue
+                val parts = meta.split("|")
 
-        return list.sortedBy { it.startOffset }
+                var width = 100
+                var align = "center"
+                var alt = ""
+                var side = ""
+
+                for (rawPart in parts) {
+                    val part = rawPart.trim()
+                    when {
+                        part.endsWith("%") -> width = part.removeSuffix("%").toIntOrNull() ?: 100
+                        part.toIntOrNull() != null -> width = part.toInt()
+                        part.equals("left", ignoreCase = true) || part.equals("right", ignoreCase = true) || part.equals("center", ignoreCase = true) -> align = part.lowercase()
+                        rawPart.startsWith("side:") || part.startsWith("side:") -> {
+                            val rawSide = if (rawPart.startsWith("side:")) rawPart.removePrefix("side:") else part.removePrefix("side:")
+                            side = rawSide.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").replace("&#124;", "|")
+                        }
+                        else -> alt = part
+                    }
+                }
+
+                list.add(
+                    MediaTokenInfo(
+                        isAudio = false,
+                        rawMatch = raw,
+                        titleOrAlt = alt,
+                        url = url,
+                        widthPercent = width.coerceIn(25, 100),
+                        alignment = align,
+                        sideText = side,
+                        startOffset = match.range.first,
+                        endOffset = match.range.last + 1
+                    )
+                )
+            }
+
+            list.sortedBy { it.startOffset }
+        } catch (_: Throwable) {
+            emptyList()
+        }
     }
 }

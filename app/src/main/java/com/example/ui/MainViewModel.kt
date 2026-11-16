@@ -107,6 +107,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val timerTapToToggle: StateFlow<Boolean> = preferencesManager.timerTapToToggle
     val timerAllowSwipe: StateFlow<Boolean> = preferencesManager.timerAllowSwipe
     val habitRewardPoints: StateFlow<Int> = preferencesManager.habitRewardPoints
+    val notesSortOption: StateFlow<String> = preferencesManager.notesSortOption
+    val notesSortAscending: StateFlow<Boolean> = preferencesManager.notesSortAscending
+    val notesLayoutMode: StateFlow<String> = preferencesManager.notesLayoutMode
 
     fun setTimerContinuousMode(enabled: Boolean) {
         preferencesManager.setTimerContinuousMode(enabled)
@@ -118,6 +121,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setTimerAllowSwipe(enabled: Boolean) {
         preferencesManager.setTimerAllowSwipe(enabled)
+    }
+
+    fun setNotesSortOption(optionName: String) {
+        preferencesManager.setNotesSortOption(optionName)
+    }
+
+    fun setNotesSortAscending(ascending: Boolean) {
+        preferencesManager.setNotesSortAscending(ascending)
+    }
+
+    fun toggleNotesSortAscending() {
+        preferencesManager.setNotesSortAscending(!preferencesManager.notesSortAscending.value)
+    }
+
+    fun setNotesLayoutMode(modeName: String) {
+        preferencesManager.setNotesLayoutMode(modeName)
     }
 
     // Persistent Theme Mode: null = system, true = dark, false = light
@@ -314,9 +333,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingOpenNoteFromFinances = MutableStateFlow<Note?>(null)
     val pendingOpenNoteFromFinances: StateFlow<Note?> = _pendingOpenNoteFromFinances.asStateFlow()
     fun clearPendingOpenNoteFromFinances() { _pendingOpenNoteFromFinances.value = null }
-
-    val noteToolbarPosition: StateFlow<String> = preferencesManager.noteToolbarPosition
-    fun setNoteToolbarPosition(position: String) = preferencesManager.setNoteToolbarPosition(position)
 
     // Calendar selected date (YYYY-MM-DD)
     val todayString: String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())

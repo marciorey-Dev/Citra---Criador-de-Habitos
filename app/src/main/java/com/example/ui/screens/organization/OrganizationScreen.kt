@@ -29,14 +29,12 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import com.example.util.squashBounceClickable
-import com.example.util.staggeredEntrance
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrganizationScreen(
     viewModel: MainViewModel,
-    onNavigateToTimerWithTask: (Task) -> Unit,
-    isInitialLaunch: Boolean = false
+    onNavigateToTimerWithTask: (Task) -> Unit
 ) {
     val selectedTabIndex by viewModel.organizationSubTab.collectAsState()
     val isNoteEditorOpen by viewModel.isNoteEditorOpen.collectAsState()
@@ -53,7 +51,6 @@ fun OrganizationScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 2.dp)
-                    .staggeredEntrance(index = 0, enabled = isInitialLaunch)
             ) {
                 Surface(
                     shape = CircleShape,

@@ -2,9 +2,11 @@ package com.example.ui.screens.organization.notes
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -47,6 +49,7 @@ private fun categoryIconFor(category: String): ImageVector {
  * In collapsed mode, notes form an organic pile rotated slightly like real papers on a desk
  * with the category name serving as cover. In expanded mode, notes slide out in a fluid staircase.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CategoryNoteStack(
     categoryName: String,
@@ -65,23 +68,23 @@ fun CategoryNoteStack(
     val pileCount = displayPileNotes.size
 
     // Rotations & offsets for up to 5 notes in the pile (organic millimeter offsets)
-    val stackRotations = listOf(0f, 3.2f, -2.6f, 4.1f, -4.5f)
+    val stackRotations = listOf(0f, 3.0f, -2.5f, 3.8f, -4.2f)
     val stackOffsetsX = listOf(0.dp, 4.dp, (-3).dp, 5.dp, (-5).dp)
-    val stackOffsetsY = listOf(0.dp, 2.dp, 3.dp, (-3).dp, (-5).dp)
+    val stackOffsetsY = listOf(0.dp, 2.dp, 3.dp, (-3).dp, (-4).dp)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .testTag("category_stack_$categoryName"),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (!isExpanded) {
-            // Collapsed Pile ("Amontoado de Notas")
+            // Collapsed Pile ("Pasta Empilhada")
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
-                    .padding(horizontal = 6.dp, vertical = 6.dp)
+                    .height(162.dp)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
                     .clickable { onToggleExpand() }
                     .testTag("category_pile_box_$categoryName"),
                 contentAlignment = Alignment.Center
@@ -106,7 +109,7 @@ fun CategoryNoteStack(
                             isPinned = false,
                             modifier = Modifier
                                 .fillMaxWidth(0.96f)
-                                .height(155.dp)
+                                .height(142.dp)
                                 .offset(x = offX, y = offY)
                                 .rotate(rot)
                         ) {
@@ -129,7 +132,7 @@ fun CategoryNoteStack(
                     }
                 }
 
-                // Top Cover Card ("Capa da Categoria")
+                // Top Cover Card ("Capa da Pasta")
                 val coverNote = displayPileNotes.firstOrNull()
                 val coverColors = PaperNotePalette.resolvePaperColors(
                     noteColor = coverNote?.noteColor,
@@ -139,12 +142,12 @@ fun CategoryNoteStack(
 
                 PaperNoteSurface(
                     cornerRadius = 16.dp,
-                    foldSize = 24.dp,
+                    foldSize = 22.dp,
                     paperColors = coverColors,
                     isPinned = coverNote?.isPinned == true,
                     modifier = Modifier
                         .fillMaxWidth(0.96f)
-                        .height(155.dp)
+                        .height(142.dp)
                 ) {
                     Column(
                         modifier = Modifier
@@ -252,7 +255,7 @@ fun CategoryNoteStack(
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Text(
-                                    text = "Pilha compacta (${notes.size})",
+                                    text = if (notes.size == 1) "Pasta com 1 nota" else "Pilha de ${notes.size} notas",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = coverColors.accentColor,
                                     fontWeight = FontWeight.Medium
@@ -288,7 +291,10 @@ fun CategoryNoteStack(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .clip(RoundedCornerShape(14.dp))
                     .clickable { onToggleExpand() }
+                    .testTag("category_stack_collapse_$categoryName")
             ) {
                 Row(
                     modifier = Modifier
@@ -388,12 +394,15 @@ fun CategoryNoteStack(
                                 isPinned = note.isPinned,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onNoteClick(note) }
+                                    .combinedClickable(
+                                        onClick = { onNoteClick(note) },
+                                        onLongClick = onNoteLongClick?.let { handler -> { handler(note) } }
+                                    )
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 10.dp, start = 14.dp, end = 26.dp, bottom = 10.dp),
+                                        .padding(top = 8.dp, start = 14.dp, end = 22.dp, bottom = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -446,29 +455,29 @@ fun CategoryNoteStack(
 
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         IconButton(
                                             onClick = { onTogglePin(note) },
-                                            modifier = Modifier.size(28.dp)
+                                            modifier = Modifier.minimumInteractiveComponentSize()
                                         ) {
                                             Icon(
                                                 imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
                                                 contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                                tint = if (note.isPinned) paperColors.accentColor else paperColors.onBackgroundColor.copy(alpha = 0.4f),
-                                                modifier = Modifier.size(16.dp)
+                                                tint = if (note.isPinned) paperColors.accentColor else paperColors.onBackgroundColor.copy(alpha = 0.45f),
+                                                modifier = Modifier.size(18.dp)
                                             )
                                         }
 
                                         IconButton(
                                             onClick = { onDeleteNote(note) },
-                                            modifier = Modifier.size(28.dp)
+                                            modifier = Modifier.minimumInteractiveComponentSize()
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.DeleteOutline,
                                                 contentDescription = "Excluir",
-                                                tint = paperColors.onBackgroundColor.copy(alpha = 0.4f),
-                                                modifier = Modifier.size(16.dp)
+                                                tint = paperColors.onBackgroundColor.copy(alpha = 0.45f),
+                                                modifier = Modifier.size(18.dp)
                                             )
                                         }
                                     }

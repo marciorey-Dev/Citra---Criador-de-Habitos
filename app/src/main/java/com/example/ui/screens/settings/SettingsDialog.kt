@@ -50,7 +50,6 @@ fun SettingsDialog(
     val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
     val disabledWelcomeCategories by viewModel.disabledWelcomeCategories.collectAsState()
     val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
-    val noteToolbarPosition by viewModel.noteToolbarPosition.collectAsState()
 
     // Finance Module States
     val financesEnabled by viewModel.financesEnabled.collectAsState()
@@ -828,88 +827,6 @@ fun SettingsDialog(
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp,
                                                 color = if (isReading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-
-                                HorizontalDivider(
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
-
-                                Text(
-                                    text = "Posição do menu de formatação",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.5.sp
-                                )
-                                Text(
-                                    text = "Escolha entre manter o menu fixado no topo (oculta ao rolar para baixo) ou colado ao teclado na parte inferior.",
-                                    fontSize = 11.5.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val isBottom = noteToolbarPosition == "BOTTOM"
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = if (!isBottom) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .clickable { viewModel.setNoteToolbarPosition("TOP") }
-                                            .testTag("settings_toolbar_pos_top")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.VerticalAlignTop,
-                                                contentDescription = null,
-                                                tint = if (!isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Acima (Topo)",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp,
-                                                color = if (!isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-
-                                    Surface(
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = if (isBottom) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .clickable { viewModel.setNoteToolbarPosition("BOTTOM") }
-                                            .testTag("settings_toolbar_pos_bottom")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.VerticalAlignBottom,
-                                                contentDescription = null,
-                                                tint = if (isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Abaixo (Teclado)",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp,
-                                                color = if (isBottom) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }

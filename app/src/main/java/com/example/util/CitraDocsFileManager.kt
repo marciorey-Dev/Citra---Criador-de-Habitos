@@ -74,17 +74,23 @@ object CitraDocsFileManager {
         return "<!-- citra_id: $uuid -->\n$clean"
     }
 
+    private val COMMENT_ID_REGEX = Regex("<!--\\s*citra_id:\\s*([a-zA-Z0-9_-]+)\\s*-->")
+    private val COMMENT_STRIP_REGEX = Regex("<!--\\s*citra_id:\\s*[a-zA-Z0-9_-]+\\s*-->\\s*\\n?")
+    private val YAML_ID_REGEX = Regex("(?s)^---\\s*\\r?\\n[^\\u0000]{0,800}?citra_id:\\s*([a-zA-Z0-9_-]+)[^\\u0000]{0,400}?\\r?\\n---\\s*\\r?\\n?")
+    private val YAML_STRIP_REGEX = Regex("(?s)^---\\s*\\r?\\n[^\\u0000]{0,800}?citra_id:\\s*[a-zA-Z0-9_-]+[^\\u0000]{0,400}?\\r?\\n---\\s*\\r?\\n?")
+
     /**
      * Extracts UUID from markdown comments or YAML frontmatter.
      */
     fun extractUuidFromMarkdown(content: String): String? {
-        val commentRegex = Regex("<!--\\s*citra_id:\\s*([a-zA-Z0-9_-]+)\\s*-->")
-        val match = commentRegex.find(content)
+        val head = if (content.length > 1024) content.substring(0, 1024) else content
+        val match = COMMENT_ID_REGEX.find(head) ?: COMMENT_ID_REGEX.find(content)
         if (match != null) return match.groupValues[1].trim()
 
-        val yamlRegex = Regex("(?s)^---\\s*\\n.*?citra_id:\\s*([a-zA-Z0-9_-]+).*?\\n---\\s*\\n?")
-        val yamlMatch = yamlRegex.find(content)
-        if (yamlMatch != null) return yamlMatch.groupValues[1].trim()
+        if (head.startsWith("---")) {
+            val yamlMatch = YAML_ID_REGEX.find(head)
+            if (yamlMatch != null) return yamlMatch.groupValues[1].trim()
+        }
 
         return null
     }
@@ -93,8 +99,20 @@ object CitraDocsFileManager {
      * Strips frontmatter/citra_id tags so text remains clean for UI editors.
      */
     fun stripFrontmatter(content: String): String {
-        var result = content.replace(Regex("<!--\\s*citra_id:\\s*[a-zA-Z0-9_-]+\\s*-->\\s*\\n?"), "")
-        result = result.replace(Regex("(?s)^---\\s*\\n.*?citra_id:\\s*[a-zA-Z0-9_-]+.*?\\n---\\s*\\n?"), "")
+        if (content.isEmpty()) return content
+        var result = if (content.contains("citra_id:")) {
+            content.replace(COMMENT_STRIP_REGEX, "")
+        } else {
+            content
+        }
+        if (result.startsWith("---")) {
+            val headLen = minOf(result.length, 1024)
+            val head = result.substring(0, headLen)
+            val yamlMatch = YAML_STRIP_REGEX.find(head)
+            if (yamlMatch != null) {
+                result = result.removeRange(yamlMatch.range.first, yamlMatch.range.last + 1)
+            }
+        }
         return result.trimStart()
     }
 

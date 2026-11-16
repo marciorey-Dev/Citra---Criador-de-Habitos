@@ -122,11 +122,18 @@ object FinanceNoteMarkdownEngine {
         return elapsedMillis >= minIntervalMillis
     }
 
+    private val FIN_MARKER_GENERIC_REGEX = Regex("(?i)<!--\\s*citra:fin:[^\\r\\n]*?-->\\s*\\n?")
+    private val FIN_MARKER_START_REGEX = Regex("<!--\\s*citra:fin:inicio[^\\r\\n]*?-->\\s*\\n?")
+    private val FIN_MARKER_END_REGEX = Regex("<!--\\s*citra:fin:fim[^\\r\\n]*?-->\\s*\\n?")
+
     fun stripFinanceMarkers(content: String): String {
+        if (!content.contains("citra:fin:", ignoreCase = true)) {
+            return content
+        }
         return content
-            .replace(Regex("(?i)<!--\\s*citra:fin:[\\s\\S]*?-->\\s*\\n?"), "")
-            .replace(Regex("<!--\\s*citra:fin:inicio[\\s\\S]*?-->\\s*\\n?"), "")
-            .replace(Regex("<!--\\s*citra:fin:fim[\\s\\S]*?-->\\s*\\n?"), "")
+            .replace(FIN_MARKER_GENERIC_REGEX, "")
+            .replace(FIN_MARKER_START_REGEX, "")
+            .replace(FIN_MARKER_END_REGEX, "")
             .trim()
     }
 

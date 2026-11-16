@@ -35,7 +35,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.example.util.squashBounce
 import com.example.util.squashBounceClickable
-import com.example.util.staggeredEntrance
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.example.data.model.TaskPriority
@@ -55,8 +54,7 @@ fun HomeScreen(
     onNavigateToTimer: () -> Unit,
     onNavigateToOrganization: () -> Unit,
     onQuickAddTask: () -> Unit,
-    onQuickAddNote: () -> Unit,
-    isInitialLaunch: Boolean = false
+    onQuickAddNote: () -> Unit
 ) {
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -102,7 +100,7 @@ fun HomeScreen(
     ) {
         // 1. Greeting & Date Header
         item {
-            Column(modifier = Modifier.staggeredEntrance(index = 0, enabled = isInitialLaunch)) {
+            Column {
                 Text(
                     text = dateDisplay,
                     fontSize = 13.sp,
@@ -131,7 +129,7 @@ fun HomeScreen(
             val primaryColor = MaterialTheme.colorScheme.primary
             val tertiaryColor = MaterialTheme.colorScheme.tertiary
 
-            Box(modifier = Modifier.staggeredEntrance(index = 1, enabled = isInitialLaunch)) {
+            Box {
                 if (pomodoroState.isRunning || pomodoroState.isPaused) {
                     val mins = pomodoroState.remainingSeconds / 60
                     val secs = pomodoroState.remainingSeconds % 60
@@ -307,7 +305,6 @@ fun HomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .staggeredEntrance(index = 2, enabled = isInitialLaunch)
                     .tutorialTarget("home_tasks_shortcut"),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -444,7 +441,6 @@ fun HomeScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .staggeredEntrance(index = 3, enabled = isInitialLaunch)
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
@@ -503,8 +499,7 @@ fun HomeScreen(
 
                     AnimatedVisibility(
                         visible = currentTask.id !in completingTaskIds,
-                        exit = shrinkVertically(tween(300)) + fadeOut(tween(250)),
-                        modifier = Modifier.staggeredEntrance(index = 3, enabled = isInitialLaunch)
+                        exit = shrinkVertically(tween(300)) + fadeOut(tween(250))
                     ) {
                         Card(
                             shape = RoundedCornerShape(22.dp),
@@ -615,8 +610,7 @@ fun HomeScreen(
             if (nextTasks.isNotEmpty()) {
                 item {
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.staggeredEntrance(index = 3, enabled = isInitialLaunch)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         nextTasks.forEach { task ->
                             val isTaskCompleting = task.id in completingTaskIds
@@ -709,9 +703,7 @@ fun HomeScreen(
         // 5. Habits Section ("Hábitos de Hoje")
         item {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .staggeredEntrance(index = 4, enabled = isInitialLaunch),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(

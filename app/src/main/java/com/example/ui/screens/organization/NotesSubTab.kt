@@ -49,32 +49,23 @@ import com.example.data.model.isReadyForMainList
 import com.example.ui.MainViewModel
 import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
+import com.example.ui.screens.organization.notes.CategoryNoteStack
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteEditorMode
+import com.example.ui.screens.organization.notes.NoteLayoutMode
 import com.example.ui.screens.organization.notes.NoteReadingPreview
+import com.example.ui.screens.organization.notes.NoteSortOption
 import com.example.ui.screens.organization.notes.PaperNoteColors
 import com.example.ui.screens.organization.notes.PaperNotePalette
 import com.example.ui.screens.organization.notes.PaperNoteSurface
 import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
+import com.example.ui.screens.organization.notes.groupNotesByCategory
+import com.example.ui.screens.organization.notes.sortNotes
 import com.example.ui.theme.*
 import com.example.ui.tutorial.tutorialTarget
 import com.example.util.NoteExportHelper
 import java.text.SimpleDateFormat
 import java.util.*
-
-enum class NoteSortOption(val label: String) {
-    LAST_UPDATED("Última Atualização"),
-    CREATION_DATE("Data de Criação"),
-    ALPHABETICAL("Ordem A-Z"),
-    CATEGORY("Categoria"),
-    SIZE("Tamanho")
-}
-
-enum class NoteLayoutMode(val label: String) {
-    GRID_2("Grade"),
-    GRID_3("Grade Pequena"),
-    LIST("Lista")
-}
 
 @Composable
 private fun categoryIconFor(category: String): ImageVector {
@@ -114,9 +105,13 @@ fun NotesSubTab(
     var noteForSubmenu by remember { mutableStateOf<Note?>(null) }
     var showTrashDialog by remember { mutableStateOf(false) }
     var showAddFolderDialog by remember { mutableStateOf(false) }
-    var currentSort by remember { mutableStateOf(NoteSortOption.LAST_UPDATED) }
-    var currentLayout by remember { mutableStateOf(NoteLayoutMode.GRID_2) }
+    val notesSortOptionName by viewModel.notesSortOption.collectAsState()
+    val isSortAscending by viewModel.notesSortAscending.collectAsState()
+    val notesLayoutModeName by viewModel.notesLayoutMode.collectAsState()
+    val currentSort = remember(notesSortOptionName) { NoteSortOption.fromName(notesSortOptionName) }
+    val currentLayout = remember(notesLayoutModeName) { NoteLayoutMode.fromName(notesLayoutModeName) }
     var showSortMenu by remember { mutableStateOf(false) }
+    val expandedCategoryStacks = remember { mutableStateMapOf<String, Boolean>() }
 
     val importMultipleNotesLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -159,21 +154,21 @@ fun NotesSubTab(
         }
     }
 
-    // Sorted notes: Pinned notes ALWAYS stay at top unless unpinned
-    val sortedNotes = remember(filteredNotes, currentSort) {
-        filteredNotes.sortedWith(
-            Comparator { a, b ->
-                if (a.isPinned != b.isPinned) {
-                    return@Comparator if (a.isPinned) -1 else 1
-                }
-                when (currentSort) {
-                    NoteSortOption.LAST_UPDATED -> b.updatedAt.compareTo(a.updatedAt)
-                    NoteSortOption.CREATION_DATE -> b.id.compareTo(a.id)
-                    NoteSortOption.ALPHABETICAL -> a.title.compareTo(b.title, ignoreCase = true)
-                    NoteSortOption.CATEGORY -> a.category.compareTo(b.category, ignoreCase = true)
-                    NoteSortOption.SIZE -> b.content.length.compareTo(a.content.length)
-                }
-            }
+    // Sorted notes: Pinned notes ALWAYS stay at top, combined with primary sort + secondary asc/desc
+    val sortedNotes = remember(filteredNotes, currentSort, isSortAscending) {
+        sortNotes(
+            notes = filteredNotes,
+            sortOption = currentSort,
+            ascending = isSortAscending
+        )
+    }
+
+    val groupedCategoryNotes = remember(sortedNotes, currentSort, isSortAscending, categories) {
+        groupNotesByCategory(
+            sortedNotes = sortedNotes,
+            sortOption = currentSort,
+            ascending = isSortAscending,
+            knownCategories = categories.map { it.name }
         )
     }
 
@@ -643,79 +638,220 @@ fun NotesSubTab(
                 }
             }
 
-            // 3. View & Sort Controls Row
-            Row(
+            // 3. View & Sort Controls Row (Primary Sort + Secondary Asc/Desc + Layout Modes incl. Stacked Folders)
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Sort Dropdown Pill
-                Box {
-                    Surface(
-                        shape = CircleShape,
-                        color = surfaceContainerLow,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { showSortMenu = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Primary Sort Dropdown Pill
+                    Box {
+                        Surface(
+                            shape = CircleShape,
+                            color = surfaceContainerLow,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { showSortMenu = true }
+                                .testTag("notes_sort_menu_btn")
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = null,
-                                modifier = Modifier.size(17.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = currentSort.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Icon(
-                                imageVector = Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.outline
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Sort,
+                                    contentDescription = "Ordenar notas",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = currentSort.shortLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ExpandMore,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp),
+                                    tint = MaterialTheme.colorScheme.outline
+                                )
+                            }
                         }
-                    }
-                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
-                        NoteSortOption.values().forEach { opt ->
+                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                            Text(
+                                text = "Ordenar por",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
+                            NoteSortOption.entries.forEach { opt ->
+                                val selected = opt == currentSort
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = opt.label,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            when (opt) {
+                                                NoteSortOption.LAST_UPDATED -> Icons.Default.Update
+                                                NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
+                                                NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
+                                                NoteSortOption.CATEGORY -> Icons.Default.Label
+                                                NoteSortOption.SIZE -> Icons.Default.FormatSize
+                                            },
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    trailingIcon = if (selected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        viewModel.setNotesSortOption(opt.name)
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                            Text(
+                                text = "Ordem secundária",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            )
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        text = opt.label,
+                                        text = "Ascendente",
                                         fontSize = 12.sp,
-                                        fontWeight = if (opt == currentSort) FontWeight.Bold else FontWeight.Normal
+                                        fontWeight = if (isSortAscending) FontWeight.Bold else FontWeight.Normal
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
-                                        when (opt) {
-                                            NoteSortOption.LAST_UPDATED -> Icons.Default.Update
-                                            NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
-                                            NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
-                                            NoteSortOption.CATEGORY -> Icons.Default.Label
-                                            NoteSortOption.SIZE -> Icons.Default.FormatSize
-                                        },
+                                        imageVector = Icons.Default.ArrowUpward,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp),
-                                        tint = if (opt == currentSort) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        tint = if (isSortAscending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                     )
                                 },
+                                trailingIcon = if (isSortAscending) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
                                 onClick = {
-                                    currentSort = opt
+                                    viewModel.setNotesSortAscending(true)
+                                    showSortMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Decrescente",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (!isSortAscending) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDownward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (!isSortAscending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                trailingIcon = if (!isSortAscending) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    viewModel.setNotesSortAscending(false)
                                     showSortMenu = false
                                 }
                             )
                         }
                     }
+
+                    // Secondary 1-Tap Ascendente / Decrescente Pill
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isSortAscending) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            surfaceContainerLow
+                        },
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { viewModel.toggleNotesSortAscending() }
+                            .testTag("notes_sort_direction_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isSortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                                contentDescription = if (isSortAscending) "Ordem Ascendente" else "Ordem Decrescente",
+                                modifier = Modifier.size(15.dp),
+                                tint = if (isSortAscending) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                }
+                            )
+                            Text(
+                                text = if (isSortAscending) "Asc" else "Desc",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isSortAscending) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                maxLines = 1
+                            )
+                        }
+                    }
                 }
 
-                // Layout Toggle Pills inside Pill Container
+                // Layout Toggle Pills inside Pill Container (Grid 2, Grid 3, List, Stacked Folders)
                 Surface(
                     shape = CircleShape,
                     color = surfaceContainerLow
@@ -725,8 +861,14 @@ fun NotesSubTab(
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        NoteLayoutMode.values().forEach { mode ->
+                        NoteLayoutMode.entries.forEach { mode ->
                             val isSelected = currentLayout == mode
+                            val layoutTag = when (mode) {
+                                NoteLayoutMode.GRID_2 -> "notes_layout_grid2_btn"
+                                NoteLayoutMode.GRID_3 -> "notes_layout_grid3_btn"
+                                NoteLayoutMode.LIST -> "notes_layout_list_btn"
+                                NoteLayoutMode.STACKED_CATEGORIES -> "notes_layout_stacked_btn"
+                            }
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
@@ -735,7 +877,8 @@ fun NotesSubTab(
                                         if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
                                         CircleShape
                                     )
-                                    .clickable { currentLayout = mode },
+                                    .clickable { viewModel.setNotesLayoutMode(mode.name) }
+                                    .testTag(layoutTag),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -743,6 +886,7 @@ fun NotesSubTab(
                                         NoteLayoutMode.GRID_2 -> Icons.Default.GridView
                                         NoteLayoutMode.GRID_3 -> Icons.Default.ViewComfy
                                         NoteLayoutMode.LIST -> Icons.Default.ViewList
+                                        NoteLayoutMode.STACKED_CATEGORIES -> Icons.Default.Layers
                                     },
                                     contentDescription = mode.label,
                                     modifier = Modifier.size(17.dp),
@@ -883,6 +1027,110 @@ fun NotesSubTab(
                                 onLongClick = { noteForSubmenu = note },
                                 onTogglePin = { viewModel.togglePinNote(note) },
                                 onDelete = { noteToDelete = note }
+                            )
+                        }
+                    }
+                    item {
+                        QuickDraftTile(
+                            onClick = { showTemplatesMenu = true }
+                        )
+                    }
+                }
+            }
+            NoteLayoutMode.STACKED_CATEGORIES -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 92.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("notes_stacked_list")
+                ) {
+                    item {
+                        topBarHeaderItem()
+                    }
+                    if (sortedNotes.isEmpty()) {
+                        item {
+                            emptyNotesItem()
+                        }
+                    } else {
+                        item(key = "stacks_summary_bar") {
+                            val allExpanded = groupedCategoryNotes.isNotEmpty() &&
+                                groupedCategoryNotes.all { expandedCategoryStacks[it.categoryName.lowercase()] == true }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderCopy,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "${groupedCategoryNotes.size} ${if (groupedCategoryNotes.size == 1) "pasta" else "pastas"} • ${sortedNotes.size} ${if (sortedNotes.size == 1) "nota" else "notas"}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                if (groupedCategoryNotes.size > 1) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                val targetState = !allExpanded
+                                                groupedCategoryNotes.forEach { group ->
+                                                    expandedCategoryStacks[group.categoryName.lowercase()] = targetState
+                                                }
+                                            }
+                                            .testTag("notes_stacks_toggle_all_btn")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (allExpanded) Icons.Default.UnfoldLess else Icons.Default.UnfoldMore,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Text(
+                                                text = if (allExpanded) "Recolher todas" else "Expandir todas",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        items(groupedCategoryNotes, key = { it.categoryName.lowercase() }) { group ->
+                            val stackKey = group.categoryName.lowercase()
+                            CategoryNoteStack(
+                                categoryName = group.categoryName,
+                                notes = group.notes,
+                                isExpanded = expandedCategoryStacks[stackKey] == true,
+                                onToggleExpand = {
+                                    expandedCategoryStacks[stackKey] = !(expandedCategoryStacks[stackKey] ?: false)
+                                },
+                                onNoteClick = { activeNoteToEdit = it },
+                                onNoteLongClick = { noteForSubmenu = it },
+                                onTogglePin = { viewModel.togglePinNote(it) },
+                                onDeleteNote = { noteToDelete = it }
                             )
                         }
                     }

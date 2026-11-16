@@ -121,4 +121,67 @@ class InlineMarkdownHelperTest {
         assertEquals("palavra", afterToggleBoldOff.text)
         assertEquals(TextRange(0, 7), afterToggleBoldOff.selection)
     }
+
+    @Test
+    fun extensive_formatted_paste_does_not_crash_and_preserves_length_invariant() {
+        val sampleSection = buildString {
+            append("# Título Principal com **Negrito** e ==Destaque==\r\n")
+            append("## Subtítulo com _Itálico_ e ~~Tachado~~ e <u>Sublinhado</u>\r\n")
+            append("- [ ] Tarefa pendente com ***~~<u>==tudo==</u>~~***\n")
+            append("- [x] Tarefa concluída com [Link **Formatado**](https://example.com/a_b?x=1&y=2)\n")
+            append("> Citação importante com `codigoInline()` e \$x^2 + y^2 = z^2\$\n")
+            append("| Col 1 | Col 2 |\n| --- | --- |\n| Val 1 | Val 2 |\n")
+            append("```kotlin\nval texto = \"escaped \\\"quote\\\" " + "a".repeat(300) + "\"\n/* " + "c".repeat(300) + " */\n```\n")
+            append("$$\n\\sum_{i=1}^{n} i^2 = \\frac{n(n+1)(2n+1)}{6}\n$$\n")
+            append("Unclosed **bold *italic ~~strike <u>underline ==highlight `code [link(url\n")
+            append("![img|50%|left|side:Texto](media/sample.jpg)\n")
+            append("![oversized](data:image/png;base64," + "A".repeat(4000) + ")\n")
+            append("---\n")
+        }
+
+        // Repeat until document exceeds 55,000 chars
+        val hugeDoc = buildString(60_000) {
+            append("---\ncitra_id: 1234-abcd-5678\n---\n")
+            while (length < 55_000) {
+                append(sampleSection)
+            }
+        }
+        assertTrue(hugeDoc.length > 55_000)
+
+        val startMs = System.currentTimeMillis()
+        val liveStyled = ObsidianMarkdownEngine.buildLivePreviewAnnotatedString(
+            text = hugeDoc,
+            selection = TextRange(25_000),
+            primaryColor = androidx.compose.ui.graphics.Color(0xFFEA580C),
+            textColor = androidx.compose.ui.graphics.Color.Black,
+            isDarkBg = false
+        )
+        // OffsetMapping.Identity requires exact UTF-16 character length match
+        assertEquals(hugeDoc.length, liveStyled.text.length)
+
+        val mediaTokens = ObsidianMarkdownEngine.parseMediaTokens(hugeDoc)
+        assertTrue(mediaTokens.size <= 40)
+        assertTrue(mediaTokens.none { it.url.startsWith("data:") && it.url.length > 512 })
+
+        val blocks = com.example.ui.screens.organization.notes.SmoothMarkdownConverter.markdownToBlocks(hugeDoc)
+        assertTrue(blocks.isNotEmpty())
+
+        val highlighted = com.example.util.CodeHighlighter.highlight(
+            code = "val s = \"" + "x\\\"".repeat(3_000) + "\"\n/* " + "y".repeat(3_000) + " */",
+            language = "kotlin"
+        )
+        assertTrue(highlighted.text.isNotEmpty())
+
+        val stripped = com.example.util.CitraDocsFileManager.stripFrontmatter(hugeDoc)
+        assertEquals("1234-abcd-5678", com.example.util.CitraDocsFileManager.extractUuidFromMarkdown(hugeDoc))
+        assertFalse(stripped.startsWith("---\ncitra_id:"))
+
+        // Single-line massive paragraph with unclosed tokens must also finish rapidly without exception
+        val megaParagraph = "**a** *b* ~~c~~ <u>d</u> ==e== `f` ".repeat(900) + "**unclosed"
+        val readingStyled = InlineMarkdownHelper.parseInlineFormatting(megaParagraph, isDark = false)
+        assertTrue(readingStyled.text.isNotEmpty())
+
+        val elapsedMs = System.currentTimeMillis() - startMs
+        assertTrue("Processing extensive paste took too long: ${elapsedMs}ms", elapsedMs < 5_000)
+    }
 }

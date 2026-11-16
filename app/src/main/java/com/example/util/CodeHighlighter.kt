@@ -56,11 +56,13 @@ object CodeHighlighter {
         "Array", "Unit", "Any", "Nothing", "Promise", "Observable", "Task", "Note", "Habit"
     )
 
-    private val stringRegex = Regex("\"(\\\\.|[^\"\\\\])*\"|'(\\\\.|[^'\\\\])*'")
-    private val commentRegex = Regex("//.*|/\\*[\\s\\S]*?\\*/|#.*")
+    private val stringRegex = Regex("\"[^\"\\\\\\n]*(?:\\\\.[^\"\\\\\\n]*)*\"|'[^'\\\\\\n]*(?:\\\\.[^'\\\\\\n]*)*'")
+    private val commentRegex = Regex("//[^\\n]*|/\\*[^*]*(?:\\*+[^*/][^*]*)*\\*+/|#[^\\n]*")
     private val numberRegex = Regex("\\b(0x[0-9a-fA-F]+|\\d+(\\.\\d+)?f?)\\b")
     private val wordRegex = Regex("\\b[a-zA-Z_][a-zA-Z0-9_]*\\b")
     private val annotationRegex = Regex("@[a-zA-Z_][a-zA-Z0-9_]*")
+
+    private const val MAX_HIGHLIGHT_CHARS = 20_000
 
     /**
      * Produces sorted, non-overlapping syntax spans resolved by precedence:
@@ -68,13 +70,14 @@ object CodeHighlighter {
      */
     fun tokenize(code: String, @Suppress("UNUSED_PARAMETER") language: String = "kotlin"): List<CodeTokenSpan> {
         if (code.isEmpty()) return emptyList()
+        val target = if (code.length > MAX_HIGHLIGHT_CHARS) code.substring(0, MAX_HIGHLIGHT_CHARS) else code
 
         // Track claimed character positions so higher-precedence tokens aren't broken by inner words/numbers
-        val occupied = BooleanArray(code.length)
+        val occupied = BooleanArray(target.length)
         val spans = mutableListOf<CodeTokenSpan>()
 
         fun claim(start: Int, endExclusive: Int, type: CodeTokenType) {
-            if (start < 0 || endExclusive > code.length || start >= endExclusive) return
+            if (start < 0 || endExclusive > target.length || start >= endExclusive) return
             for (i in start until endExclusive) {
                 if (occupied[i]) return
             }
@@ -85,22 +88,22 @@ object CodeHighlighter {
         }
 
         // 1. Comments (highest priority)
-        for (match in commentRegex.findAll(code)) {
+        for (match in commentRegex.findAll(target)) {
             claim(match.range.first, match.range.last + 1, CodeTokenType.COMMENT)
         }
 
         // 2. Strings
-        for (match in stringRegex.findAll(code)) {
+        for (match in stringRegex.findAll(target)) {
             claim(match.range.first, match.range.last + 1, CodeTokenType.STRING)
         }
 
         // 3. Annotations
-        for (match in annotationRegex.findAll(code)) {
+        for (match in annotationRegex.findAll(target)) {
             claim(match.range.first, match.range.last + 1, CodeTokenType.ANNOTATION)
         }
 
         // 4. Words: Booleans / Null, Keywords, Types
-        for (match in wordRegex.findAll(code)) {
+        for (match in wordRegex.findAll(target)) {
             val word = match.value
             val type = when {
                 word == "true" || word == "false" || word == "null" -> CodeTokenType.BOOLEAN
@@ -114,7 +117,7 @@ object CodeHighlighter {
         }
 
         // 5. Numbers
-        for (match in numberRegex.findAll(code)) {
+        for (match in numberRegex.findAll(target)) {
             claim(match.range.first, match.range.last + 1, CodeTokenType.NUMBER)
         }
 
@@ -123,29 +126,37 @@ object CodeHighlighter {
     }
 
     fun highlight(code: String, language: String = "kotlin"): AnnotatedString {
-        val spans = tokenize(code, language)
-        return buildAnnotatedString {
-            append(code)
-            for (span in spans) {
-                val color = when (span.type) {
-                    CodeTokenType.COMMENT -> ColorComment
-                    CodeTokenType.STRING -> ColorString
-                    CodeTokenType.ANNOTATION -> ColorAnnotation
-                    CodeTokenType.BOOLEAN -> ColorBoolean
-                    CodeTokenType.KEYWORD -> ColorKeyword
-                    CodeTokenType.TYPE -> ColorType
-                    CodeTokenType.NUMBER -> ColorNumber
+        if (code.isEmpty()) return AnnotatedString("")
+        return try {
+            val spans = tokenize(code, language)
+            buildAnnotatedString {
+                append(code)
+                for (span in spans) {
+                    val s = span.start.coerceIn(0, code.length)
+                    val e = span.endExclusive.coerceIn(s, code.length)
+                    if (s >= e) continue
+                    val color = when (span.type) {
+                        CodeTokenType.COMMENT -> ColorComment
+                        CodeTokenType.STRING -> ColorString
+                        CodeTokenType.ANNOTATION -> ColorAnnotation
+                        CodeTokenType.BOOLEAN -> ColorBoolean
+                        CodeTokenType.KEYWORD -> ColorKeyword
+                        CodeTokenType.TYPE -> ColorType
+                        CodeTokenType.NUMBER -> ColorNumber
+                    }
+                    addStyle(
+                        SpanStyle(
+                            color = color,
+                            fontWeight = if (span.type.isBold) FontWeight.Bold else null,
+                            fontStyle = if (span.type.isItalic) FontStyle.Italic else null
+                        ),
+                        s,
+                        e
+                    )
                 }
-                addStyle(
-                    SpanStyle(
-                        color = color,
-                        fontWeight = if (span.type.isBold) FontWeight.Bold else null,
-                        fontStyle = if (span.type.isItalic) FontStyle.Italic else null
-                    ),
-                    span.start,
-                    span.endExclusive
-                )
             }
+        } catch (_: Throwable) {
+            AnnotatedString(code)
         }
     }
 }

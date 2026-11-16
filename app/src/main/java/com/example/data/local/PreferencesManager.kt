@@ -421,7 +421,10 @@ class PreferencesManager(private val context: Context) {
             "timer_continuous_mode" to _timerContinuousMode.value,
             "timer_tap_to_toggle" to _timerTapToToggle.value,
             "timer_allow_swipe" to _timerAllowSwipe.value,
-            "habit_reward_points" to _habitRewardPoints.value
+            "habit_reward_points" to _habitRewardPoints.value,
+            "notes_sort_option" to _notesSortOption.value,
+            "notes_sort_ascending" to _notesSortAscending.value,
+            "notes_layout_mode" to _notesLayoutMode.value
         )
     }
 
@@ -470,6 +473,18 @@ class PreferencesManager(private val context: Context) {
             val safe = it.coerceAtLeast(0)
             editor.putInt("habit_reward_points", safe)
             _habitRewardPoints.value = safe
+        }
+        (map["notes_sort_option"] as? String)?.let {
+            editor.putString("notes_sort_option", it)
+            _notesSortOption.value = it
+        }
+        (map["notes_sort_ascending"] as? Boolean)?.let {
+            editor.putBoolean("notes_sort_ascending", it)
+            _notesSortAscending.value = it
+        }
+        (map["notes_layout_mode"] as? String)?.let {
+            editor.putString("notes_layout_mode", it)
+            _notesLayoutMode.value = it
         }
 
         // Standard notification and sound effects settings
@@ -766,16 +781,35 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putInt("last_used_focus_mins", safe).apply()
     }
 
-    // Note formatting toolbar position: "TOP" (default, above categories) or "BOTTOM" (docked above keyboard/margin)
-    private val _noteToolbarPosition = MutableStateFlow(
-        prefs.getString("note_toolbar_position", "TOP")?.takeIf { it == "TOP" || it == "BOTTOM" } ?: "TOP"
+    // Notes Organization Preferences: primary sort, secondary asc/desc direction, and layout mode
+    private val _notesSortOption = MutableStateFlow(
+        prefs.getString("notes_sort_option", "LAST_UPDATED") ?: "LAST_UPDATED"
     )
-    val noteToolbarPosition: StateFlow<String> = _noteToolbarPosition.asStateFlow()
+    val notesSortOption: StateFlow<String> = _notesSortOption.asStateFlow()
 
-    fun setNoteToolbarPosition(position: String) {
-        val clean = if (position == "BOTTOM") "BOTTOM" else "TOP"
-        _noteToolbarPosition.value = clean
-        prefs.edit().putString("note_toolbar_position", clean).apply()
+    private val _notesSortAscending = MutableStateFlow(
+        prefs.getBoolean("notes_sort_ascending", false)
+    )
+    val notesSortAscending: StateFlow<Boolean> = _notesSortAscending.asStateFlow()
+
+    private val _notesLayoutMode = MutableStateFlow(
+        prefs.getString("notes_layout_mode", "GRID_2") ?: "GRID_2"
+    )
+    val notesLayoutMode: StateFlow<String> = _notesLayoutMode.asStateFlow()
+
+    fun setNotesSortOption(optionName: String) {
+        _notesSortOption.value = optionName
+        prefs.edit().putString("notes_sort_option", optionName).apply()
+    }
+
+    fun setNotesSortAscending(ascending: Boolean) {
+        _notesSortAscending.value = ascending
+        prefs.edit().putBoolean("notes_sort_ascending", ascending).apply()
+    }
+
+    fun setNotesLayoutMode(modeName: String) {
+        _notesLayoutMode.value = modeName
+        prefs.edit().putString("notes_layout_mode", modeName).apply()
     }
 
     fun resetFinanceDataPreferences() {

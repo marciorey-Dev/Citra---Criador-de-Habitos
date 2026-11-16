@@ -90,6 +90,10 @@ data class ToggleBlock(
 
 object SmoothMarkdownConverter {
 
+    private val AUDIO_LINE_REGEX = Regex("^!?\\[audio:([^\\]\\n]*)\\]\\(([^)\\n]*)\\)$")
+    private val IMAGE_LINE_REGEX = Regex("^!\\[([^\\]\\n]*)\\]\\(([^)\\n]*)\\)$")
+    private val TABLE_DELIMITER_REGEX = Regex("^-+$")
+
     /**
      * Parses standard Markdown into smooth, user-friendly VisualBlocks
      * (Hiding raw syntax like ###, |---| etc.)
@@ -99,9 +103,10 @@ object SmoothMarkdownConverter {
             return listOf(TextBlock(text = ""))
         }
 
-        val blocks = mutableListOf<VisualBlock>()
-        val lines = content.lines()
-        var i = 0
+        return try {
+            val blocks = mutableListOf<VisualBlock>()
+            val lines = content.lines()
+            var i = 0
 
         while (i < lines.size) {
             val line = lines[i]
@@ -178,12 +183,12 @@ object SmoothMarkdownConverter {
                 }
 
                 // Audio (![audio:title|vol:..|loop](url) or [audio:...](url))
-                Regex("^!?\\[audio:(.*?)\\]\\((.*?)\\)$").matches(trimmed) -> {
-                    val match = Regex("^!?\\[audio:(.*?)\\]\\((.*?)\\)$").find(trimmed)
+                AUDIO_LINE_REGEX.matches(trimmed) -> {
+                    val match = AUDIO_LINE_REGEX.find(trimmed)
                     if (match != null) {
                         val rawTitle = match.groupValues[1]
                         val parts = rawTitle.split("|").map { it.trim() }
-                        var title = parts.getOrNull(0) ?: "Áudio"
+                        val title = parts.getOrNull(0) ?: "Áudio"
                         var volume = 1.0f
                         var isLoop = false
                         for (p in parts.drop(1)) {
@@ -199,8 +204,8 @@ object SmoothMarkdownConverter {
                 }
 
                 // Image (![alt|width|align|side:text](url))
-                Regex("^!\\[(.*?)\\]\\((.*?)\\)$").matches(trimmed) -> {
-                    val match = Regex("^!\\[(.*?)\\]\\((.*?)\\)$").find(trimmed)
+                IMAGE_LINE_REGEX.matches(trimmed) -> {
+                    val match = IMAGE_LINE_REGEX.find(trimmed)
                     if (match != null) {
                         val rawAlt = match.groupValues[1]
                         val parts = rawAlt.split("|")
@@ -326,6 +331,9 @@ object SmoothMarkdownConverter {
         }
 
         return if (blocks.isEmpty()) listOf(TextBlock(text = "")) else blocks
+        } catch (_: Throwable) {
+            listOf(TextBlock(text = content))
+        }
     }
 
     /**
@@ -406,7 +414,7 @@ object SmoothMarkdownConverter {
                 if (c.endsWith(" ")) c = c.substring(0, c.length - 1)
                 c.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n").replace("&#124;", "|")
             }
-            if (cells.all { it.trim().matches(Regex("^-+$")) }) null else cells
+            if (cells.all { TABLE_DELIMITER_REGEX.matches(it.trim()) }) null else cells
         }
         if (nonDelimiterRows.isEmpty()) return null
         val headers = nonDelimiterRows.first()
