@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -564,11 +566,12 @@ fun ExternalPdfReaderScreen(
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         while (true) {
-                            val event = awaitPointerEvent()
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
                             if (event.changes.count { it.pressed } >= 2) {
                                 val zoomFactor = event.calculateZoom()
-                                if (kotlin.math.abs(zoomFactor - 1f) > 0.01f) {
-                                    val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                val panDelta = event.calculatePan()
+                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                if (kotlin.math.abs(zoomFactor - 1f) > 0.005f || panDelta != Offset.Zero) {
                                     zoomScale = updated
                                     if (updated <= 1.02f) {
                                         panOffset = Offset.Zero
@@ -576,12 +579,12 @@ fun ExternalPdfReaderScreen(
                                         val maxX = (viewportSize.width * (updated - 1f)) / 2f
                                         val maxY = (viewportSize.height * (updated - 1f)) / 2f
                                         panOffset = Offset(
-                                            x = panOffset.x.coerceIn(-maxX, maxX),
-                                            y = panOffset.y.coerceIn(-maxY, maxY)
+                                            x = (panOffset.x + panDelta.x).coerceIn(-maxX, maxX),
+                                            y = (panOffset.y + panDelta.y).coerceIn(-maxY, maxY)
                                         )
                                     }
-                                    event.changes.forEach { it.consume() }
                                 }
+                                event.changes.forEach { it.consume() }
                             }
                             if (event.changes.none { it.pressed }) break
                         }
@@ -983,11 +986,12 @@ fun ExternalDocxReaderScreen(
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         while (true) {
-                            val event = awaitPointerEvent()
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
                             if (event.changes.count { it.pressed } >= 2) {
                                 val zoomFactor = event.calculateZoom()
-                                if (kotlin.math.abs(zoomFactor - 1f) > 0.01f) {
-                                    val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                val panDelta = event.calculatePan()
+                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                if (kotlin.math.abs(zoomFactor - 1f) > 0.005f || panDelta != Offset.Zero) {
                                     zoomScale = updated
                                     if (updated <= 1.02f) {
                                         panOffset = Offset.Zero
@@ -995,12 +999,12 @@ fun ExternalDocxReaderScreen(
                                         val maxX = (viewportSize.width * (updated - 1f)) / 2f
                                         val maxY = (viewportSize.height * (updated - 1f)) / 2f
                                         panOffset = Offset(
-                                            x = panOffset.x.coerceIn(-maxX, maxX),
-                                            y = panOffset.y.coerceIn(-maxY, maxY)
+                                            x = (panOffset.x + panDelta.x).coerceIn(-maxX, maxX),
+                                            y = (panOffset.y + panDelta.y).coerceIn(-maxY, maxY)
                                         )
                                     }
-                                    event.changes.forEach { it.consume() }
                                 }
+                                event.changes.forEach { it.consume() }
                             }
                             if (event.changes.none { it.pressed }) break
                         }
@@ -1105,14 +1109,7 @@ fun ExternalDocxReaderScreen(
                 categoryTestTag = "docx_reader_category_chip",
                 badgeTestTag = "docx_reader_badge"
             ) {
-                Text(
-                    text = "Modo Leitura Word (Edição bloqueada até converter)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
+                Spacer(modifier = Modifier.weight(1f))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -1597,7 +1594,16 @@ private fun DocxReadOnlyBlockItem(
             val decodedBitmap: ImageBitmap? = remember(block.mediaPath, block.bytes?.size) {
                 block.bytes?.let { bytes ->
                     try {
-                        val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                        var sample = 1
+                        while ((bounds.outWidth / sample) > 1440 || (bounds.outHeight / sample) > 1440) {
+                            sample *= 2
+                        }
+                        val opts = BitmapFactory.Options().apply {
+                            inSampleSize = sample
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                        }
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
                     } catch (_: Throwable) {
                         null

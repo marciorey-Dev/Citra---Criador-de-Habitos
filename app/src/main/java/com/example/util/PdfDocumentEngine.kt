@@ -1,10 +1,16 @@
 package com.example.util
 
 import android.content.Context
+import android.graphics.Bitmap
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDResources
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.rendering.PDFRenderer
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -54,7 +60,8 @@ object PdfDocumentEngine {
 
     fun extractMarkdown(
         context: Context?,
-        inputStream: InputStream
+        inputStream: InputStream,
+        saveImage: ((ByteArray, String) -> String?)? = null
     ): PdfConversionResult {
         ensureInitialized(context)
         return try {
@@ -153,7 +160,57 @@ object PdfDocumentEngine {
                 // Trigger PDFTextStripper traversal safely
                 stripper.getText(document)
 
-                val markdown = convertStructuredPagesToMarkdown(pages)
+                val pageImagePaths = mutableMapOf<Int, List<String>>()
+                if (saveImage != null) {
+                    var lazyRenderer: PDFRenderer? = null
+                    for (pIdx in 0 until pageCount) {
+                        val pageNum = pIdx + 1
+                        val savedForPage = mutableListOf<String>()
+                        val pdPage = document.getPage(pIdx)
+                        val extractedBitmaps = mutableListOf<Bitmap>()
+                        extractImagesFromResources(pdPage.resources, extractedBitmaps, depth = 0)
+                        for (rawBmp in extractedBitmaps) {
+                            try {
+                                val scaled = downsampleBitmapIfNeeded(rawBmp, maxDimension = 1600)
+                                val bos = ByteArrayOutputStream()
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 86, bos)
+                                if (scaled !== rawBmp) scaled.recycle()
+                                rawBmp.recycle()
+                                val bytes = bos.toByteArray()
+                                if (bytes.isNotEmpty()) {
+                                    saveImage(bytes, "jpg")?.let { savedForPage.add(it) }
+                                }
+                            } catch (_: Throwable) {
+                            }
+                        }
+
+                        val hasTextOnPage = pages.getOrNull(pIdx)?.any { it.text.isNotBlank() } == true
+                        if (!hasTextOnPage && savedForPage.isEmpty()) {
+                            try {
+                                val renderer = lazyRenderer ?: PDFRenderer(document).also { lazyRenderer = it }
+                                val rendered = renderer.renderImageWithDPI(pIdx, 130f)
+                                if (rendered != null) {
+                                    val scaled = downsampleBitmapIfNeeded(rendered, maxDimension = 1600)
+                                    val bos = ByteArrayOutputStream()
+                                    scaled.compress(Bitmap.CompressFormat.JPEG, 86, bos)
+                                    if (scaled !== rendered) scaled.recycle()
+                                    rendered.recycle()
+                                    val bytes = bos.toByteArray()
+                                    if (bytes.isNotEmpty()) {
+                                        saveImage(bytes, "jpg")?.let { savedForPage.add(it) }
+                                    }
+                                }
+                            } catch (_: Throwable) {
+                            }
+                        }
+
+                        if (savedForPage.isNotEmpty()) {
+                            pageImagePaths[pageNum] = savedForPage
+                        }
+                    }
+                }
+
+                val markdown = convertStructuredPagesToMarkdown(pages, pageImagePaths)
                 PdfConversionResult.Success(markdown = markdown, pageCount = pageCount)
             }
         } catch (e: OutOfMemoryError) {
@@ -161,6 +218,43 @@ object PdfDocumentEngine {
         } catch (e: Exception) {
             PdfConversionResult.Error(e.message ?: "Erro ao ler o texto estruturado deste PDF.")
         }
+    }
+
+    private fun extractImagesFromResources(
+        resources: PDResources?,
+        out: MutableList<Bitmap>,
+        depth: Int
+    ) {
+        if (resources == null || depth > 3 || out.size >= 40) return
+        val xObjNames = try { resources.xObjectNames } catch (_: Throwable) { null } ?: return
+        for (name in xObjNames) {
+            if (out.size >= 40) break
+            val xObj = try { resources.getXObject(name) } catch (_: Throwable) { null } ?: continue
+            when (xObj) {
+                is PDImageXObject -> {
+                    val bmp = try { xObj.image } catch (_: Throwable) { null }
+                    if (bmp != null && bmp.width >= 16 && bmp.height >= 16) {
+                        out.add(bmp)
+                    } else {
+                        bmp?.recycle()
+                    }
+                }
+                is PDFormXObject -> {
+                    extractImagesFromResources(xObj.resources, out, depth + 1)
+                }
+            }
+        }
+    }
+
+    private fun downsampleBitmapIfNeeded(bmp: Bitmap, maxDimension: Int): Bitmap {
+        val w = bmp.width
+        val h = bmp.height
+        val maxSide = maxOf(w, h)
+        if (maxSide <= maxDimension || w <= 0 || h <= 0) return bmp
+        val ratio = maxDimension.toFloat() / maxSide.toFloat()
+        val dstW = (w * ratio).roundToInt().coerceAtLeast(1)
+        val dstH = (h * ratio).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bmp, dstW, dstH, true)
     }
 
     private data class VisualLine(
@@ -182,11 +276,14 @@ object PdfDocumentEngine {
      * Pure Kotlin layout analyzer converting positioned styled spans per PDF page
      * into Citra Markdown. Exposed internally for direct deterministic JVM unit tests.
      */
-    fun convertStructuredPagesToMarkdown(pages: List<List<PdfStyledSegment>>): String {
-        if (pages.isEmpty()) return ""
+    fun convertStructuredPagesToMarkdown(
+        pages: List<List<PdfStyledSegment>>,
+        pageImages: Map<Int, List<String>> = emptyMap()
+    ): String {
+        if (pages.isEmpty() && pageImages.isEmpty()) return ""
 
         val allSegments = pages.flatten().filter { it.text.isNotBlank() }
-        if (allSegments.isEmpty()) return ""
+        if (allSegments.isEmpty() && pageImages.isEmpty()) return ""
 
         // Compute dominant body font size (weighted by character count)
         val sizeBuckets = mutableMapOf<Int, Int>()
@@ -212,9 +309,12 @@ object PdfDocumentEngine {
 
         val docOut = StringBuilder()
 
-        for (pIdx in cleanedPageLines.indices) {
-            val lines = cleanedPageLines[pIdx]
-            if (lines.isEmpty()) continue
+        val totalPageCount = maxOf(cleanedPageLines.size, pageImages.keys.maxOrNull() ?: 0)
+        for (pIdx in 0 until totalPageCount) {
+            val pageNum = pIdx + 1
+            val lines = cleanedPageLines.getOrNull(pIdx).orEmpty()
+            val imgs = pageImages[pageNum].orEmpty()
+            if (lines.isEmpty() && imgs.isEmpty()) continue
 
             if (pIdx > 0 && docOut.isNotBlank()) {
                 if (!docOut.endsWith("\n\n")) {
@@ -399,6 +499,16 @@ object PdfDocumentEngine {
                 }
                 i = j
                 docOut.append(paraBuf.toString()).append("\n\n")
+            }
+
+            if (imgs.isNotEmpty()) {
+                if (docOut.isNotEmpty() && !docOut.endsWith("\n\n")) {
+                    if (!docOut.endsWith("\n")) docOut.append("\n")
+                    docOut.append("\n")
+                }
+                imgs.forEachIndexed { imgIdx, path ->
+                    docOut.append("![Página $pageNum - Imagem ${imgIdx + 1}|100%|center]($path)\n\n")
+                }
             }
         }
 

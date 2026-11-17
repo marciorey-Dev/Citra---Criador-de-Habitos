@@ -15,13 +15,20 @@ object ExternalDocumentUriHelper {
 
     val DOCUMENT_PICKER_MIME_TYPES = arrayOf(
         "application/pdf",
+        "application/x-pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-    val PDF_PICKER_MIME_TYPES = arrayOf("application/pdf")
+    val PDF_PICKER_MIME_TYPES = arrayOf(
+        "application/pdf",
+        "application/x-pdf",
+        "application/octet-stream"
+    )
 
     val DOCX_PICKER_MIME_TYPES = arrayOf(
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-word.document.macroEnabled.12",
+        "application/octet-stream"
     )
 
     val MARKDOWN_IMPORT_MIME_TYPES = arrayOf(
@@ -113,11 +120,47 @@ object ExternalDocumentUriHelper {
         val name = (displayName ?: "").lowercase().trim()
         val mime = (mimeType ?: "").lowercase().trim()
         return when {
-            mime == "application/pdf" || name.endsWith(".pdf") -> NoteDocumentType.PDF
+            mime == "application/pdf" ||
+                mime == "application/x-pdf" ||
+                name.endsWith(".pdf") -> NoteDocumentType.PDF
             mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                mime == "application/vnd.ms-word.document.macroenabled.12" ||
                 name.endsWith(".docx") -> NoteDocumentType.DOCX
             else -> null
         }
+    }
+
+    /**
+     * Sniffs binary header / ZIP structure so image-heavy PDFs and .docx files whose MIME type
+     * is reported as application/octet-stream or without extension are still reliably recognized.
+     */
+    fun detectExternalDocumentTypeFromBytes(bytes: ByteArray): NoteDocumentType? {
+        if (bytes.size < 4) return null
+        val headerLimit = minOf(bytes.size, 1024)
+        val asciiHeader = String(bytes, 0, headerLimit, Charsets.ISO_8859_1)
+        if (asciiHeader.contains("%PDF-")) {
+            return NoteDocumentType.PDF
+        }
+        if (bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()) {
+            return try {
+                java.util.zip.ZipInputStream(bytes.inputStream()).use { zis ->
+                    var entry = zis.nextEntry
+                    var foundDocx = false
+                    while (entry != null) {
+                        val entryName = entry.name.replace('\\', '/')
+                        if (entryName.equals("word/document.xml", ignoreCase = true)) {
+                            foundDocx = true
+                            break
+                        }
+                        entry = zis.nextEntry
+                    }
+                    if (foundDocx) NoteDocumentType.DOCX else null
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return null
     }
 
     fun detectExternalDocumentType(
@@ -132,7 +175,39 @@ object ExternalDocumentUriHelper {
         } catch (_: Exception) {
             mimeTypeHint
         }
-        return detectExternalDocumentTypeFromMeta(resolvedName, mime)
+        detectExternalDocumentTypeFromMeta(resolvedName, mime)?.let { return it }
+
+        // Magic-byte fallback when MIME is generic (e.g. application/octet-stream) or filename lacks extension
+        return try {
+            openInputStream(context, uri.toString())?.use { input ->
+                val head = ByteArray(1024)
+                val readCount = input.read(head)
+                if (readCount >= 4) {
+                    val actualHead = if (readCount == head.size) head else head.copyOf(readCount)
+                    val asciiHead = String(actualHead, Charsets.ISO_8859_1)
+                    when {
+                        asciiHead.contains("%PDF-") -> NoteDocumentType.PDF
+                        actualHead[0] == 0x50.toByte() && actualHead[1] == 0x4B.toByte() -> {
+                            openInputStream(context, uri.toString())?.use { fullStream ->
+                                java.util.zip.ZipInputStream(fullStream).use { zis ->
+                                    var entry = zis.nextEntry
+                                    while (entry != null) {
+                                        if (entry.name.replace('\\', '/').equals("word/document.xml", ignoreCase = true)) {
+                                            return NoteDocumentType.DOCX
+                                        }
+                                        entry = zis.nextEntry
+                                    }
+                                }
+                            }
+                            null
+                        }
+                        else -> null
+                    }
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun openInputStream(context: Context, pathOrUri: String?): InputStream? {

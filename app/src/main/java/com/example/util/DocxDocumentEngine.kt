@@ -76,14 +76,38 @@ object DocxDocumentEngine {
 
     private data class DocxStyleDef(
         val styleId: String,
+        val styleType: String = "paragraph",
         val name: String = "",
         val basedOn: String? = null,
         val outlineLevel: Int? = null,
         val fontSizeHalfPt: Int? = null,
         val isBold: Boolean? = null,
         val isItalic: Boolean? = null,
+        val isUnderline: Boolean? = null,
+        val isStrike: Boolean? = null,
         val isMonospace: Boolean = false
     )
+
+    private data class NumberingLevelRule(
+        val ordered: Boolean,
+        val start: Int = 1
+    )
+
+    private class DocxNumberingCatalog(
+        private val rulesByNumAndLevel: Map<String, Map<Int, NumberingLevelRule>>
+    ) {
+        fun isOrdered(numId: String, ilvl: Int): Boolean {
+            val levels = rulesByNumAndLevel[numId] ?: return false
+            val rule = levels[ilvl] ?: levels[0] ?: levels.values.firstOrNull()
+            return rule?.ordered ?: false
+        }
+
+        fun startAt(numId: String, ilvl: Int): Int {
+            val levels = rulesByNumAndLevel[numId] ?: return 1
+            val rule = levels[ilvl] ?: levels[0]
+            return (rule?.start ?: 1).coerceAtLeast(1)
+        }
+    }
 
     private data class CellContent(
         val blocks: List<DocxBlock>
@@ -100,17 +124,24 @@ object DocxDocumentEngine {
             var entry = zis.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory) {
-                    val name = entry.name.replace('\\', '/')
+                    val name = entry.name.replace('\\', '/').trimStart('/')
+                    val lower = name.lowercase()
                     when {
-                        name == "word/document.xml" -> documentXml = zis.readBytes()
-                        name == "word/_rels/document.xml.rels" -> relsXml = zis.readBytes()
-                        name == "word/styles.xml" -> stylesXml = zis.readBytes()
-                        name == "word/numbering.xml" -> numberingXml = zis.readBytes()
-                        name.startsWith("word/media/") -> {
+                        lower == "word/document.xml" -> documentXml = zis.readBytes()
+                        lower == "word/_rels/document.xml.rels" -> relsXml = zis.readBytes()
+                        lower == "word/styles.xml" -> stylesXml = zis.readBytes()
+                        lower == "word/numbering.xml" -> numberingXml = zis.readBytes()
+                        lower.startsWith("word/media/") || lower.startsWith("media/") || isImageZipPath(lower) -> {
                             val bytes = zis.readBytes()
                             if (bytes.isNotEmpty() && bytes.size <= MAX_MEDIA_BYTES) {
                                 mediaMap[name] = bytes
+                                mediaMap[lower] = bytes
                                 mediaMap[name.removePrefix("word/")] = bytes
+                                mediaMap[lower.removePrefix("word/")] = bytes
+                                val fileNameOnly = lower.substringAfterLast('/')
+                                if (fileNameOnly.isNotEmpty() && !mediaMap.containsKey("filename:$fileNameOnly")) {
+                                    mediaMap["filename:$fileNameOnly"] = bytes
+                                }
                             }
                         }
                     }
@@ -123,7 +154,7 @@ object DocxDocumentEngine {
         val docBytes = documentXml ?: throw IllegalArgumentException("Arquivo .docx inválido: word/document.xml ausente.")
         val rels = relsXml?.let { parseRelationships(it) } ?: emptyMap()
         val styles = stylesXml?.let { parseStyles(it) } ?: emptyMap()
-        val numbering = numberingXml?.let { parseNumbering(it) } ?: emptyMap()
+        val numbering = numberingXml?.let { parseNumbering(it) } ?: DocxNumberingCatalog(emptyMap())
 
         val rawBlocks = parseDocumentXml(
             xmlBytes = docBytes,
@@ -135,6 +166,11 @@ object DocxDocumentEngine {
 
         val cleanedBlocks = postProcessBlocks(rawBlocks)
         return DocxParsedDocument(blocks = cleanedBlocks)
+    }
+
+    private fun isImageZipPath(lowerPath: String): Boolean {
+        val ext = lowerPath.substringAfterLast('.', "")
+        return ext in setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff")
     }
 
     fun convertToMarkdown(
@@ -444,12 +480,15 @@ object DocxDocumentEngine {
         var event = parser.eventType
 
         var currentId: String? = null
+        var currentType = "paragraph"
         var currentName = ""
         var currentBasedOn: String? = null
         var currentOutline: Int? = null
         var currentSize: Int? = null
         var currentBold: Boolean? = null
         var currentItalic: Boolean? = null
+        var currentUnderline: Boolean? = null
+        var currentStrike: Boolean? = null
         var currentMono = false
         var inRPr = false
         var inPPr = false
@@ -461,12 +500,15 @@ object DocxDocumentEngine {
                     when (tag) {
                         "style" -> {
                             currentId = attr(parser, "styleId")
+                            currentType = attr(parser, "type").orEmpty().lowercase().ifBlank { "paragraph" }
                             currentName = ""
                             currentBasedOn = null
                             currentOutline = null
                             currentSize = null
                             currentBold = null
                             currentItalic = null
+                            currentUnderline = null
+                            currentStrike = null
                             currentMono = false
                         }
                         "name" -> if (currentId != null && !inRPr && !inPPr) {
@@ -483,13 +525,21 @@ object DocxDocumentEngine {
                         "sz", "szCs" -> if (inRPr && currentSize == null) {
                             currentSize = attr(parser, "val")?.toIntOrNull()
                         }
-                        "b" -> if (inRPr) {
+                        "b", "bCs" -> if (inRPr) {
                             val v = attr(parser, "val")
                             currentBold = v == null || (!v.equals("0") && !v.equals("false", true))
                         }
-                        "i" -> if (inRPr) {
+                        "i", "iCs" -> if (inRPr) {
                             val v = attr(parser, "val")
                             currentItalic = v == null || (!v.equals("0") && !v.equals("false", true))
+                        }
+                        "u" -> if (inRPr) {
+                            val v = attr(parser, "val")
+                            currentUnderline = v == null || !v.equals("none", true)
+                        }
+                        "strike", "dstrike" -> if (inRPr) {
+                            val v = attr(parser, "val")
+                            currentStrike = v == null || (!v.equals("0") && !v.equals("false", true))
                         }
                         "rFonts" -> if (inRPr) {
                             val ascii = attr(parser, "ascii").orEmpty()
@@ -510,12 +560,15 @@ object DocxDocumentEngine {
                             if (!id.isNullOrBlank()) {
                                 rawMap[id] = DocxStyleDef(
                                     styleId = id,
+                                    styleType = currentType,
                                     name = currentName,
                                     basedOn = currentBasedOn,
                                     outlineLevel = currentOutline,
                                     fontSizeHalfPt = currentSize,
                                     isBold = currentBold,
                                     isItalic = currentItalic,
+                                    isUnderline = currentUnderline,
+                                    isStrike = currentStrike,
                                     isMonospace = currentMono
                                 )
                             }
@@ -533,6 +586,8 @@ object DocxDocumentEngine {
             var size = def.fontSizeHalfPt
             var bold = def.isBold
             var italic = def.isItalic
+            var underline = def.isUnderline
+            var strike = def.isStrike
             var mono = def.isMonospace
             var parentId = def.basedOn
             var hops = 0
@@ -542,6 +597,8 @@ object DocxDocumentEngine {
                 if (size == null) size = parent.fontSizeHalfPt
                 if (bold == null) bold = parent.isBold
                 if (italic == null) italic = parent.isItalic
+                if (underline == null) underline = parent.isUnderline
+                if (strike == null) strike = parent.isStrike
                 if (!mono) mono = parent.isMonospace
                 parentId = parent.basedOn
                 hops++
@@ -551,20 +608,27 @@ object DocxDocumentEngine {
                 fontSizeHalfPt = size,
                 isBold = bold,
                 isItalic = italic,
+                isUnderline = underline,
+                isStrike = strike,
                 isMonospace = mono
             )
         }
     }
 
-    private fun parseNumbering(xmlBytes: ByteArray): Map<String, Boolean> {
-        val abstractOrdered = mutableMapOf<String, Boolean>() // abstractNumId -> isOrdered
+    private fun parseNumbering(xmlBytes: ByteArray): DocxNumberingCatalog {
+        val abstractLevels = mutableMapOf<String, MutableMap<Int, NumberingLevelRule>>()
         val numToAbstract = mutableMapOf<String, String>()
+        val numOverrides = mutableMapOf<String, MutableMap<Int, Int>>()
 
         val parser = newParser(xmlBytes)
         var event = parser.eventType
         var currentAbstractId: String? = null
+        var currentAbstractIlvl: Int? = null
+        var currentLvlOrdered: Boolean? = null
+        var currentLvlStart = 1
+
         var currentNumId: String? = null
-        var lvlZero = false
+        var currentOverrideIlvl: Int? = null
 
         while (event != XmlPullParser.END_DOCUMENT) {
             val tag = localTag(parser.name)
@@ -573,19 +637,18 @@ object DocxDocumentEngine {
                     when (tag) {
                         "abstractNum" -> {
                             currentAbstractId = attr(parser, "abstractNumId")
-                            lvlZero = false
                         }
-                        "lvl" -> {
-                            val ilvl = attr(parser, "ilvl")?.toIntOrNull()
-                            lvlZero = (ilvl == 0)
+                        "lvl" -> if (currentAbstractId != null) {
+                            currentAbstractIlvl = attr(parser, "ilvl")?.toIntOrNull() ?: 0
+                            currentLvlOrdered = null
+                            currentLvlStart = 1
                         }
-                        "numFmt" -> {
-                            val id = currentAbstractId
-                            if (id != null && (lvlZero || !abstractOrdered.containsKey(id))) {
-                                val fmt = attr(parser, "val").orEmpty().lowercase()
-                                val ordered = fmt !in setOf("bullet", "none", "")
-                                abstractOrdered[id] = ordered
-                            }
+                        "start" -> if (currentAbstractId != null && currentAbstractIlvl != null) {
+                            currentLvlStart = attr(parser, "val")?.toIntOrNull() ?: 1
+                        }
+                        "numFmt" -> if (currentAbstractId != null && currentAbstractIlvl != null) {
+                            val fmt = attr(parser, "val").orEmpty().lowercase()
+                            currentLvlOrdered = fmt !in setOf("bullet", "none", "")
                         }
                         "num" -> {
                             currentNumId = attr(parser, "numId")
@@ -596,12 +659,35 @@ object DocxDocumentEngine {
                                 numToAbstract[currentNumId] = absId
                             }
                         }
+                        "lvlOverride" -> if (currentNumId != null) {
+                            currentOverrideIlvl = attr(parser, "ilvl")?.toIntOrNull()
+                        }
+                        "startOverride" -> {
+                            val nId = currentNumId
+                            val oLvl = currentOverrideIlvl
+                            val startVal = attr(parser, "val")?.toIntOrNull()
+                            if (nId != null && oLvl != null && startVal != null) {
+                                numOverrides.getOrPut(nId) { mutableMapOf() }[oLvl] = startVal
+                            }
+                        }
                     }
                 }
                 XmlPullParser.END_TAG -> {
                     when (tag) {
+                        "lvl" -> {
+                            val absId = currentAbstractId
+                            val ilvl = currentAbstractIlvl
+                            if (absId != null && ilvl != null) {
+                                val rule = NumberingLevelRule(
+                                    ordered = currentLvlOrdered ?: false,
+                                    start = currentLvlStart
+                                )
+                                abstractLevels.getOrPut(absId) { mutableMapOf() }[ilvl] = rule
+                            }
+                            currentAbstractIlvl = null
+                        }
                         "abstractNum" -> currentAbstractId = null
-                        "lvl" -> lvlZero = false
+                        "lvlOverride" -> currentOverrideIlvl = null
                         "num" -> currentNumId = null
                     }
                 }
@@ -609,20 +695,34 @@ object DocxDocumentEngine {
             event = parser.next()
         }
 
-        return numToAbstract.mapNotNull { (numId, absId) ->
-            abstractOrdered[absId]?.let { numId to it }
-        }.toMap()
+        val resolved = mutableMapOf<String, Map<Int, NumberingLevelRule>>()
+        for ((numId, absId) in numToAbstract) {
+            val baseLevels = abstractLevels[absId] ?: continue
+            val overrides = numOverrides[numId]
+            if (overrides.isNullOrEmpty()) {
+                resolved[numId] = baseLevels
+            } else {
+                val merged = baseLevels.toMutableMap()
+                for ((lvl, startOverride) in overrides) {
+                    val existing = merged[lvl] ?: NumberingLevelRule(ordered = true, start = startOverride)
+                    merged[lvl] = existing.copy(start = startOverride)
+                }
+                resolved[numId] = merged
+            }
+        }
+        return DocxNumberingCatalog(resolved)
     }
 
     private fun parseDocumentXml(
         xmlBytes: ByteArray,
         rels: Map<String, DocxRelationship>,
         styles: Map<String, DocxStyleDef>,
-        numbering: Map<String, Boolean>,
+        numbering: DocxNumberingCatalog,
         mediaMap: Map<String, ByteArray>
     ): List<DocxBlock> {
         val parser = newParser(xmlBytes)
         val result = mutableListOf<DocxBlock>()
+        val numberingCounters = mutableMapOf<Pair<String, Int>, Int>()
 
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
@@ -632,8 +732,11 @@ object DocxDocumentEngine {
                     if (event == XmlPullParser.END_TAG && localTag(parser.name) == "body") break
                     if (event == XmlPullParser.START_TAG) {
                         when (localTag(parser.name)) {
-                            "p" -> result.addAll(parseParagraphElement(parser, rels, styles, numbering, mediaMap))
-                            "tbl" -> parseTableElement(parser, rels, styles, numbering, mediaMap)?.let { result.add(it) }
+                            "p" -> result.addAll(
+                                parseParagraphElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
+                            )
+                            "tbl" -> parseTableElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
+                                ?.let { result.add(it) }
                         }
                     }
                     event = parser.next()
@@ -649,7 +752,8 @@ object DocxDocumentEngine {
         parser: XmlPullParser,
         rels: Map<String, DocxRelationship>,
         styles: Map<String, DocxStyleDef>,
-        numbering: Map<String, Boolean>,
+        numbering: DocxNumberingCatalog,
+        numberingCounters: MutableMap<Pair<String, Int>, Int>,
         mediaMap: Map<String, ByteArray>
     ): DocxBlock? {
         val parsedRows = mutableListOf<List<CellContent>>()
@@ -673,12 +777,14 @@ object DocxDocumentEngine {
                             depth++
                         } else depth++
                         "p" -> if (depth == 3) {
-                            currentCellBlocks?.addAll(parseParagraphElement(parser, rels, styles, numbering, mediaMap))
+                            currentCellBlocks?.addAll(
+                                parseParagraphElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
+                            )
                         } else {
                             depth++
                         }
                         "tbl" -> if (depth >= 3) {
-                            val nested = parseTableElement(parser, rels, styles, numbering, mediaMap)
+                            val nested = parseTableElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
                             if (nested != null) currentCellBlocks?.add(nested)
                         } else {
                             depth++
@@ -768,11 +874,26 @@ object DocxDocumentEngine {
         return formatRunsToMarkdown(blockToRuns(block))
     }
 
+    private fun resolveMediaEntry(rawTarget: String, mediaMap: Map<String, ByteArray>): Pair<String, ByteArray?> {
+        var cleaned = rawTarget.replace('\\', '/').trim()
+        while (cleaned.startsWith("../")) cleaned = cleaned.removePrefix("../")
+        while (cleaned.startsWith("./")) cleaned = cleaned.removePrefix("./")
+        cleaned = cleaned.trimStart('/')
+        val fullWordPath = if (cleaned.startsWith("word/", ignoreCase = true)) cleaned else "word/$cleaned"
+        val bytes = mediaMap[fullWordPath]
+            ?: mediaMap[fullWordPath.lowercase()]
+            ?: mediaMap[cleaned]
+            ?: mediaMap[cleaned.lowercase()]
+            ?: mediaMap["filename:${cleaned.substringAfterLast('/').lowercase()}"]
+        return fullWordPath to bytes
+    }
+
     private fun parseParagraphElement(
         parser: XmlPullParser,
         rels: Map<String, DocxRelationship>,
         styles: Map<String, DocxStyleDef>,
-        numbering: Map<String, Boolean>,
+        numbering: DocxNumberingCatalog,
+        numberingCounters: MutableMap<Pair<String, Int>, Int>,
         mediaMap: Map<String, ByteArray>
     ): List<DocxBlock> {
         var pStyleId: String? = null
@@ -786,7 +907,10 @@ object DocxDocumentEngine {
         var ilvl = 0
         var outlineLevel: Int? = null
         var isMathParagraph = false
-        var hasPageBreak = false
+        var hasPageBreakBefore = false
+        var hasPageBreakAfter = false
+        var hasSectionBreak = false
+        var sectionBreakIsContinuous = false
 
         val runs = mutableListOf<DocxRun>()
         val extractedImages = mutableListOf<DocxBlock.Image>()
@@ -794,15 +918,19 @@ object DocxDocumentEngine {
 
         var inPPr = false
         var inPBdr = false
+        var inSectPr = false
         var inR = false
         var inRPr = false
         var inMath = false
         var currentLinkUrl: String? = null
+        val fieldDisplayStack = mutableListOf<Boolean>()
+        var activeFieldLinkUrl: String? = null
 
+        var rStyleId: String? = null
         var rBold: Boolean? = null
         var rItalic: Boolean? = null
-        var rStrike = false
-        var rUnderline = false
+        var rStrike: Boolean? = null
+        var rUnderline: Boolean? = null
         var rHighlight = false
         var rCode = false
         var rColor: String? = null
@@ -810,25 +938,29 @@ object DocxDocumentEngine {
         val maxFontSizes = mutableListOf<Int>()
         val currentRunText = StringBuilder()
         var currentDrawingWidthPercent = 100
+        var currentDrawingAlt: String? = null
 
         fun flushRun() {
             val txt = currentRunText.toString()
             currentRunText.setLength(0)
             if (txt.isEmpty()) return
-            val styleDef = pStyleId?.let { styles[it] }
-            val resolvedBold = rBold ?: styleDef?.isBold ?: false
-            val resolvedItalic = rItalic ?: styleDef?.isItalic ?: false
-            val resolvedCode = rCode || (styleDef?.isMonospace == true)
+            val pStyleDef = pStyleId?.let { styles[it] }
+            val rStyleDef = rStyleId?.let { styles[it] }
+            val resolvedBold = rBold ?: rStyleDef?.isBold ?: pStyleDef?.isBold ?: false
+            val resolvedItalic = rItalic ?: rStyleDef?.isItalic ?: pStyleDef?.isItalic ?: false
+            val resolvedUnderline = rUnderline ?: rStyleDef?.isUnderline ?: pStyleDef?.isUnderline ?: false
+            val resolvedStrike = rStrike ?: rStyleDef?.isStrike ?: pStyleDef?.isStrike ?: false
+            val resolvedCode = rCode || (rStyleDef?.isMonospace == true) || (pStyleDef?.isMonospace == true)
             runs.add(
                 DocxRun(
                     text = txt,
                     isBold = resolvedBold,
                     isItalic = resolvedItalic,
-                    isUnderline = rUnderline,
-                    isStrikethrough = rStrike,
+                    isUnderline = resolvedUnderline,
+                    isStrikethrough = resolvedStrike,
                     isHighlight = rHighlight,
                     isCode = resolvedCode,
-                    linkUrl = currentLinkUrl,
+                    linkUrl = currentLinkUrl ?: activeFieldLinkUrl,
                     colorHex = rColor
                 )
             )
@@ -846,6 +978,20 @@ object DocxDocumentEngine {
                     depth++
                     when (tag) {
                         "pPr" -> if (depth == 2) inPPr = true
+                        "sectPr" -> if (inPPr) {
+                            inSectPr = true
+                            hasSectionBreak = true
+                        }
+                        "type" -> if (inSectPr) {
+                            val v = attr(parser, "val").orEmpty().lowercase()
+                            if (v == "continuous") sectionBreakIsContinuous = true
+                        }
+                        "pageBreakBefore" -> if (inPPr) {
+                            val v = attr(parser, "val")
+                            if (v == null || (!v.equals("0") && !v.equals("false", true))) {
+                                hasPageBreakBefore = true
+                            }
+                        }
                         "pBdr" -> if (inPPr) inPBdr = true
                         "left" -> if (inPBdr) {
                             val v = attr(parser, "val").orEmpty()
@@ -861,7 +1007,7 @@ object DocxDocumentEngine {
                             }
                         }
                         "pStyle" -> if (inPPr) pStyleId = attr(parser, "val")
-                        "jc" -> if (inPPr) alignment = attr(parser, "val").orEmpty().lowercase().ifBlank { "left" }
+                        "jc" -> if (inPPr && !inSectPr) alignment = attr(parser, "val").orEmpty().lowercase().ifBlank { "left" }
                         "ind" -> if (inPPr) indentLeft = attr(parser, "left")?.toIntOrNull() ?: indentLeft
                         "outlineLvl" -> if (inPPr) outlineLevel = attr(parser, "val")?.toIntOrNull()
                         "numId" -> if (inPPr) numId = attr(parser, "val")
@@ -883,6 +1029,29 @@ object DocxDocumentEngine {
                                 currentLinkUrl = rel.target
                             }
                         }
+                        "fldChar" -> {
+                            when (attr(parser, "fldCharType")?.lowercase()) {
+                                "begin" -> fieldDisplayStack.add(false)
+                                "separate" -> if (fieldDisplayStack.isNotEmpty()) {
+                                    fieldDisplayStack[fieldDisplayStack.lastIndex] = true
+                                }
+                                "end" -> {
+                                    if (fieldDisplayStack.isNotEmpty()) {
+                                        fieldDisplayStack.removeAt(fieldDisplayStack.lastIndex)
+                                    }
+                                    activeFieldLinkUrl = null
+                                }
+                            }
+                        }
+                        "instrText", "delText" -> {
+                            val instr = safeNextText(parser)
+                            depth--
+                            if (tag == "instrText" && instr.contains("HYPERLINK", ignoreCase = true)) {
+                                Regex("HYPERLINK\\s+\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(instr)?.let {
+                                    activeFieldLinkUrl = it.groupValues[1]
+                                }
+                            }
+                        }
                         "oMathPara", "oMath" -> {
                             inMath = true
                             if (tag == "oMathPara") isMathParagraph = true
@@ -890,10 +1059,11 @@ object DocxDocumentEngine {
                         "r" -> {
                             if (!inMath) {
                                 inR = true
+                                rStyleId = null
                                 rBold = null
                                 rItalic = null
-                                rStrike = false
-                                rUnderline = false
+                                rStrike = null
+                                rUnderline = null
                                 rHighlight = false
                                 rCode = false
                                 rColor = null
@@ -902,6 +1072,7 @@ object DocxDocumentEngine {
                             }
                         }
                         "rPr" -> if (inR) inRPr = true
+                        "rStyle" -> if (inRPr) rStyleId = attr(parser, "val")
                         "b", "bCs" -> if (inRPr) {
                             val v = attr(parser, "val")
                             rBold = v == null || (!v.equals("0") && !v.equals("false", true))
@@ -939,7 +1110,11 @@ object DocxDocumentEngine {
                         "br" -> if (inR) {
                             val type = attr(parser, "type")
                             if (type.equals("page", ignoreCase = true)) {
-                                hasPageBreak = true
+                                if (runs.isEmpty() && currentRunText.isEmpty() && extractedImages.isEmpty()) {
+                                    hasPageBreakBefore = true
+                                } else {
+                                    hasPageBreakAfter = true
+                                }
                             } else {
                                 currentRunText.append("\n")
                             }
@@ -947,13 +1122,21 @@ object DocxDocumentEngine {
                         "tab" -> if (inR) currentRunText.append("    ")
                         "t" -> {
                             val textContent = safeNextText(parser)
-                            // safeNextText advances to END_TAG of <t>, so decrement depth cleanly
                             depth--
-                            if (inMath) {
-                                mathTokens.append(textContent)
-                            } else if (inR) {
-                                currentRunText.append(textContent)
+                            val insideHiddenFieldCode = fieldDisplayStack.lastOrNull() == false
+                            if (!insideHiddenFieldCode) {
+                                if (inMath) {
+                                    mathTokens.append(textContent)
+                                } else if (inR) {
+                                    currentRunText.append(textContent)
+                                }
                             }
+                        }
+                        "docPr" -> {
+                            val descr = attr(parser, "descr")?.trim()?.takeIf { it.isNotEmpty() }
+                            val title = attr(parser, "title")?.trim()?.takeIf { it.isNotEmpty() }
+                            val name = attr(parser, "name")?.trim()?.takeIf { it.isNotEmpty() }
+                            currentDrawingAlt = descr ?: title ?: name
                         }
                         "extent" -> {
                             val cx = attr(parser, "cx")?.toLongOrNull()
@@ -968,21 +1151,20 @@ object DocxDocumentEngine {
                             }
                         }
                         "blip", "imagedata" -> {
-                            val embedId = attr(parser, "embed") ?: attr(parser, "id")
+                            val embedId = attr(parser, "embed") ?: attr(parser, "id") ?: attr(parser, "relid")
                             val rel = embedId?.let { rels[it] }
                             if (rel != null) {
-                                val targetPath = rel.target.removePrefix("/")
-                                val normalizedPath = if (targetPath.startsWith("word/")) targetPath else "word/$targetPath"
-                                val imgBytes = mediaMap[normalizedPath] ?: mediaMap[targetPath]
+                                val (normalizedPath, imgBytes) = resolveMediaEntry(rel.target, mediaMap)
                                 extractedImages.add(
                                     DocxBlock.Image(
                                         mediaPath = normalizedPath,
-                                        alt = normalizedPath.substringAfterLast('/'),
+                                        alt = currentDrawingAlt ?: normalizedPath.substringAfterLast('/'),
                                         widthPercent = currentDrawingWidthPercent,
                                         alignment = alignment,
                                         bytes = imgBytes
                                     )
                                 )
+                                currentDrawingAlt = null
                             }
                         }
                     }
@@ -991,6 +1173,7 @@ object DocxDocumentEngine {
                 XmlPullParser.END_TAG -> {
                     when (tag) {
                         "pBdr" -> inPBdr = false
+                        "sectPr" -> inSectPr = false
                         "pPr" -> inPPr = false
                         "rPr" -> inRPr = false
                         "r" -> {
@@ -1009,13 +1192,24 @@ object DocxDocumentEngine {
         }
 
         val blocks = mutableListOf<DocxBlock>()
-        if (hasPageBreak && runs.isEmpty() && extractedImages.isEmpty()) {
+        if (hasPageBreakBefore) {
             blocks.add(DocxBlock.PageBreak)
+        }
+        val trailingSectionPageBreak = hasSectionBreak && !sectionBreakIsContinuous
+        val emitAfterBreak = hasPageBreakAfter || trailingSectionPageBreak
+
+        val plainText = runs.joinToString("") { it.text }.trim()
+        if (runs.isEmpty() && extractedImages.isEmpty() && mathTokens.isBlank()) {
+            if (hasBottomBorder) {
+                blocks.add(DocxBlock.Divider)
+            }
+            if (emitAfterBreak && !hasPageBreakBefore) {
+                blocks.add(DocxBlock.PageBreak)
+            }
             return blocks
         }
 
         // Math formula block if paragraph is primarily oMath or EFF6FF math shading
-        val plainText = runs.joinToString("") { it.text }.trim()
         if ((isMathParagraph || (mathTokens.isNotBlank() && plainText.isEmpty())) ||
             (shadingFill == "EFF6FF" && plainText.isNotEmpty())
         ) {
@@ -1023,13 +1217,14 @@ object DocxDocumentEngine {
             if (formula.isNotEmpty()) {
                 blocks.add(DocxBlock.Math(formula))
             }
-            if (hasPageBreak) blocks.add(DocxBlock.PageBreak)
+            if (emitAfterBreak) blocks.add(DocxBlock.PageBreak)
             return blocks
         }
 
         // Divider if empty paragraph with bottom border
         if (plainText.isEmpty() && extractedImages.isEmpty() && hasBottomBorder) {
             blocks.add(DocxBlock.Divider)
+            if (emitAfterBreak) blocks.add(DocxBlock.PageBreak)
             return blocks
         }
 
@@ -1042,22 +1237,39 @@ object DocxDocumentEngine {
             } else ""
             val codeBody = if (lang.isNotEmpty()) lines.drop(1).joinToString("\n") else plainText
             blocks.add(DocxBlock.Code(code = codeBody, language = lang))
-            if (hasPageBreak) blocks.add(DocxBlock.PageBreak)
+            if (emitAfterBreak) blocks.add(DocxBlock.PageBreak)
             return blocks
         }
 
         // Standalone images
         if (extractedImages.isNotEmpty() && plainText.isEmpty()) {
             blocks.addAll(extractedImages)
-            if (hasPageBreak) blocks.add(DocxBlock.PageBreak)
+            if (emitAfterBreak) blocks.add(DocxBlock.PageBreak)
             return blocks
         }
 
-        // Resolve heading level from pStyle, styles.xml, or large bold font size
-        val styleDef = pStyleId?.let { styles[it] }
-        val headingLevel = resolveHeadingLevel(pStyleId, styleDef, outlineLevel, runs, maxFontSizes)
+        val pStyleDef = pStyleId?.let { styles[it] }
+        val tocLevel = resolveTocLevel(pStyleId, pStyleDef?.name)
+        val headingLevel = if (tocLevel == null) {
+            resolveHeadingLevel(pStyleId, pStyleDef, outlineLevel, runs, maxFontSizes)
+        } else null
 
         when {
+            isTocHeadingStyle(pStyleId, pStyleDef?.name) && plainText.isNotEmpty() -> {
+                blocks.add(DocxBlock.Heading(level = 2, runs = trimRunEdges(runs)))
+            }
+
+            tocLevel != null && plainText.isNotEmpty() -> {
+                blocks.add(
+                    DocxBlock.ListItem(
+                        ordered = false,
+                        indexNumber = 0,
+                        indentLevel = (tocLevel - 1).coerceIn(0, 4),
+                        runs = trimRunEdges(runs)
+                    )
+                )
+            }
+
             headingLevel != null && plainText.isNotEmpty() -> {
                 blocks.add(DocxBlock.Heading(level = headingLevel, runs = trimRunEdges(runs)))
             }
@@ -1072,7 +1284,8 @@ object DocxDocumentEngine {
 
             // Quote detection (left border or Quote style)
             hasLeftBorder || pStyleId?.contains("quote", ignoreCase = true) == true ||
-                styleDef?.name?.contains("quote", ignoreCase = true) == true -> {
+                pStyleDef?.name?.contains("quote", ignoreCase = true) == true ||
+                pStyleDef?.name?.contains("citação", ignoreCase = true) == true -> {
                 if (plainText.isNotEmpty()) {
                     blocks.add(DocxBlock.Quote(runs = trimRunEdges(runs)))
                 }
@@ -1089,10 +1302,27 @@ object DocxDocumentEngine {
 
             // Explicit Word numbering or bullet symbol
             numId != null || startsWithBulletSymbol(plainText) || startsWithNumberedPrefix(plainText) -> {
-                val isOrderedFromNum = numId?.let { numbering[it] }
+                val activeNumId = numId?.takeIf { it != "0" }
+                val isOrderedFromNum = activeNumId?.let { numbering.isOrdered(it, ilvl) }
                 val orderedMatch = Regex("^\\s*(\\d+)[.)]\\s+").find(plainText)
                 val isOrdered = isOrderedFromNum ?: (orderedMatch != null)
-                val numIndex = orderedMatch?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+
+                val numIndex = if (isOrdered) {
+                    val explicitNum = orderedMatch?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    if (explicitNum != null) {
+                        explicitNum
+                    } else if (activeNumId != null) {
+                        val key = activeNumId to ilvl
+                        val existing = numberingCounters[key]
+                        val nextVal = if (existing == null) numbering.startAt(activeNumId, ilvl) else existing + 1
+                        numberingCounters[key] = nextVal
+                        // Reset deeper levels under the same numId
+                        numberingCounters.keys.filter { it.first == activeNumId && it.second > ilvl }
+                            .forEach { numberingCounters.remove(it) }
+                        nextVal
+                    } else 1
+                } else 0
+
                 val cleaned = when {
                     startsWithBulletSymbol(plainText) -> stripLeadingPrefixFromRuns(runs, Regex("^\\s*[•◦▪▫‣–—*-]\\s+"))
                     orderedMatch != null -> stripLeadingPrefixFromRuns(runs, Regex("^\\s*\\d+[.)]\\s+"))
@@ -1125,10 +1355,27 @@ object DocxDocumentEngine {
         if (extractedImages.isNotEmpty() && plainText.isNotEmpty()) {
             blocks.addAll(extractedImages)
         }
-        if (hasPageBreak) {
+        if (emitAfterBreak) {
             blocks.add(DocxBlock.PageBreak)
         }
         return blocks
+    }
+
+    private fun isTocHeadingStyle(styleId: String?, styleName: String?): Boolean {
+        return listOfNotNull(styleId, styleName).any { raw ->
+            val low = raw.lowercase().trim()
+            low == "tocheading" || low == "toc heading" || low == "sumário título"
+        }
+    }
+
+    private fun resolveTocLevel(styleId: String?, styleName: String?): Int? {
+        for (raw in listOfNotNull(styleId, styleName)) {
+            val low = raw.lowercase().trim()
+            Regex("^(?:toc|sum[aá]rio|[ií]ndice)\\s*([1-9])$").find(low)?.let {
+                return it.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+            }
+        }
+        return null
     }
 
     private fun safeNextText(parser: XmlPullParser): String {

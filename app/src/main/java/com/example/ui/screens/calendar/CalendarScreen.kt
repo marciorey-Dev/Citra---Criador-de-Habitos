@@ -253,7 +253,7 @@ fun CalendarScreen(
                     activeNoteForEditor = note
                     isCreatingNoteForCalendar = false
                 },
-                initialMode = if (viewModel.getLastNoteEditorMode() == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
+                initialMode = if (viewModel.defaultNoteOpenMode.collectAsState().value == "READING") NoteEditorMode.READING else NoteEditorMode.LIVE_PREVIEW,
                 onModeChanged = { mode ->
                     viewModel.setLastNoteEditorMode(mode.name)
                 },

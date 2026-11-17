@@ -841,11 +841,99 @@ class PreferencesManager(private val context: Context) {
         prefs.edit().putString("toolbar_items_order", order.joinToString(",")).apply()
     }
 
+    // Recent external PDF / DOCX documents history
+    private val _recentExternalDocs = MutableStateFlow(loadRecentExternalDocs())
+    val recentExternalDocs: StateFlow<List<RecentExternalDocEntry>> = _recentExternalDocs.asStateFlow()
+
+    private fun loadRecentExternalDocs(): List<RecentExternalDocEntry> {
+        val raw = prefs.getString("recent_external_docs_json", null) ?: return emptyList()
+        return try {
+            val arr = org.json.JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val uri = obj.optString("uri").trim()
+                    val title = obj.optString("title").trim()
+                    val docType = obj.optString("docType").trim()
+                    val addedAt = obj.optLong("addedAt", 0L)
+                    if (uri.isNotBlank() && docType.isNotBlank()) {
+                        add(
+                            RecentExternalDocEntry(
+                                uri = uri,
+                                title = title.ifBlank { "Documento" },
+                                docType = docType,
+                                addedAt = addedAt
+                            )
+                        )
+                    }
+                }
+            }.sortedByDescending { it.addedAt }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun recordRecentExternalDocs(entries: List<RecentExternalDocEntry>) {
+        if (entries.isEmpty()) return
+        synchronized(recentExternalDocsLock) {
+            val map = linkedMapOf<String, RecentExternalDocEntry>()
+            for (item in entries) {
+                val cleanUri = item.uri.trim()
+                if (cleanUri.isNotBlank()) {
+                    map[cleanUri] = item.copy(uri = cleanUri)
+                }
+            }
+            for (existing in _recentExternalDocs.value) {
+                val cleanUri = existing.uri.trim()
+                if (cleanUri.isNotBlank() && !map.containsKey(cleanUri)) {
+                    map[cleanUri] = existing
+                }
+            }
+            val updated = map.values
+                .sortedByDescending { it.addedAt }
+                .take(60)
+            val arr = org.json.JSONArray()
+            for (doc in updated) {
+                arr.put(
+                    org.json.JSONObject().apply {
+                        put("uri", doc.uri)
+                        put("title", doc.title)
+                        put("docType", doc.docType)
+                        put("addedAt", doc.addedAt)
+                    }
+                )
+            }
+            prefs.edit().putString("recent_external_docs_json", arr.toString()).apply()
+            _recentExternalDocs.value = updated
+        }
+    }
+
+    fun removeRecentExternalDoc(uri: String) {
+        val clean = uri.trim()
+        synchronized(recentExternalDocsLock) {
+            val updated = _recentExternalDocs.value.filterNot { it.uri == clean }
+            val arr = org.json.JSONArray()
+            for (doc in updated) {
+                arr.put(
+                    org.json.JSONObject().apply {
+                        put("uri", doc.uri)
+                        put("title", doc.title)
+                        put("docType", doc.docType)
+                        put("addedAt", doc.addedAt)
+                    }
+                )
+            }
+            prefs.edit().putString("recent_external_docs_json", arr.toString()).apply()
+            _recentExternalDocs.value = updated
+        }
+    }
+
     companion object {
         private val citraBallLock = Any()
         private val timerSnapshotLock = Any()
         private val focusClaimLock = Any()
         private val habitRewardLock = Any()
+        private val recentExternalDocsLock = Any()
         val DEFAULT_TOOLBAR_ORDER = listOf(
             // Primeiro módulo (exatamente os 13 símbolos permitidos no topo por padrão):
             "bold", "italic", "inline_code", "titles", "checklist", "list",
@@ -874,4 +962,11 @@ data class SavedTimerSnapshot(
     val isStopwatchMode: Boolean = false,
     val stopwatchStartTimeMillis: Long = 0L,
     val stopwatchAccumulatedSeconds: Int = 0
+)
+
+data class RecentExternalDocEntry(
+    val uri: String,
+    val title: String,
+    val docType: String,
+    val addedAt: Long = System.currentTimeMillis()
 )

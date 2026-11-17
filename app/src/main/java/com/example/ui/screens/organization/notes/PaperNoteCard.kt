@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.Note
+import com.example.data.model.isDocxDocument
+import com.example.data.model.isPdfDocument
 import com.example.ui.theme.*
 
 /**
@@ -161,6 +163,26 @@ object PaperNotePalette {
         )
     )
 
+    private val pdfDefaultOption = NoteColorOption(
+        key = "PDF_RED_DEFAULT",
+        displayName = "PDF Padrão",
+        primaryColor = Color(0xFFDC2626),
+        lightBg = Color(0xFFFEE2E2),
+        lightFlap = Color(0xFFFCA5A5),
+        darkBg = Color(0xFF4C1D24),
+        darkFlap = Color(0xFF6E2932)
+    )
+
+    private val docxDefaultOption = NoteColorOption(
+        key = "DOCX_BLUE_DEFAULT",
+        displayName = "Word Padrão",
+        primaryColor = Color(0xFF2563EB),
+        lightBg = Color(0xFFDBEAFE),
+        lightFlap = Color(0xFF93C5FD),
+        darkBg = Color(0xFF1E325A),
+        darkFlap = Color(0xFF2B467C)
+    )
+
     fun findColorOption(key: String?): NoteColorOption {
         if (key.isNullOrBlank()) return options[0]
         return options.firstOrNull { it.key.equals(key, ignoreCase = true) }
@@ -168,8 +190,7 @@ object PaperNotePalette {
             ?: options[0]
     }
 
-    fun resolvePaperColors(noteColor: String?, isDark: Boolean, isPinned: Boolean): PaperNoteColors {
-        val opt = findColorOption(noteColor)
+    private fun resolveOptionColors(opt: NoteColorOption, isDark: Boolean, isPinned: Boolean): PaperNoteColors {
         val bg = if (isDark) opt.darkBg else opt.lightBg
         val flap = if (isDark) opt.darkFlap else opt.lightFlap
         val crease = if (isDark && opt.key == "DEFAULT") Color(0xFF3F3931) else opt.primaryColor.copy(alpha = if (isDark) 0.45f else 0.35f)
@@ -196,11 +217,45 @@ object PaperNotePalette {
         )
     }
 
+    fun resolvePaperColors(noteColor: String?, isDark: Boolean, isPinned: Boolean): PaperNoteColors {
+        return resolveOptionColors(findColorOption(noteColor), isDark, isPinned)
+    }
+
+    fun resolvePaperColors(note: Note, isDark: Boolean): PaperNoteColors {
+        val useDocDefault = note.noteColor.isNullOrBlank() || note.noteColor.equals("DEFAULT", ignoreCase = true)
+        val opt = when {
+            useDocDefault && note.isPdfDocument -> pdfDefaultOption
+            useDocDefault && note.isDocxDocument -> docxDefaultOption
+            else -> findColorOption(note.noteColor)
+        }
+        return resolveOptionColors(opt, isDark, note.isPinned)
+    }
+
     @Composable
     @ReadOnlyComposable
     fun resolvePaperColors(noteColor: String?, isPinned: Boolean): PaperNoteColors {
         return resolvePaperColors(noteColor, isAppDarkTheme(), isPinned)
     }
+}
+
+/**
+ * Gentle ±1° left-right wobble animation for unselected note cards while multi-selection mode is active.
+ * Selected cards stay completely static (0°).
+ */
+@Composable
+fun rememberSelectionWobbleAngle(isSelectionMode: Boolean, isSelected: Boolean): Float {
+    if (!isSelectionMode || isSelected) return 0f
+    val infiniteTransition = rememberInfiniteTransition(label = "note_wobble")
+    val angle by infiniteTransition.animateFloat(
+        initialValue = -1.1f,
+        targetValue = 1.1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 155, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "wobble_deg"
+    )
+    return angle
 }
 
 data class PaperNoteColors(

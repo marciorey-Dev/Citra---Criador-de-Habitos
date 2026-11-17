@@ -23,10 +23,14 @@ import com.example.ui.screens.organization.notes.TableBlock
 import com.example.ui.screens.organization.notes.filterNotesByDocumentType
 import com.example.ui.screens.organization.notes.groupNotesByCategory
 import com.example.ui.screens.organization.notes.sortNotes
+import com.example.util.BatchExportFormat
+import com.example.util.DocxBlock
 import com.example.util.DocxConversionResult
 import com.example.util.DocxDocumentEngine
 import com.example.util.DocxRun
+import com.example.util.ExternalDocumentUriHelper
 import com.example.util.InlineMarkdownHelper
+import com.example.util.NoteExportHelper
 import com.example.util.PdfDocumentEngine
 import com.example.util.PdfStyledSegment
 import org.junit.Assert.assertEquals
@@ -38,7 +42,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
@@ -442,5 +449,192 @@ class ExternalDocumentEngineTest {
         assertEquals(2, restored.size)
         assertFalse(restored.first { it.uuid == "active-1" }.isArchived)
         assertTrue(restored.first { it.uuid == "arch-2" }.isArchived)
+    }
+
+    @Test
+    fun `docx parser supports sequential numbering counters rStyle TOC instrText stripping pageBreakBefore and relative media paths`() {
+        val stylesXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:style w:type="character" w:styleId="StrongEmphasis">
+                <w:rPr><w:b/><w:u w:val="single"/></w:rPr>
+              </w:style>
+              <w:style w:type="paragraph" w:styleId="TOC1">
+                <w:name w:val="toc 1"/>
+              </w:style>
+            </w:styles>
+        """.trimIndent()
+
+        val numberingXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:abstractNum w:abstractNumId="1">
+                <w:lvl w:ilvl="0">
+                  <w:start w:val="1"/>
+                  <w:numFmt w:val="decimal"/>
+                </w:lvl>
+              </w:abstractNum>
+              <w:num w:numId="5"><w:abstractNumId w:val="1"/></w:num>
+            </w:numbering>
+        """.trimIndent()
+
+        val relsXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+              <Relationship Id="rIdRelImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/diagram.jpg"/>
+            </Relationships>
+        """.trimIndent()
+
+        val documentXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:pPr><w:pStyle w:val="TOC1"/></w:pPr>
+                  <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+                  <w:r><w:instrText> TOC \o "1-3" \h \z \u </w:instrText></w:r>
+                  <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+                  <w:r><w:t>1. Introdução</w:t></w:r>
+                  <w:r><w:fldChar w:fldCharType="end"/></w:r>
+                </w:p>
+                <w:p>
+                  <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="5"/></w:numPr></w:pPr>
+                  <w:r><w:t>Primeiro passo</w:t></w:r>
+                </w:p>
+                <w:p>
+                  <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="5"/></w:numPr></w:pPr>
+                  <w:r><w:t>Segundo passo</w:t></w:r>
+                </w:p>
+                <w:p>
+                  <w:pPr><w:pageBreakBefore/></w:pPr>
+                  <w:r><w:rPr><w:rStyle w:val="StrongEmphasis"/></w:rPr><w:t>Texto destacado</w:t></w:r>
+                  <w:r><w:rPr><w:strike/></w:rPr><w:t> riscado</w:t></w:r>
+                </w:p>
+                <w:p><w:r><w:drawing><a:blip r:embed="rIdRelImg"/></w:drawing></w:r></w:p>
+              </w:body>
+            </w:document>
+        """.trimIndent()
+
+        val bytes = buildSyntheticDocx(
+            documentXml = documentXml,
+            stylesXml = stylesXml,
+            numberingXml = numberingXml,
+            relsXml = relsXml,
+            media = mapOf("word/media/diagram.jpg" to byteArrayOf(9, 8, 7))
+        )
+
+        val parsed = DocxDocumentEngine.parseDocx(ByteArrayInputStream(bytes))
+        val allListItems = parsed.blocks.filterIsInstance<DocxBlock.ListItem>()
+        val orderedListItems = allListItems.filter { it.ordered }
+        assertEquals(2, orderedListItems.size)
+        assertEquals(1, orderedListItems[0].indexNumber)
+        assertEquals(2, orderedListItems[1].indexNumber)
+        assertTrue(allListItems.any { !it.ordered && it.runs.joinToString("") { r -> r.text }.contains("Introdução") })
+
+        assertTrue(parsed.blocks.any { it is DocxBlock.PageBreak })
+        assertTrue(parsed.blocks.any { it is DocxBlock.Image && it.bytes?.size == 3 })
+
+        val paragraphs = parsed.blocks.filterIsInstance<DocxBlock.Paragraph>()
+        val allVisibleText = (allListItems.flatMap { it.runs } + paragraphs.flatMap { it.runs }).joinToString("") { it.text }
+        assertFalse("Field instruction code must not leak into visible text", allVisibleText.contains("TOC \\o"))
+        assertTrue(paragraphs.flatMap { it.runs }.any { it.text == "Texto destacado" && it.isBold && it.isUnderline })
+        assertTrue(paragraphs.flatMap { it.runs }.any { it.text.contains("riscado") && it.isStrikethrough })
+    }
+
+    @Test
+    fun `docx exporter writes compatible styles numbering and round-trips through docx parser`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val markdown = """
+            # Plano Trimestral
+            
+            Texto com **negrito**, *itálico* e ~~riscado~~.
+            
+            - Item alfa
+            - Item beta
+            
+            1. Etapa um
+            2. Etapa dois
+            
+            <!-- pagebreak -->
+            
+            | Área | Status |
+            | --- | --- |
+            | App | Pronto |
+        """.trimIndent()
+
+        val blocks = SmoothMarkdownConverter.markdownToBlocks(markdown)
+        val outFile = File(context.cacheDir, "test_export_citra.docx")
+        NoteExportHelper.writeDocxToFile(
+            context = context,
+            destFile = outFile,
+            noteTitle = "Plano Trimestral",
+            noteCategory = "Trabalho",
+            blocks = blocks
+        )
+
+        assertTrue(outFile.exists())
+        ZipFile(outFile).use { zip ->
+            assertTrue(zip.getEntry("word/document.xml") != null)
+            assertTrue(zip.getEntry("word/styles.xml") != null)
+            assertTrue(zip.getEntry("word/numbering.xml") != null)
+        }
+
+        val parsed = FileInputStream(outFile).use { DocxDocumentEngine.parseDocx(it) }
+        assertTrue(parsed.blocks.any { it is DocxBlock.Heading && it.runs.any { r -> r.text.contains("Plano Trimestral") } })
+        assertTrue(parsed.blocks.any { it is DocxBlock.ListItem && !it.ordered })
+        assertTrue(parsed.blocks.any { it is DocxBlock.ListItem && it.ordered })
+        assertTrue(parsed.blocks.any { it is DocxBlock.PageBreak })
+        assertTrue(parsed.blocks.any { block ->
+            block is DocxBlock.Table &&
+                block.headers.size == 2 &&
+                block.rows.size == 1 &&
+                block.headers[0].joinToString("") { it.text }.contains("Área") &&
+                block.rows[0][1].joinToString("") { it.text }.contains("Pronto")
+        })
+        outFile.delete()
+    }
+
+    @Test
+    fun `magic-byte detector identifies PDF and DOCX without filename extensions`() {
+        val pdfBytes = "%PDF-1.7\n1 0 obj\n".toByteArray(Charsets.US_ASCII)
+        assertEquals(
+            NoteDocumentType.PDF,
+            ExternalDocumentUriHelper.detectExternalDocumentTypeFromBytes(pdfBytes)
+        )
+
+        val docxBytes = buildSyntheticDocx(
+            documentXml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>Ok</w:t></w:r></w:p></w:body></w:document>"
+        )
+        assertEquals(
+            NoteDocumentType.DOCX,
+            ExternalDocumentUriHelper.detectExternalDocumentTypeFromBytes(docxBytes)
+        )
+    }
+
+    @Test
+    fun `batch exporter packages multiple notes safely with incremental progress`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val notes = listOf(
+            Note(id = 1L, title = "Nota Alpha", content = "# Titulo\n\nConteudo 1", category = "Estudos"),
+            Note(id = 2L, title = "Nota Alpha", content = "Segundo arquivo mesmo nome", category = "Geral"),
+            Note(id = 3L, title = "Lista Beta", content = "- Item 1\n- Item 2", category = "Trabalho")
+        )
+        val progressEvents = mutableListOf<Pair<Int, Int>>()
+
+        val output = NoteExportHelper.exportNotesBatch(
+            context = context,
+            notes = notes,
+            format = BatchExportFormat.DOCX,
+            onProgress = { exported, total, _ ->
+                progressEvents.add(exported to total)
+            }
+        )
+
+        assertEquals(3, output.exportedCount)
+        assertEquals(0, output.skippedCount)
+        assertEquals("application/zip", output.mimeType)
+        assertTrue(progressEvents.any { it == (3 to 3) })
     }
 }

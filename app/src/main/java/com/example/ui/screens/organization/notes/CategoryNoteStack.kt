@@ -63,8 +63,11 @@ fun CategoryNoteStack(
     onToggleExpand: () -> Unit,
     onNoteClick: (Note) -> Unit,
     onNoteLongClick: ((Note) -> Unit)? = null,
+    onNoteMoreClick: ((Note) -> Unit)? = null,
     onTogglePin: (Note) -> Unit,
     onDeleteNote: (Note) -> Unit,
+    isSelectionMode: Boolean = false,
+    selectedNoteIds: Set<Long> = emptySet(),
     modifier: Modifier = Modifier
 ) {
     val isDark = isAppDarkTheme()
@@ -102,9 +105,8 @@ fun CategoryNoteStack(
                         val offX = stackOffsetsX.getOrElse(i) { 0.dp }
                         val offY = stackOffsetsY.getOrElse(i) { 0.dp }
                         val paperColors = PaperNotePalette.resolvePaperColors(
-                            noteColor = note.noteColor,
-                            isDark = isDark,
-                            isPinned = note.isPinned
+                            note = note,
+                            isDark = isDark
                         )
 
                         PaperNoteSurface(
@@ -139,11 +141,11 @@ fun CategoryNoteStack(
 
                 // Top Cover Card ("Capa da Pasta")
                 val coverNote = displayPileNotes.firstOrNull()
-                val coverColors = PaperNotePalette.resolvePaperColors(
-                    noteColor = coverNote?.noteColor,
-                    isDark = isDark,
-                    isPinned = coverNote?.isPinned == true
-                )
+                val coverColors = if (coverNote != null) {
+                    PaperNotePalette.resolvePaperColors(note = coverNote, isDark = isDark)
+                } else {
+                    PaperNotePalette.resolvePaperColors(noteColor = null, isDark = isDark, isPinned = false)
+                }
 
                 PaperNoteSurface(
                     cornerRadius = 16.dp,
@@ -422,10 +424,11 @@ fun CategoryNoteStack(
                     notes.forEachIndexed { index, note ->
                         // Staircase offset progression
                         val stairIndent = (index * 8).dp.coerceAtMost(24.dp)
+                        val isSelected = selectedNoteIds.contains(note.id)
+                        val wobbleDeg = rememberSelectionWobbleAngle(isSelectionMode = isSelectionMode, isSelected = isSelected)
                         val paperColors = PaperNotePalette.resolvePaperColors(
-                            noteColor = note.noteColor,
-                            isDark = isDark,
-                            isPinned = note.isPinned
+                            note = note,
+                            isDark = isDark
                         )
                         val dateText = remember(note.updatedAt) {
                             SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(note.updatedAt))
@@ -435,12 +438,13 @@ fun CategoryNoteStack(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(start = stairIndent)
+                                .rotate(wobbleDeg)
                         ) {
                             PaperNoteSurface(
                                 cornerRadius = 14.dp,
                                 foldSize = 20.dp,
                                 paperColors = paperColors,
-                                isPinned = note.isPinned,
+                                isPinned = note.isPinned || isSelected,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .combinedClickable(
@@ -455,6 +459,56 @@ fun CategoryNoteStack(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
+                                    if (isSelectionMode) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(end = 10.dp)
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (isSelected) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                                )
+                                                .border(
+                                                    width = 1.5.dp,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Selecionada",
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (note.isExternalDocument) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(end = 10.dp)
+                                                .size(width = 44.dp, height = 56.dp)
+                                        ) {
+                                            if (note.isPdfDocument) {
+                                                PdfPageOnePreviewBox(
+                                                    externalUri = note.externalUri,
+                                                    compact = true,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                DocxPageOnePreviewBox(
+                                                    externalUri = note.externalUri,
+                                                    compact = true,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            }
+                                        }
+                                    }
+
                                     Column(
                                         modifier = Modifier.weight(1f),
                                         verticalArrangement = Arrangement.spacedBy(3.dp)
@@ -473,7 +527,7 @@ fun CategoryNoteStack(
                                             }
                                             if (note.isExternalDocument) {
                                                 val isPdf = note.isPdfDocument
-                                                val docAccent = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                                                val docAccent = if (isPdf) PdfSheetAccentColor else DocxSheetAccentColor
                                                 Surface(
                                                     shape = RoundedCornerShape(6.dp),
                                                     color = docAccent.copy(alpha = 0.16f)
@@ -512,18 +566,18 @@ fun CategoryNoteStack(
                                         when (note.resolvedDocumentType) {
                                             NoteDocumentType.PDF -> {
                                                 Text(
-                                                    text = "Somente leitura · Toque para abrir PDF",
+                                                    text = "Documento PDF · Toque para abrir",
                                                     style = MaterialTheme.typography.bodySmall,
-                                                    color = Color(0xFFDC2626).copy(alpha = 0.85f),
+                                                    color = PdfSheetAccentColor.copy(alpha = 0.85f),
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                             NoteDocumentType.DOCX -> {
                                                 Text(
-                                                    text = "Somente leitura · Toque para abrir .docx",
+                                                    text = "Documento .docx · Toque para abrir",
                                                     style = MaterialTheme.typography.bodySmall,
-                                                    color = Color(0xFF2563EB).copy(alpha = 0.85f),
+                                                    color = DocxSheetAccentColor.copy(alpha = 0.85f),
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
@@ -569,13 +623,13 @@ fun CategoryNoteStack(
                                         }
 
                                         IconButton(
-                                            onClick = { onDeleteNote(note) },
+                                            onClick = { onNoteMoreClick?.invoke(note) ?: onDeleteNote(note) },
                                             modifier = Modifier.minimumInteractiveComponentSize()
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.DeleteOutline,
-                                                contentDescription = "Excluir",
-                                                tint = paperColors.onBackgroundColor.copy(alpha = 0.45f),
+                                                imageVector = if (onNoteMoreClick != null) Icons.Default.MoreVert else Icons.Default.DeleteOutline,
+                                                contentDescription = if (onNoteMoreClick != null) "Opções" else "Excluir",
+                                                tint = paperColors.onBackgroundColor.copy(alpha = 0.55f),
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }

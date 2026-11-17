@@ -55,6 +55,21 @@ data class FlexiblePomodoroState(
     val completedSummary: String = ""
 )
 
+sealed class BatchExportUiState {
+    data object Idle : BatchExportUiState()
+    data class Exporting(
+        val exported: Int,
+        val total: Int,
+        val currentTitle: String,
+        val format: com.example.util.BatchExportFormat
+    ) : BatchExportUiState()
+    data class Completed(
+        val output: com.example.util.NoteExportHelper.BatchExportOutput,
+        val format: com.example.util.BatchExportFormat
+    ) : BatchExportUiState()
+    data class Error(val message: String) : BatchExportUiState()
+}
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getInstance(application)
     val repository = CitraRepository(application, database)
@@ -309,6 +324,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val archivedNotes: StateFlow<List<Note>> = repository.allArchivedNotes
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val recentExternalDocs: StateFlow<List<com.example.data.local.RecentExternalDocEntry>> =
+        preferencesManager.recentExternalDocs
+
     val defaultNoteOpenMode: StateFlow<String> = preferencesManager.defaultNoteOpenMode
     fun setDefaultNoteOpenMode(mode: String) = preferencesManager.setDefaultNoteOpenMode(mode)
 
@@ -322,6 +340,130 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             _userMessage.emit(msg)
         }
+    }
+
+    fun moveNotesToTrash(targetNotes: List<Note>) {
+        if (targetNotes.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            targetNotes.forEach { note ->
+                repository.moveToTrash(note)
+            }
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            _userMessage.emit("${targetNotes.size} ${if (targetNotes.size == 1) "item movido" else "itens movidos"} para a Lixeira.")
+        }
+    }
+
+    fun setNotesArchived(targetNotes: List<Note>, isArchived: Boolean) {
+        if (targetNotes.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            targetNotes.forEach { note ->
+                repository.setNoteArchived(note, isArchived)
+            }
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            val msg = if (isArchived) {
+                "${targetNotes.size} ${if (targetNotes.size == 1) "item arquivado" else "itens arquivados"}."
+            } else {
+                "${targetNotes.size} ${if (targetNotes.size == 1) "item desarquivado" else "itens desarquivados"}."
+            }
+            _userMessage.emit(msg)
+        }
+    }
+
+    fun updateNotesColor(targetNotes: List<Note>, noteColor: String?) {
+        if (targetNotes.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            targetNotes.forEach { note ->
+                repository.updateNote(note.copy(noteColor = noteColor, updatedAt = now))
+            }
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            _userMessage.emit("Cor atualizada em ${targetNotes.size} ${if (targetNotes.size == 1) "item" else "itens"}.")
+        }
+    }
+
+    fun updateNotesCategory(targetNotes: List<Note>, newCategory: String) {
+        if (targetNotes.isEmpty()) return
+        val cleanCategory = newCategory.trim().ifBlank { "Geral" }
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            targetNotes.forEach { note ->
+                repository.updateNote(note.copy(category = cleanCategory, updatedAt = now))
+            }
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            _userMessage.emit("Categoria '$cleanCategory' aplicada a ${targetNotes.size} ${if (targetNotes.size == 1) "item" else "itens"}.")
+        }
+    }
+
+    private val _batchExportState = MutableStateFlow<BatchExportUiState>(BatchExportUiState.Idle)
+    val batchExportState: StateFlow<BatchExportUiState> = _batchExportState.asStateFlow()
+    private var batchExportJob: Job? = null
+    @Volatile
+    private var batchExportCancelled: Boolean = false
+
+    fun startBatchExport(
+        context: Context,
+        targetNotes: List<Note>,
+        format: com.example.util.BatchExportFormat,
+        themeColor: Int
+    ) {
+        if (targetNotes.isEmpty()) return
+        batchExportJob?.cancel()
+        batchExportCancelled = false
+        val total = targetNotes.size
+        _batchExportState.value = BatchExportUiState.Exporting(
+            exported = 0,
+            total = total,
+            currentTitle = targetNotes.first().title.ifBlank { "Preparando..." },
+            format = format
+        )
+        batchExportJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val output = com.example.util.NoteExportHelper.exportNotesBatch(
+                    context = context,
+                    notes = targetNotes,
+                    format = format,
+                    themeColor = themeColor,
+                    onProgress = { exported, expTotal, currentTitle ->
+                        if (!batchExportCancelled) {
+                            _batchExportState.value = BatchExportUiState.Exporting(
+                                exported = exported,
+                                total = expTotal,
+                                currentTitle = currentTitle,
+                                format = format
+                            )
+                        }
+                    },
+                    isCancelled = { batchExportCancelled }
+                )
+                if (!batchExportCancelled) {
+                    _batchExportState.value = BatchExportUiState.Completed(output = output, format = format)
+                } else {
+                    _batchExportState.value = BatchExportUiState.Idle
+                }
+            } catch (e: Exception) {
+                if (batchExportCancelled || e is kotlinx.coroutines.CancellationException) {
+                    _batchExportState.value = BatchExportUiState.Idle
+                } else {
+                    _batchExportState.value = BatchExportUiState.Error(
+                        e.message ?: "Erro inesperado ao exportar as notas selecionadas."
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancelBatchExport() {
+        batchExportCancelled = true
+        batchExportJob?.cancel()
+        batchExportJob = null
+        _batchExportState.value = BatchExportUiState.Idle
+        viewModelScope.launch {
+            _userMessage.emit("Exportação cancelada.")
+        }
+    }
+
+    fun clearBatchExportState() {
+        _batchExportState.value = BatchExportUiState.Idle
     }
 
     fun ensureCategoryForDraft(): String {
@@ -1282,6 +1424,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ?.takeIf { it.isNotBlank() && !it.equals("Todas", ignoreCase = true) }
                 ?: "Geral"
 
+            val recentDocsToSave = mutableListOf<com.example.data.local.RecentExternalDocEntry>()
+
             for (uri in uris) {
                 try {
                     com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, uri)
@@ -1297,6 +1441,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     if (externalDocType != null) {
                         val uriStr = uri.toString()
+                        recentDocsToSave.add(
+                            com.example.data.local.RecentExternalDocEntry(
+                                uri = uriStr,
+                                title = rawTitle,
+                                docType = externalDocType.id,
+                                addedAt = System.currentTimeMillis()
+                            )
+                        )
                         if (existingExternalUris.contains(uriStr)) {
                             skippedDuplicatesCount++
                             continue
@@ -1416,6 +1568,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            if (recentDocsToSave.isNotEmpty()) {
+                preferencesManager.recordRecentExternalDocs(recentDocsToSave)
+            }
+
             if (linkedDocsCount > 0 || importedNotesCount > 0) {
                 com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             }
@@ -1436,6 +1592,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val msg = if (parts.isEmpty()) "Nenhum arquivo importado." else parts.joinToString(" • ") + "!"
             _userMessage.emit(msg)
         }
+    }
+
+    fun openOrAddRecentExternalDocs(
+        entries: List<com.example.data.local.RecentExternalDocEntry>,
+        preferredCategory: String? = null,
+        openIfSingle: Boolean = true
+    ) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val allExisting = repository.getAllNotesSync()
+            val resolvedCategory = preferredCategory
+                ?.trim()
+                ?.takeIf { it.isNotBlank() && !it.equals("Todas", ignoreCase = true) }
+                ?: "Geral"
+            var addedCount = 0
+            var resolvedSingle: Note? = null
+
+            for (entry in entries) {
+                val docType = NoteDocumentType.fromId(entry.docType)
+                val existing = allExisting.firstOrNull {
+                    it.externalUri?.trim() == entry.uri.trim() && it.resolvedDocumentType == docType
+                }
+                if (existing != null) {
+                    val activeCopy = if (existing.isArchived || existing.isDeleted) {
+                        val restored = existing.copy(
+                            isArchived = false,
+                            isDeleted = false,
+                            deletedAt = null,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        repository.updateNote(restored)
+                        restored
+                    } else {
+                        existing
+                    }
+                    if (entries.size == 1) resolvedSingle = activeCopy
+                } else {
+                    val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
+                    val newDoc = Note(
+                        uuid = java.util.UUID.randomUUID().toString(),
+                        title = entry.title.ifBlank { "Documento" },
+                        content = "",
+                        category = resolvedCategory,
+                        iconEmoji = docIcon,
+                        documentType = docType.id,
+                        externalUri = entry.uri,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val newId = repository.insertNote(newDoc)
+                    addedCount++
+                    if (entries.size == 1) resolvedSingle = newDoc.copy(id = newId)
+                }
+            }
+
+            preferencesManager.recordRecentExternalDocs(
+                entries.map { it.copy(addedAt = System.currentTimeMillis()) }
+            )
+            if (addedCount > 0) {
+                com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            }
+            if (openIfSingle && entries.size == 1 && resolvedSingle != null) {
+                _noteToOpen.value = resolvedSingle
+            } else if (addedCount > 0) {
+                _userMessage.emit("$addedCount documento(s) carregado(s) para as notas!")
+            } else {
+                _userMessage.emit("Documentos já estão na lista de notas.")
+            }
+        }
+    }
+
+    fun removeRecentExternalDoc(uri: String) {
+        preferencesManager.removeRecentExternalDoc(uri)
     }
 
     fun openOrRegisterExternalDocumentFromIntent(
@@ -1461,6 +1689,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val uriStr = uri.toString()
+                val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+                preferencesManager.recordRecentExternalDocs(
+                    listOf(
+                        com.example.data.local.RecentExternalDocEntry(
+                            uri = uriStr,
+                            title = rawTitle,
+                            docType = docType.id,
+                            addedAt = System.currentTimeMillis()
+                        )
+                    )
+                )
+
                 val existingNotes = repository.getAllNotesSync()
                 val existing = existingNotes.firstOrNull {
                     it.externalUri?.trim() == uriStr && it.resolvedDocumentType == docType
@@ -1472,7 +1712,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     _noteToOpen.value = existing.copy(isArchived = false)
                 } else {
-                    val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
                     val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
                     val newDoc = Note(
                         uuid = java.util.UUID.randomUUID().toString(),
@@ -1707,6 +1946,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 updatedAt = System.currentTimeMillis()
             )
             repository.updateNote(updated)
+            preferencesManager.recordRecentExternalDocs(
+                listOf(
+                    com.example.data.local.RecentExternalDocEntry(
+                        uri = newUri.toString(),
+                        title = cleanTitle,
+                        docType = updated.documentType,
+                        addedAt = System.currentTimeMillis()
+                    )
+                )
+            )
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             kotlinx.coroutines.withContext(Dispatchers.Main) {
                 onUpdated?.invoke(updated)
@@ -1738,7 +1987,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     stream.use { input ->
                         when (docNote.resolvedDocumentType) {
                             NoteDocumentType.PDF -> {
-                                when (val res = com.example.util.PdfDocumentEngine.extractMarkdown(context, input)) {
+                                val res = com.example.util.PdfDocumentEngine.extractMarkdown(context, input) { bytes, ext ->
+                                    saveDocxExtractedImage(context, bytes, ext)
+                                }
+                                when (res) {
                                     is com.example.util.PdfConversionResult.Success -> res.markdown to null
                                     is com.example.util.PdfConversionResult.Error -> null to res.message
                                 }

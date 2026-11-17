@@ -15,9 +15,16 @@ import android.text.TextPaint
 import android.text.style.*
 import android.util.Base64
 import androidx.core.content.FileProvider
+import com.example.data.model.Note
+import com.example.data.model.NoteDocumentType
+import com.example.data.model.resolvedDocumentType
 import com.example.ui.screens.organization.notes.*
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.text.SimpleDateFormat
@@ -25,11 +32,27 @@ import java.util.*
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 enum class NotePaginationType(val label: String) {
     NONE("Nenhuma"),
     ARABIC("1."),
     ROMAN("I.")
+}
+
+enum class BatchExportFormat(
+    val id: String,
+    val label: String,
+    val subtitle: String,
+    val extension: String,
+    val mimeType: String
+) {
+    DOCX("DOCX", "Word (.docx)", "Documento editável compatível com estilos e imagens", "docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    PDF("PDF", "PDF (.pdf)", "Documento diagramado pronto para leitura ou impressão", "pdf", "application/pdf"),
+    MARKDOWN("MD", "Markdown (.md)", "Texto puro com formatação completa do Citra", "md", "text/markdown"),
+    HTML("HTML", "Página Web (.html)", "Layout interativo com áudios e imagens incorporadas", "html", "text/html"),
+    TXT("TXT", "Texto Simples (.txt)", "Conteúdo limpo para máxima compatibilidade", "txt", "text/plain"),
+    JSON_BACKUP("JSON", "Pacote Backup (.json)", "Arquivo único com metadados, cores e categorias", "json", "application/json")
 }
 
 object NoteExportHelper {
@@ -547,27 +570,49 @@ object NoteExportHelper {
         val text: String,
         val isBold: Boolean = false,
         val isItalic: Boolean = false,
+        val isUnderline: Boolean = false,
         val isStrike: Boolean = false,
-        val isCode: Boolean = false
+        val isHighlight: Boolean = false,
+        val isCode: Boolean = false,
+        val linkUrl: String? = null
     )
 
     private fun parseInlineSpans(input: String): List<InlineSpan> {
+        if (input.isEmpty()) return emptyList()
         val result = mutableListOf<InlineSpan>()
-        val regex = Regex("(\\*\\*.*?\\*\\*|~~.*?~~|`.*?`|(?<!\\*)\\*.*?\\*(?!\\*))")
+        val tokenRegex = Regex(
+            """(\*\*\*.*?\*\*\*|___.*?___|<u>.*?</u>|\*\*.*?\*\*|__.*?__|~~.*?~~|==.*?==|`[^`\n]+`|\[[^\]\n]+\]\([^\)\n]+\)|(?<!\*)\*(?!\*)[^*\n]+(?<!\*)\*(?!\*)|(?<!_)_(?!_)[^_\n]+(?<!_)_(?!_))""",
+            RegexOption.IGNORE_CASE
+        )
         var lastIdx = 0
-        for (m in regex.findAll(input)) {
+        for (m in tokenRegex.findAll(input)) {
             if (m.range.first > lastIdx) {
                 result.add(InlineSpan(text = input.substring(lastIdx, m.range.first)))
             }
             val raw = m.value
             when {
-                raw.startsWith("**") && raw.endsWith("**") && raw.length >= 4 ->
+                (raw.startsWith("***") && raw.endsWith("***") && raw.length > 6) ||
+                    (raw.startsWith("___") && raw.endsWith("___") && raw.length > 6) ->
+                    result.add(InlineSpan(text = raw.substring(3, raw.length - 3), isBold = true, isItalic = true))
+                raw.startsWith("<u>", ignoreCase = true) && raw.endsWith("</u>", ignoreCase = true) && raw.length > 7 ->
+                    result.add(InlineSpan(text = raw.substring(3, raw.length - 4), isUnderline = true))
+                (raw.startsWith("**") && raw.endsWith("**") && raw.length > 4) ||
+                    (raw.startsWith("__") && raw.endsWith("__") && raw.length > 4) ->
                     result.add(InlineSpan(text = raw.substring(2, raw.length - 2), isBold = true))
-                raw.startsWith("~~") && raw.endsWith("~~") && raw.length >= 4 ->
+                raw.startsWith("~~") && raw.endsWith("~~") && raw.length > 4 ->
                     result.add(InlineSpan(text = raw.substring(2, raw.length - 2), isStrike = true))
+                raw.startsWith("==") && raw.endsWith("==") && raw.length > 4 ->
+                    result.add(InlineSpan(text = raw.substring(2, raw.length - 2), isHighlight = true))
                 raw.startsWith("`") && raw.endsWith("`") && raw.length >= 2 ->
                     result.add(InlineSpan(text = raw.substring(1, raw.length - 1), isCode = true))
-                raw.startsWith("*") && raw.endsWith("*") && raw.length >= 2 ->
+                raw.startsWith("[") && raw.contains("](") && raw.endsWith(")") -> {
+                    val split = raw.indexOf("](")
+                    val label = raw.substring(1, split)
+                    val url = raw.substring(split + 2, raw.length - 1)
+                    result.add(InlineSpan(text = label, isUnderline = true, linkUrl = url))
+                }
+                (raw.startsWith("*") && raw.endsWith("*") && raw.length > 2) ||
+                    (raw.startsWith("_") && raw.endsWith("_") && raw.length > 2) ->
                     result.add(InlineSpan(text = raw.substring(1, raw.length - 1), isItalic = true))
                 else -> result.add(InlineSpan(text = raw))
             }
@@ -579,30 +624,137 @@ object NoteExportHelper {
         return if (result.isEmpty()) listOf(InlineSpan(text = input)) else result
     }
 
-    private fun renderDocxRuns(text: String, defaultColorHex: String = "334155"): String {
+    private fun renderDocxRuns(
+        text: String,
+        defaultColorHex: String = "334155",
+        defaultBold: Boolean = false,
+        defaultItalic: Boolean = false,
+        defaultSizeHalfPt: String? = null
+    ): String {
         val spans = parseInlineSpans(text)
         val sb = StringBuilder()
         for (span in spans) {
             val escaped = escapeXml(span.text).replace("\n", "</w:t><w:br/><w:t xml:space=\"preserve\">")
             sb.append("<w:r><w:rPr>")
-            if (span.isBold) sb.append("<w:b/>")
-            if (span.isItalic) sb.append("<w:i/>")
+            if (defaultBold || span.isBold) sb.append("<w:b/>")
+            if (defaultItalic || span.isItalic) sb.append("<w:i/>")
+            if (span.isUnderline) sb.append("<w:u w:val=\"single\"/>")
             if (span.isStrike) sb.append("<w:strike/>")
+            if (defaultSizeHalfPt != null) sb.append("<w:sz w:val=\"$defaultSizeHalfPt\"/>")
             if (span.isCode) {
                 sb.append("<w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/>")
                 sb.append("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F1F5F9\"/>")
                 sb.append("<w:color w:val=\"0F172A\"/>")
             } else {
+                if (span.isHighlight) {
+                    sb.append("<w:highlight w:val=\"yellow\"/>")
+                }
                 sb.append("<w:color w:val=\"$defaultColorHex\"/>")
             }
             sb.append("</w:rPr><w:t xml:space=\"preserve\">$escaped</w:t></w:r>")
+            if (!span.linkUrl.isNullOrBlank() && span.linkUrl != span.text) {
+                sb.append("<w:r><w:rPr><w:sz w:val=\"16\"/><w:color w:val=\"64748B\"/></w:rPr>")
+                sb.append("<w:t xml:space=\"preserve\"> (${escapeXml(span.linkUrl)})</w:t></w:r>")
+            }
         }
         return sb.toString()
     }
 
+    private fun buildDocxStylesXml(themeHex: String): String {
+        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:sz w:val="22"/></w:rPr></w:rPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:pPr><w:spacing w:after="140" w:line="276" w:lineRule="auto"/></w:pPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:outlineLvl w:val="0"/><w:spacing w:before="280" w:after="100"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="36"/><w:color w:val="$themeHex"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:outlineLvl w:val="1"/><w:spacing w:before="240" w:after="90"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="32"/><w:color w:val="1E293B"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading3">
+    <w:name w:val="heading 3"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:outlineLvl w:val="2"/><w:spacing w:before="200" w:after="80"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="28"/><w:color w:val="$themeHex"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading4">
+    <w:name w:val="heading 4"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:outlineLvl w:val="3"/><w:spacing w:before="160" w:after="60"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="26"/><w:color w:val="334155"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading5">
+    <w:name w:val="heading 5"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:outlineLvl w:val="4"/><w:spacing w:before="120" w:after="50"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="24"/><w:color w:val="475569"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Quote">
+    <w:name w:val="Quote"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:ind w:left="420"/><w:pBdr><w:left w:val="single" w:sz="24" w:space="12" w:color="$themeHex"/></w:pBdr></w:pPr>
+    <w:rPr><w:i/><w:color w:val="475569"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="ListParagraph">
+    <w:name w:val="List Paragraph"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:ind w:left="720"/></w:pPr>
+  </w:style>
+</w:styles>"""
+    }
+
+    private fun buildDocxNumberingXml(): String {
+        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="1">
+    <w:multiLevelType w:val="singleLevel"/>
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="bullet"/>
+      <w:lvlText w:val="•"/>
+      <w:lvlJc w:val="left"/>
+      <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>
+    </w:lvl>
+  </w:abstractNum>
+  <w:abstractNum w:abstractNumId="2">
+    <w:multiLevelType w:val="singleLevel"/>
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="decimal"/>
+      <w:lvlText w:val="%1."/>
+      <w:lvlJc w:val="left"/>
+      <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+  <w:num w:numId="2"><w:abstractNumId w:val="2"/></w:num>
+</w:numbering>"""
+    }
+
+    private fun downsampleBitmapForExport(bmp: Bitmap, maxDim: Int = 1600): Bitmap {
+        val maxSide = maxOf(bmp.width, bmp.height)
+        if (maxSide <= maxDim || bmp.width <= 0 || bmp.height <= 0) return bmp
+        val scale = maxDim.toFloat() / maxSide.toFloat()
+        val targetW = (bmp.width * scale).roundToInt().coerceAtLeast(1)
+        val targetH = (bmp.height * scale).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bmp, targetW, targetH, true)
+    }
+
     /**
      * Exports Note as a standard styled Microsoft Word (.docx) OpenXML document.
-     * Preserves markdown headings, bold, italic, code, quotes, tables, checklists, callouts, and embedded images!
+     * Includes styles.xml, numbering.xml, headings, bold/italic/underline/strike/highlight/code combinations,
+     * quotes, tables, checklists, real Word bullet & ordered lists, page breaks, TOC headings, and scaled images.
      */
     fun exportToDocx(
         context: Context,
@@ -612,11 +764,33 @@ object NoteExportHelper {
         themeColor: Int = Color.parseColor("#FF6F00"),
         paginationType: NotePaginationType = NotePaginationType.NONE
     ): Uri {
+        val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.docx")
+        writeDocxToFile(
+            context = context,
+            destFile = file,
+            noteTitle = noteTitle,
+            noteCategory = noteCategory,
+            blocks = blocks,
+            themeColor = themeColor,
+            paginationType = paginationType
+        )
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
+
+    fun writeDocxToFile(
+        context: Context,
+        destFile: File,
+        noteTitle: String,
+        noteCategory: String,
+        blocks: List<VisualBlock>,
+        themeColor: Int = Color.parseColor("#FF6F00"),
+        paginationType: NotePaginationType = NotePaginationType.NONE
+    ) {
         val themeHex = colorToHex(themeColor)
         val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
         val displayTitle = noteTitle.ifBlank { "Sem Título" }
 
-        val imageEntries = mutableListOf<Pair<String, ByteArray>>() // id to bytes
+        val imageEntries = mutableListOf<Pair<String, ByteArray>>()
         var imageCounter = 0
 
         val docSb = StringBuilder()
@@ -643,27 +817,43 @@ object NoteExportHelper {
         docSb.append("<w:r><w:rPr><w:sz w:val=\"18\"/><w:color w:val=\"64748B\"/></w:rPr>")
         docSb.append("<w:t xml:space=\"preserve\"> • Exportado pelo Citra em $dateStr</w:t></w:r></w:p>\n")
 
-        // Iterate blocks
+        val numberedLineRegex = Regex("^\\s*(\\d{1,3})[.)]\\s+(.+)$")
+
         for (block in blocks) {
             when (block) {
                 is HeadingBlock -> {
-                    val (szVal, colHex, spaceBefore) = when (block.level) {
+                    val lvl = block.level.coerceIn(1, 5)
+                    val (szVal, colHex, spaceBefore) = when (lvl) {
                         1 -> Triple("36", themeHex, "280")
                         2 -> Triple("32", "1E293B", "240")
                         3 -> Triple("28", themeHex, "200")
                         4 -> Triple("26", "334155", "160")
                         else -> Triple("24", "475569", "120")
                     }
-                    docSb.append("<w:p><w:pPr><w:spacing w:before=\"$spaceBefore\" w:after=\"100\"/></w:pPr>")
-                    docSb.append("<w:r><w:rPr><w:b/><w:sz w:val=\"$szVal\"/><w:color w:val=\"$colHex\"/></w:rPr>")
-                    docSb.append("<w:t xml:space=\"preserve\">${escapeXml(block.text.ifBlank { " " })}</w:t></w:r></w:p>\n")
+                    docSb.append("<w:p><w:pPr><w:pStyle w:val=\"Heading$lvl\"/><w:spacing w:before=\"$spaceBefore\" w:after=\"100\"/></w:pPr>")
+                    docSb.append(renderDocxRuns(block.text.ifBlank { " " }, defaultColorHex = colHex, defaultBold = true, defaultSizeHalfPt = szVal))
+                    docSb.append("</w:p>\n")
                 }
 
                 is TextBlock -> {
                     if (block.text.isNotBlank()) {
-                        docSb.append("<w:p><w:pPr><w:spacing w:after=\"140\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr>")
-                        docSb.append(renderDocxRuns(block.text))
-                        docSb.append("</w:p>\n")
+                        val subLines = block.text.split("\n")
+                        for (sub in subLines) {
+                            val trimmed = sub.trim()
+                            val orderedMatch = numberedLineRegex.matchEntire(trimmed)
+                            if (orderedMatch != null) {
+                                val itemContent = orderedMatch.groupValues[2]
+                                docSb.append("<w:p><w:pPr><w:pStyle w:val=\"ListParagraph\"/>")
+                                docSb.append("<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"2\"/></w:numPr>")
+                                docSb.append("<w:spacing w:after=\"80\"/></w:pPr>")
+                                docSb.append(renderDocxRuns(itemContent))
+                                docSb.append("</w:p>\n")
+                            } else if (trimmed.isNotEmpty()) {
+                                docSb.append("<w:p><w:pPr><w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr>")
+                                docSb.append(renderDocxRuns(sub))
+                                docSb.append("</w:p>\n")
+                            }
+                        }
                     } else {
                         docSb.append("<w:p><w:pPr><w:spacing w:after=\"80\"/></w:pPr></w:p>\n")
                     }
@@ -685,19 +875,19 @@ object NoteExportHelper {
                 }
 
                 is BulletBlock -> {
-                    docSb.append("<w:p><w:pPr><w:ind w:left=\"360\"/><w:spacing w:after=\"80\"/></w:pPr>")
-                    docSb.append("<w:r><w:rPr><w:b/><w:color w:val=\"$themeHex\"/></w:rPr>")
-                    docSb.append("<w:t xml:space=\"preserve\">• </w:t></w:r>")
+                    docSb.append("<w:p><w:pPr><w:pStyle w:val=\"ListParagraph\"/>")
+                    docSb.append("<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"1\"/></w:numPr>")
+                    docSb.append("<w:spacing w:after=\"80\"/></w:pPr>")
                     docSb.append(renderDocxRuns(block.text))
                     docSb.append("</w:p>\n")
                 }
 
                 is QuoteBlock -> {
-                    docSb.append("<w:p><w:pPr><w:ind w:left=\"420\"/>")
+                    docSb.append("<w:p><w:pPr><w:pStyle w:val=\"Quote\"/><w:ind w:left=\"420\"/>")
                     docSb.append("<w:pBdr><w:left w:val=\"single\" w:sz=\"24\" w:space=\"12\" w:color=\"$themeHex\"/></w:pBdr>")
                     docSb.append("<w:spacing w:before=\"120\" w:after=\"120\"/></w:pPr>")
-                    docSb.append("<w:r><w:rPr><w:i/><w:color w:val=\"475569\"/></w:rPr>")
-                    docSb.append("<w:t xml:space=\"preserve\">${escapeXml(block.text)}</w:t></w:r></w:p>\n")
+                    docSb.append(renderDocxRuns(block.text, defaultColorHex = "475569", defaultItalic = true))
+                    docSb.append("</w:p>\n")
                 }
 
                 is CodeBlock -> {
@@ -727,26 +917,24 @@ object NoteExportHelper {
                     docSb.append("<w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"E2E8F0\"/>")
                     docSb.append("</w:tblBorders></w:tblPr>\n")
 
-                    // Header row with theme tint
                     docSb.append("<w:tr><w:trPr><w:tblHeader/></w:trPr>")
                     for (header in block.headers) {
                         docSb.append("<w:tc><w:tcPr><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F8FAFC\"/>")
                         docSb.append("<w:tcMar><w:top w:w=\"120\"/><w:bottom w:w=\"120\"/><w:left w:w=\"140\"/><w:right w:w=\"140\"/></w:tcMar></w:tcPr>")
                         docSb.append("<w:p><w:pPr><w:spacing w:before=\"60\" w:after=\"60\"/></w:pPr>")
-                        docSb.append("<w:r><w:rPr><w:b/><w:sz w:val=\"20\"/><w:color w:val=\"0F172A\"/></w:rPr>")
-                        docSb.append("<w:t xml:space=\"preserve\">${escapeXml(header)}</w:t></w:r></w:p></w:tc>")
+                        docSb.append(renderDocxRuns(header.ifBlank { " " }, defaultColorHex = "0F172A", defaultBold = true, defaultSizeHalfPt = "20"))
+                        docSb.append("</w:p></w:tc>")
                     }
                     docSb.append("</w:tr>\n")
 
-                    // Data rows
                     for (row in block.rows) {
                         docSb.append("<w:tr>")
                         for (cIdx in 0 until block.headers.size) {
                             val cellText = if (cIdx < row.size) row[cIdx] else ""
                             docSb.append("<w:tc><w:tcPr><w:tcMar><w:top w:w=\"100\"/><w:bottom w:w=\"100\"/><w:left w:w=\"140\"/><w:right w:w=\"140\"/></w:tcMar></w:tcPr>")
                             docSb.append("<w:p><w:pPr><w:spacing w:before=\"40\" w:after=\"40\"/></w:pPr>")
-                            docSb.append("<w:r><w:rPr><w:sz w:val=\"20\"/><w:color w:val=\"334155\"/></w:rPr>")
-                            docSb.append("<w:t xml:space=\"preserve\">${escapeXml(cellText)}</w:t></w:r></w:p></w:tc>")
+                            docSb.append(renderDocxRuns(cellText, defaultColorHex = "334155", defaultSizeHalfPt = "20"))
+                            docSb.append("</w:p></w:tc>")
                         }
                         docSb.append("</w:tr>\n")
                     }
@@ -795,12 +983,17 @@ object NoteExportHelper {
                 }
 
                 is ImageBlock -> {
-                    val bmp = loadBitmapFromUrl(context, block.url)
-                    if (bmp != null) {
+                    val rawBmp = loadBitmapFromUrl(context, block.url)
+                    if (rawBmp != null) {
+                        val bmp = downsampleBitmapForExport(rawBmp, 1600)
+                        val bmpW = bmp.width.coerceAtLeast(1)
+                        val bmpH = bmp.height.coerceAtLeast(1)
                         imageCounter++
                         val relId = "rIdImg$imageCounter"
                         val bos = ByteArrayOutputStream()
                         bmp.compress(Bitmap.CompressFormat.JPEG, 85, bos)
+                        if (bmp !== rawBmp) bmp.recycle()
+                        rawBmp.recycle()
                         imageEntries.add(relId to bos.toByteArray())
 
                         val hasSide = block.widthPercent < 100 && (block.alignment == "left" || block.alignment == "right") && block.sideText.isNotBlank()
@@ -809,7 +1002,7 @@ object NoteExportHelper {
                             val totalEmu = 5400000L
                             val imgEmu = (totalEmu * imgFraction).toLong()
                             val textEmu = totalEmu - imgEmu
-                            val emuH = ((imgEmu * bmp.height) / bmp.width.coerceAtLeast(1)).coerceIn(500000L, 6000000L)
+                            val emuH = ((imgEmu * bmpH) / bmpW).coerceIn(500000L, 6000000L)
 
                             val imgTwips = imgEmu / 635L
                             val textTwips = textEmu / 635L
@@ -818,7 +1011,7 @@ object NoteExportHelper {
                                 append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">")
                                 append("<wp:extent cx=\"$imgEmu\" cy=\"$emuH\"/>")
                                 append("<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>")
-                                append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\"/>")
+                                append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\" descr=\"${escapeXml(block.alt)}\"/>")
                                 append("<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>")
                                 append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">")
                                 append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"$imageCounter\" name=\"image_$imageCounter.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>")
@@ -831,7 +1024,7 @@ object NoteExportHelper {
                             val textCellXml = buildString {
                                 val lines = block.sideText.split("\n")
                                 for (l in lines) {
-                                    append("<w:p><w:pPr><w:spacing w:before=\"40\" w:after=\"40\"/></w:pPr><w:r><w:rPr><w:sz w:val=\"20\"/></w:rPr><w:t xml:space=\"preserve\">${escapeXml(l)}</w:t></w:r></w:p>")
+                                    append("<w:p><w:pPr><w:spacing w:before=\"40\" w:after=\"40\"/></w:pPr>${renderDocxRuns(l, defaultSizeHalfPt = "20")}</w:p>")
                                 }
                             }
 
@@ -847,10 +1040,8 @@ object NoteExportHelper {
                             }
                             docSb.append("</w:tr></w:tbl>\n")
                         } else {
-                            // 1 inch = 914400 EMUs. Printable width ~ 5,400,000 EMUs.
                             val maxEmuW = (5400000L * block.widthPercent / 100).coerceIn(1000000L, 5400000L)
-                            val emuH = ((maxEmuW * bmp.height) / bmp.width.coerceAtLeast(1)).coerceIn(500000L, 6000000L)
-
+                            val emuH = ((maxEmuW * bmpH) / bmpW).coerceIn(500000L, 6000000L)
                             val jcVal = when (block.alignment) {
                                 "left" -> "left"
                                 "right" -> "right"
@@ -860,7 +1051,7 @@ object NoteExportHelper {
                             docSb.append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">")
                             docSb.append("<wp:extent cx=\"$maxEmuW\" cy=\"$emuH\"/>")
                             docSb.append("<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/>")
-                            docSb.append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\"/>")
+                            docSb.append("<wp:docPr id=\"$imageCounter\" name=\"Image_$imageCounter\" descr=\"${escapeXml(block.alt)}\"/>")
                             docSb.append("<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>")
                             docSb.append("<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">")
                             docSb.append("<pic:pic><pic:nvPicPr><pic:cNvPr id=\"$imageCounter\" name=\"image_$imageCounter.jpeg\"/><pic:cNvPicPr/></pic:nvPicPr>")
@@ -890,7 +1081,7 @@ object NoteExportHelper {
         }
 
         // Section properties
-        docSb.append("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/>") // A4 size in twips
+        docSb.append("<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/>")
         docSb.append("<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/>")
         if (paginationType != NotePaginationType.NONE) {
             val numFmt = if (paginationType == NotePaginationType.ROMAN) "upperRoman" else "decimal"
@@ -900,10 +1091,7 @@ object NoteExportHelper {
         docSb.append("</w:sectPr>\n")
         docSb.append("</w:body></w:document>")
 
-        // Assemble DOCX ZIP
-        val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.docx")
-        ZipOutputStream(FileOutputStream(file)).use { zos ->
-            // 1. [Content_Types].xml
+        ZipOutputStream(BufferedOutputStream(FileOutputStream(destFile), 32768)).use { zos ->
             zos.putNextEntry(ZipEntry("[Content_Types].xml"))
             val footerOverride = if (paginationType != NotePaginationType.NONE) {
                 "\n  <Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>"
@@ -915,25 +1103,27 @@ object NoteExportHelper {
   <Default Extension="jpeg" ContentType="image/jpeg"/>
   <Default Extension="jpg" ContentType="image/jpeg"/>
   <Default Extension="png" ContentType="image/png"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>$footerOverride
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>$footerOverride
 </Types>"""
-            zos.write(contentTypes.toByteArray())
+            zos.write(contentTypes.toByteArray(Charsets.UTF_8))
             zos.closeEntry()
 
-            // 2. _rels/.rels
             zos.putNextEntry(ZipEntry("_rels/.rels"))
             val rootRels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>"""
-            zos.write(rootRels.toByteArray())
+            zos.write(rootRels.toByteArray(Charsets.UTF_8))
             zos.closeEntry()
 
-            // 3. word/_rels/document.xml.rels
             zos.putNextEntry(ZipEntry("word/_rels/document.xml.rels"))
             val docRelsSb = StringBuilder()
             docRelsSb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n")
             docRelsSb.append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n")
+            docRelsSb.append("  <Relationship Id=\"rIdStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>\n")
+            docRelsSb.append("  <Relationship Id=\"rIdNumbering\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering\" Target=\"numbering.xml\"/>\n")
             if (paginationType != NotePaginationType.NONE) {
                 docRelsSb.append("  <Relationship Id=\"rIdFooter1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>\n")
             }
@@ -942,47 +1132,45 @@ object NoteExportHelper {
                 docRelsSb.append("  <Relationship Id=\"$relId\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image_${idx + 1}.jpeg\"/>\n")
             }
             docRelsSb.append("</Relationships>")
-            zos.write(docRelsSb.toString().toByteArray())
+            zos.write(docRelsSb.toString().toByteArray(Charsets.UTF_8))
             zos.closeEntry()
 
-            // 4. word/document.xml
+            zos.putNextEntry(ZipEntry("word/styles.xml"))
+            zos.write(buildDocxStylesXml(themeHex).toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+
+            zos.putNextEntry(ZipEntry("word/numbering.xml"))
+            zos.write(buildDocxNumberingXml().toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+
             zos.putNextEntry(ZipEntry("word/document.xml"))
-            zos.write(docSb.toString().toByteArray())
+            zos.write(docSb.toString().toByteArray(Charsets.UTF_8))
             zos.closeEntry()
 
-            // 4.1 word/footer1.xml (if pagination is active)
-        if (paginationType != NotePaginationType.NONE) {
-            zos.putNextEntry(ZipEntry("word/footer1.xml"))
-            val footerXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            if (paginationType != NotePaginationType.NONE) {
+                zos.putNextEntry(ZipEntry("word/footer1.xml"))
+                val footerXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:p>
-    <w:pPr>
-      <w:jc w:val="right"/>
-    </w:pPr>
+    <w:pPr><w:jc w:val="right"/></w:pPr>
     <w:r>
-      <w:rPr>
-        <w:sz w:val="20"/>
-        <w:color w:val="94A3B8"/>
-      </w:rPr>
+      <w:rPr><w:sz w:val="20"/><w:color w:val="94A3B8"/></w:rPr>
       <w:fldSimple w:instr="PAGE"/>
       <w:t>.</w:t>
     </w:r>
   </w:p>
 </w:ftr>"""
-            zos.write(footerXml.toByteArray())
-            zos.closeEntry()
-        }
+                zos.write(footerXml.toByteArray(Charsets.UTF_8))
+                zos.closeEntry()
+            }
 
-        // 5. word/media/image_X.jpeg
-        for ((idx, item) in imageEntries.withIndex()) {
-            zos.putNextEntry(ZipEntry("word/media/image_${idx + 1}.jpeg"))
-            zos.write(item.second)
-            zos.closeEntry()
+            for ((idx, item) in imageEntries.withIndex()) {
+                zos.putNextEntry(ZipEntry("word/media/image_${idx + 1}.jpeg"))
+                zos.write(item.second)
+                zos.closeEntry()
+            }
         }
     }
-
-    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-}
 
     /**
      * Exports Note as a standard styled PDF document using Android's native PdfDocument.
@@ -2649,6 +2837,253 @@ document.addEventListener("DOMContentLoaded", function() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, title))
+    }
+
+    data class BatchExportOutput(
+        val uri: Uri,
+        val mimeType: String,
+        val fileName: String,
+        val exportedCount: Int,
+        val skippedCount: Int
+    )
+
+    /**
+     * Memory-safe, streaming batch exporter for multi-selected notes (Markdown, PDF, DOCX).
+     * Reports progress per note and streams output directly to disk to handle large datasets cleanly.
+     */
+    fun exportNotesBatch(
+        context: Context,
+        notes: List<Note>,
+        format: BatchExportFormat,
+        themeColor: Int = Color.parseColor("#FF6F00"),
+        onProgress: (exported: Int, total: Int, currentTitle: String) -> Unit = { _, _, _ -> },
+        isCancelled: () -> Boolean = { false }
+    ): BatchExportOutput {
+        require(notes.isNotEmpty()) { "Nenhuma nota selecionada para exportar." }
+
+        val exportDir = getExportDir(context)
+        val total = notes.size
+
+        if (format == BatchExportFormat.JSON_BACKUP) {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val jsonFile = File(exportDir, "citra_notas_$timestamp.json")
+            val array = JSONArray()
+            var count = 0
+            for (note in notes) {
+                if (isCancelled()) throw IllegalStateException("Exportação cancelada pelo usuário.")
+                val obj = JSONObject().apply {
+                    put("uuid", note.uuid)
+                    put("title", note.title)
+                    put("content", note.content)
+                    put("category", note.category)
+                    put("iconEmoji", note.iconEmoji)
+                    put("noteColor", note.noteColor ?: "DEFAULT")
+                    put("documentType", note.documentType)
+                    put("externalUri", note.externalUri ?: "")
+                    put("updatedAt", note.updatedAt)
+                }
+                array.put(obj)
+                count++
+                onProgress(count, total, note.title.ifBlank { "Sem Título" })
+            }
+            val root = JSONObject().apply {
+                put("app", "Citra")
+                put("exportedAt", System.currentTimeMillis())
+                put("count", array.length())
+                put("notes", array)
+            }
+            jsonFile.writeText(root.toString(2), Charsets.UTF_8)
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", jsonFile)
+            return BatchExportOutput(
+                uri = uri,
+                mimeType = format.mimeType,
+                fileName = jsonFile.name,
+                exportedCount = count,
+                skippedCount = 0
+            )
+        }
+
+        // Single note direct export (when non-ZIP is preferable and supported)
+        if (notes.size == 1) {
+            val single = notes.first()
+            val title = single.title.ifBlank { "Sem Título" }
+            val docType = single.resolvedDocumentType
+            if (docType == NoteDocumentType.PDF && format == BatchExportFormat.PDF && !single.externalUri.isNullOrBlank()) {
+                val dest = File(exportDir, "${sanitizeFilename(title)}.pdf")
+                val copied = ExternalDocumentUriHelper.openInputStream(context, single.externalUri)?.use { input ->
+                    FileOutputStream(dest).use { out -> input.copyTo(out) }
+                    true
+                } ?: false
+                if (copied) {
+                    onProgress(1, 1, title)
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", dest)
+                    return BatchExportOutput(uri, format.mimeType, dest.name, 1, 0)
+                }
+            } else if (docType == NoteDocumentType.DOCX && format == BatchExportFormat.DOCX && !single.externalUri.isNullOrBlank()) {
+                val dest = File(exportDir, "${sanitizeFilename(title)}.docx")
+                val copied = ExternalDocumentUriHelper.openInputStream(context, single.externalUri)?.use { input ->
+                    FileOutputStream(dest).use { out -> input.copyTo(out) }
+                    true
+                } ?: false
+                if (copied) {
+                    onProgress(1, 1, title)
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", dest)
+                    return BatchExportOutput(uri, format.mimeType, dest.name, 1, 0)
+                }
+            } else if (docType == NoteDocumentType.MARKDOWN) {
+                val blocks = SmoothMarkdownConverter.markdownToBlocks(single.content)
+                val uri = when (format) {
+                    BatchExportFormat.DOCX -> exportToDocx(context, title, single.category, blocks, themeColor)
+                    BatchExportFormat.PDF -> exportToPdf(context, title, single.category, blocks, themeColor)
+                    BatchExportFormat.MARKDOWN -> exportToMdFile(context, title, blocks)
+                    BatchExportFormat.HTML -> exportToHtmlFile(context, title, single.category, blocks, themeColor)
+                    BatchExportFormat.TXT -> exportToTxtFile(context, title, single.category, blocks)
+                    BatchExportFormat.JSON_BACKUP -> exportToMdFile(context, title, blocks)
+                }
+                onProgress(1, 1, title)
+                return BatchExportOutput(
+                    uri = uri,
+                    mimeType = format.mimeType,
+                    fileName = "${sanitizeFilename(title)}.${format.extension}",
+                    exportedCount = 1,
+                    skippedCount = 0
+                )
+            }
+        }
+
+        // Multi-note or heterogeneous export -> single streamed .zip archive
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val zipFile = File(exportDir, "citra_exportacao_$timestamp.zip")
+        val tempWorkDir = File(exportDir, "batch_tmp_$timestamp").apply { mkdirs() }
+        val usedNames = mutableSetOf<String>()
+        var exported = 0
+        var skipped = 0
+
+        fun uniqueEntryName(base: String, ext: String): String {
+            var candidate = "${sanitizeFilename(base)}.$ext"
+            var suffix = 2
+            while (!usedNames.add(candidate.lowercase())) {
+                candidate = "${sanitizeFilename(base)}_$suffix.$ext"
+                suffix++
+            }
+            return candidate
+        }
+
+        try {
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile), 32768)).use { zos ->
+                for ((idx, note) in notes.withIndex()) {
+                    if (isCancelled()) throw IllegalStateException("Exportação cancelada pelo usuário.")
+                    val title = note.title.ifBlank { "Nota_${idx + 1}" }
+                    onProgress(idx, total, title)
+
+                    val docType = note.resolvedDocumentType
+                    try {
+                        when (docType) {
+                            NoteDocumentType.MARKDOWN -> {
+                                val blocks = SmoothMarkdownConverter.markdownToBlocks(note.content)
+                                val entryName = uniqueEntryName(title, format.extension)
+                                val tmpFile = File(tempWorkDir, "item_${idx}.${format.extension}")
+                                when (format) {
+                                    BatchExportFormat.DOCX -> writeDocxToFile(
+                                        context = context,
+                                        destFile = tmpFile,
+                                        noteTitle = title,
+                                        noteCategory = note.category,
+                                        blocks = blocks,
+                                        themeColor = themeColor
+                                    )
+                                    BatchExportFormat.PDF -> {
+                                        val pdfUri = exportToPdf(context, title, note.category, blocks, themeColor)
+                                        context.contentResolver.openInputStream(pdfUri)?.use { inp ->
+                                            FileOutputStream(tmpFile).use { out -> inp.copyTo(out) }
+                                        }
+                                    }
+                                    BatchExportFormat.MARKDOWN -> {
+                                        tmpFile.writeText(note.content, Charsets.UTF_8)
+                                    }
+                                    BatchExportFormat.HTML -> {
+                                        streamNoteToHtmlFile(context, tmpFile, title, note.category, blocks, themeColor)
+                                    }
+                                    BatchExportFormat.TXT -> {
+                                        tmpFile.writeText(exportToTxt(title, note.category, blocks), Charsets.UTF_8)
+                                    }
+                                    BatchExportFormat.JSON_BACKUP -> {
+                                        tmpFile.writeText(note.content, Charsets.UTF_8)
+                                    }
+                                }
+                                if (tmpFile.exists() && tmpFile.length() > 0L) {
+                                    zos.putNextEntry(ZipEntry(entryName))
+                                    FileInputStream(tmpFile).use { it.copyTo(zos, 32768) }
+                                    zos.closeEntry()
+                                    tmpFile.delete()
+                                    exported++
+                                } else {
+                                    skipped++
+                                }
+                            }
+
+                            NoteDocumentType.PDF, NoteDocumentType.DOCX -> {
+                                val ext = if (docType == NoteDocumentType.PDF) "pdf" else "docx"
+                                val stream = note.externalUri?.let {
+                                    ExternalDocumentUriHelper.openInputStream(context, it)
+                                }
+                                if (stream != null) {
+                                    stream.use { input ->
+                                        val shouldConvertFromDocxToFormat = docType == NoteDocumentType.DOCX &&
+                                            format in setOf(BatchExportFormat.MARKDOWN, BatchExportFormat.TXT, BatchExportFormat.HTML)
+                                        if (shouldConvertFromDocxToFormat) {
+                                            val conv = DocxDocumentEngine.convertToMarkdown(input)
+                                            if (conv is DocxConversionResult.Success) {
+                                                val blocks = SmoothMarkdownConverter.markdownToBlocks(conv.markdown)
+                                                val entryName = uniqueEntryName(title, format.extension)
+                                                val tmpFile = File(tempWorkDir, "doc_${idx}.${format.extension}")
+                                                when (format) {
+                                                    BatchExportFormat.MARKDOWN -> tmpFile.writeText(conv.markdown, Charsets.UTF_8)
+                                                    BatchExportFormat.TXT -> tmpFile.writeText(exportToTxt(title, note.category, blocks), Charsets.UTF_8)
+                                                    BatchExportFormat.HTML -> streamNoteToHtmlFile(context, tmpFile, title, note.category, blocks, themeColor)
+                                                    else -> tmpFile.writeText(conv.markdown, Charsets.UTF_8)
+                                                }
+                                                zos.putNextEntry(ZipEntry(entryName))
+                                                FileInputStream(tmpFile).use { it.copyTo(zos, 32768) }
+                                                zos.closeEntry()
+                                                tmpFile.delete()
+                                                exported++
+                                            } else {
+                                                skipped++
+                                            }
+                                        } else {
+                                            val entryName = uniqueEntryName(title, ext)
+                                            zos.putNextEntry(ZipEntry(entryName))
+                                            input.copyTo(zos, 32768)
+                                            zos.closeEntry()
+                                            exported++
+                                        }
+                                    }
+                                } else {
+                                    skipped++
+                                }
+                            }
+                        }
+                    } catch (e: IllegalStateException) {
+                        throw e
+                    } catch (_: Throwable) {
+                        skipped++
+                    }
+                    onProgress(idx + 1, total, title)
+                }
+            }
+        } finally {
+            tempWorkDir.deleteRecursively()
+        }
+
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
+        return BatchExportOutput(
+            uri = uri,
+            mimeType = "application/zip",
+            fileName = zipFile.name,
+            exportedCount = exported,
+            skippedCount = skipped
+        )
     }
 
     private fun createStaticLayout(
