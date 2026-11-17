@@ -327,6 +327,73 @@ object CitraDocsFileManager {
     }
 
     /**
+     * Deletes all files inside Documents/Citra Docs/ across all candidate storage targets and MediaStore.
+     */
+    fun deleteAllDocsFiles(context: Context): Int {
+        var deletedCount = 0
+        val deletedPaths = mutableListOf<String>()
+
+        for (folder in getAllDocsFolders(context)) {
+            if (!folder.exists() || !folder.isDirectory) continue
+            val files = folder.listFiles() ?: continue
+            for (f in files) {
+                if (f.isFile) {
+                    val path = f.absolutePath
+                    if (f.delete() || !f.exists()) {
+                        deletedCount++
+                        deletedPaths.add(path)
+                    }
+                }
+            }
+        }
+
+        try {
+            val externalUri = android.provider.MediaStore.Files.getContentUri("external")
+            val projection = mutableListOf(
+                android.provider.MediaStore.MediaColumns._ID,
+                android.provider.MediaStore.MediaColumns.DATA
+            )
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                projection.add(android.provider.MediaStore.MediaColumns.RELATIVE_PATH)
+            }
+            context.contentResolver.query(externalUri, projection.toTypedArray(), null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns._ID)
+                val dataCol = cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
+                val relCol = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    cursor.getColumnIndex(android.provider.MediaStore.MediaColumns.RELATIVE_PATH)
+                } else -1
+
+                while (cursor.moveToNext()) {
+                    val id = if (idCol >= 0) cursor.getLong(idCol) else -1L
+                    val data = if (dataCol >= 0) cursor.getString(dataCol) else null
+                    val rel = if (relCol >= 0) cursor.getString(relCol) else null
+                    val isInCitraDocs = (data != null && data.contains("Citra Docs", ignoreCase = true)) ||
+                        (rel != null && rel.contains("Citra Docs", ignoreCase = true))
+                    if (isInCitraDocs && id != -1L) {
+                        try {
+                            val deleteUri = android.content.ContentUris.withAppendedId(externalUri, id)
+                            if (context.contentResolver.delete(deleteUri, null, null) > 0) {
+                                deletedCount++
+                            }
+                            if (data != null) File(data).delete()
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore Citra Docs cleanup error (non-fatal)", e)
+        }
+
+        if (deletedPaths.isNotEmpty()) {
+            try {
+                MediaScannerConnection.scanFile(context, deletedPaths.toTypedArray(), null, null)
+            } catch (_: Exception) {}
+        }
+
+        return deletedCount
+    }
+
+    /**
      * Lists all .md files present in Documents/Citra Docs/
      */
     fun listAllMarkdownNotes(context: Context): List<File> {

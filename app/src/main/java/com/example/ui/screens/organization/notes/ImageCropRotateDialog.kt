@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,7 +21,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -30,9 +30,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -42,6 +42,8 @@ import com.example.util.MediaStorageHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 data class CropAspectRatio(
@@ -63,6 +65,18 @@ val CropAspectRatios = listOf(
     CropAspectRatio("16_9", "16:9", 16f, 9f, 23, 13)
 )
 
+private enum class CropDragHandle {
+    TOP_LEFT,
+    TOP_RIGHT,
+    BOTTOM_LEFT,
+    BOTTOM_RIGHT,
+    TOP,
+    BOTTOM,
+    LEFT,
+    RIGHT,
+    MOVE
+}
+
 @Composable
 fun ImageFullScreenCropRotateDialog(
     imageUrl: String,
@@ -71,20 +85,23 @@ fun ImageFullScreenCropRotateDialog(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
     var rotationDegrees by remember { mutableIntStateOf(0) }
     var isCropMode by remember { mutableStateOf(false) }
-    var selectedRatio by remember { mutableStateOf(CropAspectRatios[0]) } // Free/Original
+    var selectedRatio by remember { mutableStateOf(CropAspectRatios[0]) } // Free by default
     var isProcessing by remember { mutableStateOf(false) }
 
-    // Normalized crop box state within the container (0f..1f range)
-    var cropNormalizedLeft by remember { mutableFloatStateOf(0.1f) }
-    var cropNormalizedTop by remember { mutableFloatStateOf(0.1f) }
-    var cropNormalizedWidth by remember { mutableFloatStateOf(0.8f) }
-    var cropNormalizedHeight by remember { mutableFloatStateOf(0.8f) }
+    // Normalized crop box state within the actual displayed image bounds (0f..1f range)
+    var cropLeft by remember { mutableFloatStateOf(0.05f) }
+    var cropTop by remember { mutableFloatStateOf(0.05f) }
+    var cropRight by remember { mutableFloatStateOf(0.95f) }
+    var cropBottom by remember { mutableFloatStateOf(0.95f) }
+    var activeHandle by remember { mutableStateOf<CropDragHandle?>(null) }
 
-    // Raw loaded bitmap for cropping calculations
+    // Raw loaded bitmap and its rotated display version
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var rotatedBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(imageUrl) {
         withContext(Dispatchers.IO) {
@@ -92,29 +109,63 @@ fun ImageFullScreenCropRotateDialog(
         }
     }
 
-    // Adjust crop box dimensions when aspect ratio preset changes
-    fun updateCropBoxForRatio(ratio: CropAspectRatio) {
+    LaunchedEffect(sourceBitmap, rotationDegrees) {
+        val bmp = sourceBitmap
+        rotatedBitmap = when {
+            bmp == null -> null
+            rotationDegrees % 360 == 0 -> bmp
+            else -> withContext(Dispatchers.Default) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+            }
+        }
+    }
+
+    // Current rotated intrinsic aspect ratio (width / height)
+    val currentImageAspect = remember(sourceBitmap, rotatedBitmap, rotationDegrees) {
+        val r = rotatedBitmap
+        if (r != null && r.height > 0) {
+            r.width.toFloat() / r.height.toFloat()
+        } else {
+            val s = sourceBitmap
+            if (s != null && s.width > 0 && s.height > 0) {
+                if (rotationDegrees % 180 == 0) s.width.toFloat() / s.height.toFloat()
+                else s.height.toFloat() / s.width.toFloat()
+            } else {
+                1f
+            }
+        }
+    }
+
+    fun updateCropBoxForRatio(ratio: CropAspectRatio, imgAspect: Float = currentImageAspect) {
         selectedRatio = ratio
         if (ratio.ratioWidth <= 0f || ratio.ratioHeight <= 0f) {
-            cropNormalizedLeft = 0.05f
-            cropNormalizedTop = 0.05f
-            cropNormalizedWidth = 0.90f
-            cropNormalizedHeight = 0.90f
+            cropLeft = 0.05f
+            cropTop = 0.05f
+            cropRight = 0.95f
+            cropBottom = 0.95f
             return
         }
 
-        val targetRatio = ratio.ratioWidth / ratio.ratioHeight
-        if (targetRatio >= 1f) {
-            // Wider
-            cropNormalizedWidth = 0.85f
-            cropNormalizedHeight = (cropNormalizedWidth / targetRatio).coerceIn(0.1f, 0.9f)
+        // targetPixelRatio = (normW * imgW) / (normH * imgH) = (normW / normH) * imgAspect
+        val targetPixelRatio = ratio.ratioWidth / ratio.ratioHeight
+        val normRatio = (targetPixelRatio / imgAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.01f)
+        val maxSpan = 0.88f
+        val normW: Float
+        val normH: Float
+        if (normRatio >= 1f) {
+            normW = maxSpan
+            normH = (maxSpan / normRatio).coerceIn(0.08f, maxSpan)
         } else {
-            // Taller
-            cropNormalizedHeight = 0.85f
-            cropNormalizedWidth = (cropNormalizedHeight * targetRatio).coerceIn(0.1f, 0.9f)
+            normH = maxSpan
+            normW = (maxSpan * normRatio).coerceIn(0.08f, maxSpan)
         }
-        cropNormalizedLeft = ((1f - cropNormalizedWidth) / 2f).coerceAtLeast(0f)
-        cropNormalizedTop = ((1f - cropNormalizedHeight) / 2f).coerceAtLeast(0f)
+        val left = ((1f - normW) / 2f).coerceIn(0f, 1f - normW)
+        val top = ((1f - normH) / 2f).coerceIn(0f, 1f - normH)
+        cropLeft = left
+        cropTop = top
+        cropRight = (left + normW).coerceAtMost(1f)
+        cropBottom = (top + normH).coerceAtMost(1f)
     }
 
     Dialog(
@@ -156,7 +207,24 @@ fun ImageFullScreenCropRotateDialog(
                         // Rotate 90° button
                         IconButton(
                             onClick = {
-                                rotationDegrees = (rotationDegrees + 90) % 360
+                                val nextRot = (rotationDegrees + 90) % 360
+                                rotationDegrees = nextRot
+                                if (isCropMode) {
+                                    if (selectedRatio.ratioWidth > 0f && selectedRatio.ratioHeight > 0f) {
+                                        val nextAspect = 1f / currentImageAspect.coerceAtLeast(0.01f)
+                                        updateCropBoxForRatio(selectedRatio, nextAspect)
+                                    } else {
+                                        // Rotate freeform crop box 90° CW in normalized space
+                                        val oldL = cropLeft
+                                        val oldT = cropTop
+                                        val oldR = cropRight
+                                        val oldB = cropBottom
+                                        cropLeft = (1f - oldB).coerceIn(0f, 0.9f)
+                                        cropTop = oldL.coerceIn(0f, 0.9f)
+                                        cropRight = (1f - oldT).coerceIn(cropLeft + 0.05f, 1f)
+                                        cropBottom = oldR.coerceIn(cropTop + 0.05f, 1f)
+                                    }
+                                }
                             },
                             modifier = Modifier
                                 .size(40.dp)
@@ -170,12 +238,14 @@ fun ImageFullScreenCropRotateDialog(
                             )
                         }
 
-                        // Crop Mode Toggle
+                        // Crop Mode Toggle (preserves FREE mode so corners are immediately resizable)
                         IconButton(
                             onClick = {
                                 isCropMode = !isCropMode
-                                if (isCropMode && selectedRatio.id == "FREE") {
-                                    updateCropBoxForRatio(CropAspectRatios[1]) // Default to 1:1 when entering crop
+                                if (isCropMode && selectedRatio.id == "FREE" &&
+                                    (cropRight - cropLeft < 0.08f || cropBottom - cropTop < 0.08f)
+                                ) {
+                                    updateCropBoxForRatio(CropAspectRatios[0])
                                 }
                             },
                             modifier = Modifier
@@ -193,7 +263,7 @@ fun ImageFullScreenCropRotateDialog(
                             )
                         }
 
-                        // Save button (active if rotated or in crop mode)
+                        // Save button
                         Button(
                             onClick = {
                                 if (rotationDegrees == 0 && !isCropMode) {
@@ -205,26 +275,23 @@ fun ImageFullScreenCropRotateDialog(
                                 coroutineScope.launch {
                                     withContext(Dispatchers.IO) {
                                         try {
-                                            // 1. Rotate if needed
-                                            val rotated = if (rotationDegrees != 0) {
+                                            val rotated = if (rotationDegrees % 360 != 0) {
                                                 val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
                                                 Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
                                             } else {
                                                 bmp
                                             }
 
-                                            // 2. Crop if in crop mode
                                             val finalBitmap = if (isCropMode) {
-                                                val cropX = (cropNormalizedLeft * rotated.width).roundToInt().coerceIn(0, rotated.width - 1)
-                                                val cropY = (cropNormalizedTop * rotated.height).roundToInt().coerceIn(0, rotated.height - 1)
-                                                val cropW = (cropNormalizedWidth * rotated.width).roundToInt().coerceIn(1, rotated.width - cropX)
-                                                val cropH = (cropNormalizedHeight * rotated.height).roundToInt().coerceIn(1, rotated.height - cropY)
+                                                val cropX = (cropLeft * rotated.width).roundToInt().coerceIn(0, rotated.width - 1)
+                                                val cropY = (cropTop * rotated.height).roundToInt().coerceIn(0, rotated.height - 1)
+                                                val cropW = ((cropRight - cropLeft) * rotated.width).roundToInt().coerceIn(1, rotated.width - cropX)
+                                                val cropH = ((cropBottom - cropTop) * rotated.height).roundToInt().coerceIn(1, rotated.height - cropY)
                                                 Bitmap.createBitmap(rotated, cropX, cropY, cropW, cropH)
                                             } else {
                                                 rotated
                                             }
 
-                                            // 3. Save into Citra Pic folder
                                             val newPath = MediaStorageHelper.saveNoteImageBitmap(context, finalBitmap)
                                             withContext(Dispatchers.Main) {
                                                 isProcessing = false
@@ -233,7 +300,7 @@ fun ImageFullScreenCropRotateDialog(
                                                 }
                                                 onDismiss()
                                             }
-                                        } catch (e: Exception) {
+                                        } catch (_: Exception) {
                                             withContext(Dispatchers.Main) {
                                                 isProcessing = false
                                                 onDismiss()
@@ -266,126 +333,368 @@ fun ImageFullScreenCropRotateDialog(
                     }
                 }
 
-                // Main Interactive Image Area with Draggable Crop Box
+                // Main Interactive Image Area with Dynamic Corner/Edge Resizable Crop Box
                 BoxWithConstraints(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val containerWidthPx = constraints.maxWidth.toFloat()
-                    val containerHeightPx = constraints.maxHeight.toFloat()
+                    val containerWidthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                    val containerHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+                    val containerAspect = containerWidthPx / containerHeightPx
+                    val fittedWidthPx: Float
+                    val fittedHeightPx: Float
+                    if (currentImageAspect > containerAspect) {
+                        fittedWidthPx = containerWidthPx
+                        fittedHeightPx = (containerWidthPx / currentImageAspect).coerceAtLeast(1f)
+                    } else {
+                        fittedHeightPx = containerHeightPx
+                        fittedWidthPx = (containerHeightPx * currentImageAspect).coerceAtLeast(1f)
+                    }
 
-                    // Render rotated base image
-                    AsyncImage(
-                        model = imageUrl,
-                        contentDescription = "Visualização da Imagem",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .rotate(rotationDegrees.toFloat()),
-                        contentScale = ContentScale.Fit
-                    )
+                    val fittedWidthDp = with(density) { fittedWidthPx.toDp() }
+                    val fittedHeightDp = with(density) { fittedHeightPx.toDp() }
 
-                    // Interactive Draggable Crop Overlay
-                    if (isCropMode) {
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(containerWidthPx, containerHeightPx, cropNormalizedWidth, cropNormalizedHeight) {
-                                    detectDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        val deltaXNorm = dragAmount.x / containerWidthPx
-                                        val deltaYNorm = dragAmount.y / containerHeightPx
+                    val currentLeft by rememberUpdatedState(cropLeft)
+                    val currentTop by rememberUpdatedState(cropTop)
+                    val currentRight by rememberUpdatedState(cropRight)
+                    val currentBottom by rememberUpdatedState(cropBottom)
+                    val currentRatio by rememberUpdatedState(selectedRatio)
+                    val latestWidthPx by rememberUpdatedState(fittedWidthPx)
+                    val latestHeightPx by rememberUpdatedState(fittedHeightPx)
 
-                                        val newLeft = (cropNormalizedLeft + deltaXNorm)
-                                            .coerceIn(0f, 1f - cropNormalizedWidth)
-                                        val newTop = (cropNormalizedTop + deltaYNorm)
-                                            .coerceIn(0f, 1f - cropNormalizedHeight)
+                    // Box matched 1:1 to the displayed rotated image bounds so crop coordinates never drift
+                    Box(
+                        modifier = Modifier.size(width = fittedWidthDp, height = fittedHeightDp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val previewBmp = rotatedBitmap
+                        if (previewBmp != null) {
+                            Image(
+                                bitmap = previewBmp.asImageBitmap(),
+                                contentDescription = "Visualização da Imagem",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.FillBounds
+                            )
+                        } else {
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = "Visualização da Imagem",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
 
-                                        cropNormalizedLeft = newLeft
-                                        cropNormalizedTop = newTop
+                        if (isCropMode) {
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(isCropMode) {
+                                        detectDragGestures(
+                                            onDragStart = { startOffset ->
+                                                val w = latestWidthPx.coerceAtLeast(1f)
+                                                val h = latestHeightPx.coerceAtLeast(1f)
+                                                val l = currentLeft * w
+                                                val t = currentTop * h
+                                                val r = currentRight * w
+                                                val b = currentBottom * h
+
+                                                val cornerRadiusPx = 36.dp.toPx()
+                                                val edgeTolPx = 22.dp.toPx()
+
+                                                val corners = listOf(
+                                                    CropDragHandle.TOP_LEFT to Offset(l, t),
+                                                    CropDragHandle.TOP_RIGHT to Offset(r, t),
+                                                    CropDragHandle.BOTTOM_LEFT to Offset(l, b),
+                                                    CropDragHandle.BOTTOM_RIGHT to Offset(r, b)
+                                                )
+                                                val closestCorner = corners.minByOrNull { (_, pos) ->
+                                                    hypot(startOffset.x - pos.x, startOffset.y - pos.y)
+                                                }
+                                                val closestCornerDist = closestCorner?.let { (_, pos) ->
+                                                    hypot(startOffset.x - pos.x, startOffset.y - pos.y)
+                                                } ?: Float.MAX_VALUE
+
+                                                activeHandle = when {
+                                                    closestCorner != null && closestCornerDist <= cornerRadiusPx -> closestCorner.first
+                                                    abs(startOffset.x - l) <= edgeTolPx && startOffset.y in (t - edgeTolPx)..(b + edgeTolPx) -> CropDragHandle.LEFT
+                                                    abs(startOffset.x - r) <= edgeTolPx && startOffset.y in (t - edgeTolPx)..(b + edgeTolPx) -> CropDragHandle.RIGHT
+                                                    abs(startOffset.y - t) <= edgeTolPx && startOffset.x in (l - edgeTolPx)..(r + edgeTolPx) -> CropDragHandle.TOP
+                                                    abs(startOffset.y - b) <= edgeTolPx && startOffset.x in (l - edgeTolPx)..(r + edgeTolPx) -> CropDragHandle.BOTTOM
+                                                    startOffset.x in l..r && startOffset.y in t..b -> CropDragHandle.MOVE
+                                                    closestCorner != null && closestCornerDist <= 56.dp.toPx() -> closestCorner.first
+                                                    else -> null
+                                                }
+                                            },
+                                            onDragEnd = { activeHandle = null },
+                                            onDragCancel = { activeHandle = null },
+                                            onDrag = { change, dragAmount ->
+                                                val handle = activeHandle ?: return@detectDragGestures
+                                                change.consume()
+
+                                                val w = latestWidthPx.coerceAtLeast(1f)
+                                                val h = latestHeightPx.coerceAtLeast(1f)
+                                                val minSpanPx = 44.dp.toPx().coerceAtMost(minOf(w, h) * 0.45f)
+                                                val minNormW = (minSpanPx / w).coerceIn(0.05f, 0.45f)
+                                                val minNormH = (minSpanPx / h).coerceIn(0.05f, 0.45f)
+
+                                                val dx = dragAmount.x / w
+                                                val dy = dragAmount.y / h
+                                                val ratio = currentRatio
+
+                                                if (handle == CropDragHandle.MOVE) {
+                                                    val boxW = currentRight - currentLeft
+                                                    val boxH = currentBottom - currentTop
+                                                    val nextL = (currentLeft + dx).coerceIn(0f, (1f - boxW).coerceAtLeast(0f))
+                                                    val nextT = (currentTop + dy).coerceIn(0f, (1f - boxH).coerceAtLeast(0f))
+                                                    cropLeft = nextL
+                                                    cropTop = nextT
+                                                    cropRight = (nextL + boxW).coerceAtMost(1f)
+                                                    cropBottom = (nextT + boxH).coerceAtMost(1f)
+                                                } else if (ratio.ratioWidth <= 0f || ratio.ratioHeight <= 0f) {
+                                                    // Freeform crop: every corner and edge moves independently
+                                                    when (handle) {
+                                                        CropDragHandle.TOP_LEFT -> {
+                                                            cropLeft = (currentLeft + dx).coerceIn(0f, currentRight - minNormW)
+                                                            cropTop = (currentTop + dy).coerceIn(0f, currentBottom - minNormH)
+                                                        }
+                                                        CropDragHandle.TOP_RIGHT -> {
+                                                            cropRight = (currentRight + dx).coerceIn(currentLeft + minNormW, 1f)
+                                                            cropTop = (currentTop + dy).coerceIn(0f, currentBottom - minNormH)
+                                                        }
+                                                        CropDragHandle.BOTTOM_LEFT -> {
+                                                            cropLeft = (currentLeft + dx).coerceIn(0f, currentRight - minNormW)
+                                                            cropBottom = (currentBottom + dy).coerceIn(currentTop + minNormH, 1f)
+                                                        }
+                                                        CropDragHandle.BOTTOM_RIGHT -> {
+                                                            cropRight = (currentRight + dx).coerceIn(currentLeft + minNormW, 1f)
+                                                            cropBottom = (currentBottom + dy).coerceIn(currentTop + minNormH, 1f)
+                                                        }
+                                                        CropDragHandle.LEFT -> {
+                                                            cropLeft = (currentLeft + dx).coerceIn(0f, currentRight - minNormW)
+                                                        }
+                                                        CropDragHandle.RIGHT -> {
+                                                            cropRight = (currentRight + dx).coerceIn(currentLeft + minNormW, 1f)
+                                                        }
+                                                        CropDragHandle.TOP -> {
+                                                            cropTop = (currentTop + dy).coerceIn(0f, currentBottom - minNormH)
+                                                        }
+                                                        CropDragHandle.BOTTOM -> {
+                                                            cropBottom = (currentBottom + dy).coerceIn(currentTop + minNormH, 1f)
+                                                        }
+                                                        CropDragHandle.MOVE -> Unit
+                                                    }
+                                                } else {
+                                                    // Locked aspect ratio resizing anchored on the opposite corner/center
+                                                    val targetRatio = ratio.ratioWidth / ratio.ratioHeight
+                                                    val minW = maxOf(minSpanPx, minSpanPx * targetRatio)
+                                                    val lPx = currentLeft * w
+                                                    val tPx = currentTop * h
+                                                    val rPx = currentRight * w
+                                                    val bPx = currentBottom * h
+
+                                                    when (handle) {
+                                                        CropDragHandle.TOP_LEFT -> {
+                                                            val maxW = minOf(rPx, bPx * targetRatio).coerceAtLeast(minW)
+                                                            val candW = rPx - (lPx + dragAmount.x)
+                                                            val candH = bPx - (tPx + dragAmount.y)
+                                                            val desiredW = if (abs(dragAmount.x) >= abs(dragAmount.y) * targetRatio) candW else candH * targetRatio
+                                                            val newW = desiredW.coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropLeft = ((rPx - newW) / w).coerceIn(0f, 1f)
+                                                            cropTop = ((bPx - newH) / h).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.TOP_RIGHT -> {
+                                                            val maxW = minOf(w - lPx, bPx * targetRatio).coerceAtLeast(minW)
+                                                            val candW = (rPx + dragAmount.x) - lPx
+                                                            val candH = bPx - (tPx + dragAmount.y)
+                                                            val desiredW = if (abs(dragAmount.x) >= abs(dragAmount.y) * targetRatio) candW else candH * targetRatio
+                                                            val newW = desiredW.coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropRight = ((lPx + newW) / w).coerceIn(0f, 1f)
+                                                            cropTop = ((bPx - newH) / h).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.BOTTOM_LEFT -> {
+                                                            val maxW = minOf(rPx, (h - tPx) * targetRatio).coerceAtLeast(minW)
+                                                            val candW = rPx - (lPx + dragAmount.x)
+                                                            val candH = (bPx + dragAmount.y) - tPx
+                                                            val desiredW = if (abs(dragAmount.x) >= abs(dragAmount.y) * targetRatio) candW else candH * targetRatio
+                                                            val newW = desiredW.coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropLeft = ((rPx - newW) / w).coerceIn(0f, 1f)
+                                                            cropBottom = ((tPx + newH) / h).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.BOTTOM_RIGHT -> {
+                                                            val maxW = minOf(w - lPx, (h - tPx) * targetRatio).coerceAtLeast(minW)
+                                                            val candW = (rPx + dragAmount.x) - lPx
+                                                            val candH = (bPx + dragAmount.y) - tPx
+                                                            val desiredW = if (abs(dragAmount.x) >= abs(dragAmount.y) * targetRatio) candW else candH * targetRatio
+                                                            val newW = desiredW.coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropRight = ((lPx + newW) / w).coerceIn(0f, 1f)
+                                                            cropBottom = ((tPx + newH) / h).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.LEFT -> {
+                                                            val centerY = (tPx + bPx) / 2f
+                                                            val maxAvailH = minOf(centerY, h - centerY) * 2f
+                                                            val maxW = minOf(rPx, maxAvailH * targetRatio).coerceAtLeast(minW)
+                                                            val newW = (rPx - (lPx + dragAmount.x)).coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropLeft = ((rPx - newW) / w).coerceIn(0f, 1f)
+                                                            cropTop = ((centerY - newH / 2f) / h).coerceIn(0f, 1f)
+                                                            cropBottom = ((centerY + newH / 2f) / h).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.RIGHT -> {
+                                                            val centerY = (tPx + bPx) / 2f
+                                                            val maxAvailH = minOf(centerY, h - centerY) * 2f
+                                                            val maxW = minOf(w - lPx, maxAvailH * targetRatio).coerceAtLeast(minW)
+                                                            val newW = ((rPx + dragAmount.x) - lPx).coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropRight = ((lPx + newW) / w).coerceIn(0f, 1f)
+                                                            cropTop = ((centerY - newH / 2f) / h).coerceIn(0f, 1f)
+                                                            cropBottom = ((centerY + newH / 2f) / h).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.TOP -> {
+                                                            val centerX = (lPx + rPx) / 2f
+                                                            val maxAvailW = minOf(centerX, w - centerX) * 2f
+                                                            val maxW = minOf(maxAvailW, bPx * targetRatio).coerceAtLeast(minW)
+                                                            val candW = (bPx - (tPx + dragAmount.y)) * targetRatio
+                                                            val newW = candW.coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropTop = ((bPx - newH) / h).coerceIn(0f, 1f)
+                                                            cropLeft = ((centerX - newW / 2f) / w).coerceIn(0f, 1f)
+                                                            cropRight = ((centerX + newW / 2f) / w).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.BOTTOM -> {
+                                                            val centerX = (lPx + rPx) / 2f
+                                                            val maxAvailW = minOf(centerX, w - centerX) * 2f
+                                                            val maxW = minOf(maxAvailW, (h - tPx) * targetRatio).coerceAtLeast(minW)
+                                                            val candW = ((bPx + dragAmount.y) - tPx) * targetRatio
+                                                            val newW = candW.coerceIn(minW, maxW)
+                                                            val newH = newW / targetRatio
+                                                            cropBottom = ((tPx + newH) / h).coerceIn(0f, 1f)
+                                                            cropLeft = ((centerX - newW / 2f) / w).coerceIn(0f, 1f)
+                                                            cropRight = ((centerX + newW / 2f) / w).coerceIn(0f, 1f)
+                                                        }
+                                                        CropDragHandle.MOVE -> Unit
+                                                    }
+                                                }
+                                            }
+                                        )
                                     }
+                            ) {
+                                val rectLeft = (cropLeft * size.width).coerceIn(0f, size.width)
+                                val rectTop = (cropTop * size.height).coerceIn(0f, size.height)
+                                val rectRight = (cropRight * size.width).coerceIn(rectLeft + 1f, size.width)
+                                val rectBottom = (cropBottom * size.height).coerceIn(rectTop + 1f, size.height)
+                                val rectWidth = (rectRight - rectLeft).coerceAtLeast(1f)
+                                val rectHeight = (rectBottom - rectTop).coerceAtLeast(1f)
+                                val cropRect = Rect(Offset(rectLeft, rectTop), Size(rectWidth, rectHeight))
+
+                                // 1. Dimmed mask outside crop area
+                                if (rectTop > 0f) {
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = 0.65f),
+                                        topLeft = Offset(0f, 0f),
+                                        size = Size(size.width, rectTop)
+                                    )
                                 }
-                        ) {
-                            val rectLeft = cropNormalizedLeft * size.width
-                            val rectTop = cropNormalizedTop * size.height
-                            val rectWidth = cropNormalizedWidth * size.width
-                            val rectHeight = cropNormalizedHeight * size.height
-                            val cropRect = Rect(Offset(rectLeft, rectTop), Size(rectWidth, rectHeight))
+                                if (rectBottom < size.height) {
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = 0.65f),
+                                        topLeft = Offset(0f, rectBottom),
+                                        size = Size(size.width, size.height - rectBottom)
+                                    )
+                                }
+                                if (rectLeft > 0f) {
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = 0.65f),
+                                        topLeft = Offset(0f, rectTop),
+                                        size = Size(rectLeft, rectHeight)
+                                    )
+                                }
+                                if (rectRight < size.width) {
+                                    drawRect(
+                                        color = Color.Black.copy(alpha = 0.65f),
+                                        topLeft = Offset(rectRight, rectTop),
+                                        size = Size(size.width - rectRight, rectHeight)
+                                    )
+                                }
 
-                            // 1. Dimmed semi-transparent dark mask outside crop area
-                            // Top
-                            drawRect(
-                                color = Color.Black.copy(alpha = 0.65f),
-                                topLeft = Offset(0f, 0f),
-                                size = Size(size.width, rectTop)
-                            )
-                            // Bottom
-                            drawRect(
-                                color = Color.Black.copy(alpha = 0.65f),
-                                topLeft = Offset(0f, rectTop + rectHeight),
-                                size = Size(size.width, size.height - (rectTop + rectHeight))
-                            )
-                            // Left
-                            drawRect(
-                                color = Color.Black.copy(alpha = 0.65f),
-                                topLeft = Offset(0f, rectTop),
-                                size = Size(rectLeft, rectHeight)
-                            )
-                            // Right
-                            drawRect(
-                                color = Color.Black.copy(alpha = 0.65f),
-                                topLeft = Offset(rectLeft + rectWidth, rectTop),
-                                size = Size(size.width - (rectLeft + rectWidth), rectHeight)
-                            )
+                                // 2. Crisp White Border
+                                drawRect(
+                                    color = Color.White,
+                                    topLeft = cropRect.topLeft,
+                                    size = cropRect.size,
+                                    style = Stroke(width = 1.8.dp.toPx())
+                                )
 
-                            // 2. Crisp White Border around crop window
-                            drawRect(
-                                color = Color.White,
-                                topLeft = cropRect.topLeft,
-                                size = cropRect.size,
-                                style = Stroke(width = 2.dp.toPx())
-                            )
+                                // 3. Rule-of-Thirds Grid Lines
+                                val oneThirdX = rectWidth / 3f
+                                val oneThirdY = rectHeight / 3f
+                                val gridColor = Color.White.copy(alpha = 0.35f)
+                                val gridStrokeWidth = 1.dp.toPx()
 
-                            // 3. Rule-of-Thirds Grid Lines
-                            val oneThirdX = rectWidth / 3f
-                            val oneThirdY = rectHeight / 3f
-                            val gridColor = Color.White.copy(alpha = 0.35f)
-                            val gridStroke = Stroke(width = 1.dp.toPx())
+                                drawLine(gridColor, Offset(rectLeft + oneThirdX, rectTop), Offset(rectLeft + oneThirdX, rectBottom), gridStrokeWidth)
+                                drawLine(gridColor, Offset(rectLeft + oneThirdX * 2f, rectTop), Offset(rectLeft + oneThirdX * 2f, rectBottom), gridStrokeWidth)
+                                drawLine(gridColor, Offset(rectLeft, rectTop + oneThirdY), Offset(rectRight, rectTop + oneThirdY), gridStrokeWidth)
+                                drawLine(gridColor, Offset(rectLeft, rectTop + oneThirdY * 2f), Offset(rectRight, rectTop + oneThirdY * 2f), gridStrokeWidth)
 
-                            // Vertical grid lines
-                            drawLine(gridColor, Offset(rectLeft + oneThirdX, rectTop), Offset(rectLeft + oneThirdX, rectTop + rectHeight), gridStroke.width)
-                            drawLine(gridColor, Offset(rectLeft + oneThirdX * 2f, rectTop), Offset(rectLeft + oneThirdX * 2f, rectTop + rectHeight), gridStroke.width)
-                            // Horizontal grid lines
-                            drawLine(gridColor, Offset(rectLeft, rectTop + oneThirdY), Offset(rectLeft + rectWidth, rectTop + oneThirdY), gridStroke.width)
-                            drawLine(gridColor, Offset(rectLeft, rectTop + oneThirdY * 2f), Offset(rectLeft + rectWidth, rectTop + oneThirdY * 2f), gridStroke.width)
+                                // 4. Dynamic Corner L-Brackets + Touch Handle Knobs
+                                val cornerLen = minOf(22.dp.toPx(), rectWidth * 0.35f, rectHeight * 0.35f)
+                                val cornerStrokeWidth = 4.dp.toPx()
+                                val accent = Color(0xFFFF9800)
 
-                            // Corner guides for dragging feedback
-                            val cornerLen = 18.dp.toPx()
-                            val cornerStroke = Stroke(width = 3.5.dp.toPx())
-                            val accent = Color(0xFFFF9800)
+                                // Top-Left
+                                drawLine(accent, Offset(rectLeft - 1.dp.toPx(), rectTop), Offset(rectLeft + cornerLen, rectTop), cornerStrokeWidth)
+                                drawLine(accent, Offset(rectLeft, rectTop - 1.dp.toPx()), Offset(rectLeft, rectTop + cornerLen), cornerStrokeWidth)
+                                // Top-Right
+                                drawLine(accent, Offset(rectRight - cornerLen, rectTop), Offset(rectRight + 1.dp.toPx(), rectTop), cornerStrokeWidth)
+                                drawLine(accent, Offset(rectRight, rectTop - 1.dp.toPx()), Offset(rectRight, rectTop + cornerLen), cornerStrokeWidth)
+                                // Bottom-Left
+                                drawLine(accent, Offset(rectLeft - 1.dp.toPx(), rectBottom), Offset(rectLeft + cornerLen, rectBottom), cornerStrokeWidth)
+                                drawLine(accent, Offset(rectLeft, rectBottom - cornerLen), Offset(rectLeft, rectBottom + 1.dp.toPx()), cornerStrokeWidth)
+                                // Bottom-Right
+                                drawLine(accent, Offset(rectRight - cornerLen, rectBottom), Offset(rectRight + 1.dp.toPx(), rectBottom), cornerStrokeWidth)
+                                drawLine(accent, Offset(rectRight, rectBottom - cornerLen), Offset(rectRight, rectBottom + 1.dp.toPx()), cornerStrokeWidth)
 
-                            // Top-Left
-                            drawLine(accent, Offset(rectLeft - 1.dp.toPx(), rectTop), Offset(rectLeft + cornerLen, rectTop), cornerStroke.width)
-                            drawLine(accent, Offset(rectLeft, rectTop - 1.dp.toPx()), Offset(rectLeft, rectTop + cornerLen), cornerStroke.width)
+                                val cornerPositions = listOf(
+                                    CropDragHandle.TOP_LEFT to Offset(rectLeft, rectTop),
+                                    CropDragHandle.TOP_RIGHT to Offset(rectRight, rectTop),
+                                    CropDragHandle.BOTTOM_LEFT to Offset(rectLeft, rectBottom),
+                                    CropDragHandle.BOTTOM_RIGHT to Offset(rectRight, rectBottom)
+                                )
+                                cornerPositions.forEach { (hnd, center) ->
+                                    val isDraggingThis = activeHandle == hnd
+                                    drawCircle(
+                                        color = if (isDraggingThis) Color.White else accent,
+                                        radius = if (isDraggingThis) 8.dp.toPx() else 6.dp.toPx(),
+                                        center = center
+                                    )
+                                    drawCircle(
+                                        color = Color.Black.copy(alpha = 0.6f),
+                                        radius = if (isDraggingThis) 8.dp.toPx() else 6.dp.toPx(),
+                                        center = center,
+                                        style = Stroke(width = 1.5.dp.toPx())
+                                    )
+                                }
 
-                            // Top-Right
-                            drawLine(accent, Offset(rectLeft + rectWidth - cornerLen, rectTop), Offset(rectLeft + rectWidth + 1.dp.toPx(), rectTop), cornerStroke.width)
-                            drawLine(accent, Offset(rectLeft + rectWidth, rectTop - 1.dp.toPx()), Offset(rectLeft + rectWidth, rectTop + cornerLen), cornerStroke.width)
-
-                            // Bottom-Left
-                            drawLine(accent, Offset(rectLeft - 1.dp.toPx(), rectTop + rectHeight), Offset(rectLeft + cornerLen, rectTop + rectHeight), cornerStroke.width)
-                            drawLine(accent, Offset(rectLeft, rectTop + rectHeight - cornerLen), Offset(rectLeft, rectTop + rectHeight + 1.dp.toPx()), cornerStroke.width)
-
-                            // Bottom-Right
-                            drawLine(accent, Offset(rectLeft + rectWidth - cornerLen, rectTop + rectHeight), Offset(rectLeft + rectWidth + 1.dp.toPx(), rectTop + rectHeight), cornerStroke.width)
-                            drawLine(accent, Offset(rectLeft + rectWidth, rectTop + rectHeight - cornerLen), Offset(rectLeft + rectWidth, rectTop + rectHeight + 1.dp.toPx()), cornerStroke.width)
+                                // Mid-edge grab bars
+                                val midBarLen = minOf(18.dp.toPx(), rectWidth * 0.25f, rectHeight * 0.25f)
+                                val centerX = (rectLeft + rectRight) / 2f
+                                val centerY = (rectTop + rectBottom) / 2f
+                                drawLine(Color.White, Offset(centerX - midBarLen / 2f, rectTop), Offset(centerX + midBarLen / 2f, rectTop), 3.dp.toPx())
+                                drawLine(Color.White, Offset(centerX - midBarLen / 2f, rectBottom), Offset(centerX + midBarLen / 2f, rectBottom), 3.dp.toPx())
+                                drawLine(Color.White, Offset(rectLeft, centerY - midBarLen / 2f), Offset(rectLeft, centerY + midBarLen / 2f), 3.dp.toPx())
+                                drawLine(Color.White, Offset(rectRight, centerY - midBarLen / 2f), Offset(rectRight, centerY + midBarLen / 2f), 3.dp.toPx())
+                            }
                         }
                     }
                 }
 
-                // Bottom Controls: Aspect Ratio Presets with Miniature Visual Icons
+                // Bottom Controls: Aspect Ratio Presets
                 AnimatedVisibility(visible = isCropMode) {
                     Surface(
                         modifier = Modifier
@@ -399,8 +708,8 @@ fun ImageFullScreenCropRotateDialog(
                                 .padding(vertical = 12.dp, horizontal = 8.dp)
                         ) {
                             Text(
-                                text = "Arraste a área para posicionar o corte • Escolha uma proporção:",
-                                color = Color.White.copy(alpha = 0.75f),
+                                text = "Arraste qualquer canto, borda ou o centro para moldar o corte:",
+                                color = Color.White.copy(alpha = 0.78f),
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -431,7 +740,6 @@ fun ImageFullScreenCropRotateDialog(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.Center
                                         ) {
-                                            // Visual Miniature Box Preview representing the aspect ratio
                                             Box(
                                                 modifier = Modifier
                                                     .size(width = ratio.iconWidthDp.dp, height = ratio.iconHeightDp.dp)

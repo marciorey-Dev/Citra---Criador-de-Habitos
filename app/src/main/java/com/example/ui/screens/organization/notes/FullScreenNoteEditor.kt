@@ -73,6 +73,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
@@ -1305,7 +1307,10 @@ fun FullScreenNoteEditor(
                             title = input
                         }
                     },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Next
+                    ),
                     keyboardActions = KeyboardActions(onNext = {
                         try { bodyFocusRequester.requestFocus() } catch (_: Exception) {}
                     }),
@@ -1478,6 +1483,11 @@ fun FullScreenNoteEditor(
                                 color = textColor,
                                 fontSize = 16.sp,
                                 lineHeight = 26.sp
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                keyboardType = KeyboardType.Text,
+                                imeAction = ImeAction.Default
                             ),
                             cursorBrush = SolidColor(primaryColor),
                             visualTransformation = remember(editorValue.selection, isDarkBg, primaryColor, textColor) {
@@ -3172,7 +3182,10 @@ private fun ObsidianSideBySideImageWidget(
                             textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                             singleLine = false,
                             maxLines = 15,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Default
+                            ),
                             modifier = Modifier.weight(1f - fraction)
                         )
                     } else {
@@ -3183,7 +3196,10 @@ private fun ObsidianSideBySideImageWidget(
                             textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                             singleLine = false,
                             maxLines = 15,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Default
+                            ),
                             modifier = Modifier.weight(1f - fraction)
                         )
                         Box(modifier = Modifier.weight(fraction)) {

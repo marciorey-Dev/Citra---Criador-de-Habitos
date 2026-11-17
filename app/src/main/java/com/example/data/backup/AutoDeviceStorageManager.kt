@@ -34,6 +34,14 @@ object AutoDeviceStorageManager {
         return primary
     }
 
+    fun clearSnapshot(context: Context) {
+        try {
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            File(dir, BACKUP_FILENAME).takeIf { it.exists() }?.delete()
+            File(dir, LEGACY_FILENAME).takeIf { it.exists() }?.delete()
+        } catch (_: Exception) {}
+    }
+
     suspend fun saveFullAppSnapshot(
         context: Context,
         tasks: List<Task>,
@@ -63,6 +71,8 @@ object AutoDeviceStorageManager {
                     put("isCompleted", t.isCompleted)
                     put("completedAt", t.completedAt ?: JSONObject.NULL)
                     put("focusMinutesCompleted", t.focusMinutesCompleted)
+                    put("isDisruptive", t.isDisruptive)
+                    put("isWontDo", t.isWontDo)
                     put("createdAt", t.createdAt)
                 })
             }
@@ -100,6 +110,8 @@ object AutoDeviceStorageManager {
                     put("iconEmoji", n.iconEmoji)
                     put("associatedDate", n.associatedDate ?: JSONObject.NULL)
                     put("isPinned", n.isPinned)
+                    put("isArchived", n.isArchived)
+                    put("noteColor", n.noteColor ?: JSONObject.NULL)
                     put("backgroundImageUri", n.backgroundImageUri ?: JSONObject.NULL)
                     put("backgroundBlur", n.backgroundBlur)
                     put("backgroundBrightness", n.backgroundBrightness)
@@ -189,6 +201,8 @@ object AutoDeviceStorageManager {
                         isCompleted = o.optBoolean("isCompleted", false),
                         completedAt = if (o.isNull("completedAt")) null else o.optLong("completedAt"),
                         focusMinutesCompleted = o.optInt("focusMinutesCompleted", 0),
+                        isDisruptive = o.optBoolean("isDisruptive", false),
+                        isWontDo = o.optBoolean("isWontDo", false),
                         createdAt = o.optLong("createdAt", System.currentTimeMillis())
                     ))
                 }
@@ -247,6 +261,8 @@ object AutoDeviceStorageManager {
                         iconEmoji = o.optString("iconEmoji", "📝"),
                         associatedDate = if (o.isNull("associatedDate")) null else o.optString("associatedDate"),
                         isPinned = o.optBoolean("isPinned", false),
+                        isArchived = o.optBoolean("isArchived", false),
+                        noteColor = if (o.isNull("noteColor")) null else o.optString("noteColor").takeIf { it.isNotBlank() },
                         backgroundImageUri = if (o.isNull("backgroundImageUri")) null else o.optString("backgroundImageUri"),
                         backgroundBlur = o.optDouble("backgroundBlur", 0.5).toFloat(),
                         backgroundBrightness = o.optDouble("backgroundBrightness", 0.5).toFloat(),

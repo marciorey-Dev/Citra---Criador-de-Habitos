@@ -81,7 +81,7 @@ import com.example.util.DocxDocumentEngine
 import com.example.util.DocxParsedDocument
 import com.example.util.DocxRun
 import com.example.util.ExternalDocumentUriHelper
-import com.example.util.MathBeautifier
+import com.example.util.LatexFormulaRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -1425,12 +1425,11 @@ private fun DocxReadOnlyBlockItem(
                         tint = Color(0xFF3B82F6),
                         modifier = Modifier.size(18.dp)
                     )
-                    Text(
-                        text = MathBeautifier.beautify(block.formula),
-                        fontFamily = FontFamily.Serif,
+                    LatexFormulaRenderer.LatexFormulaBlockView(
+                        formula = block.formula,
+                        textColor = textColor,
                         fontSize = (15f * fontScale).sp,
-                        color = textColor,
-                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }

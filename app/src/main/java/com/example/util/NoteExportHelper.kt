@@ -183,8 +183,14 @@ object NoteExportHelper {
     }
 
 
-    private fun sanitizeFilename(name: String): String {
-        return name.replace(Regex("[^a-zA-Z0-9._\\- ]"), "_").trim().ifBlank { "Nota" }
+    fun sanitizeFilename(name: String): String {
+        val cleaned = name
+            .replace(Regex("[\\u0000-\\u001F\\u007F\\\\/:*?\"<>|]"), "_")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .trim('.')
+            .trim()
+        return cleaned.take(120).ifBlank { "Nota" }
     }
 
     private fun getExportDir(context: Context): File {
@@ -2099,7 +2105,8 @@ object NoteExportHelper {
                     measuredHeight += 68f + 14f
                 }
                 is MathBlock -> {
-                    val layout = createStaticLayout(formatSpannable("$$ " + block.formula + " $$", italicPaint.color, themeColor), italicPaint, contentWidth - 32)
+                    val rendered = LatexFormulaRenderer.renderFormulaToText(block.formula)
+                    val layout = createStaticLayout(formatSpannable("$$ $rendered $$", italicPaint.color, themeColor), italicPaint, contentWidth - 32)
                     measuredHeight += layout.height + 28f + 14f
                 }
                 is DividerBlock -> {
@@ -2535,14 +2542,14 @@ object NoteExportHelper {
     fun exportToMdFile(context: Context, noteTitle: String, blocks: List<VisualBlock>): Uri {
         val md = SmoothMarkdownConverter.blocksToMarkdown(blocks)
         val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.md")
-        file.writeText(md)
+        file.writeText(md, Charsets.UTF_8)
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
     fun exportToTxtFile(context: Context, noteTitle: String, noteCategory: String, blocks: List<VisualBlock>): Uri {
         val txt = exportToTxt(noteTitle, noteCategory, blocks)
         val file = File(getExportDir(context), "${sanitizeFilename(noteTitle)}.txt")
-        file.writeText(txt)
+        file.writeText(txt, Charsets.UTF_8)
         return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     }
 
@@ -2638,7 +2645,7 @@ object NoteExportHelper {
                     is BulletBlock -> writer.write("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
                     is QuoteBlock -> writer.write("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
                     is CodeBlock -> writer.write("<pre><code class=\"language-${escapeHtml(block.language)}\">${renderCodeHtml(block.code, block.language)}</code></pre>\n")
-                    is MathBlock -> writer.write("<div class=\"math\">$$ ${escapeHtml(block.formula)} $$</div>\n")
+                    is MathBlock -> writer.write("<div class=\"math\">${escapeHtml(LatexFormulaRenderer.renderFormulaToText(block.formula))}</div>\n")
                     is TableBlock -> {
                         writer.write("<table><thead><tr>")
                         for (h in block.headers) writer.write("<th>${escapeHtml(h)}</th>")
@@ -2970,7 +2977,7 @@ document.addEventListener("DOMContentLoaded", function() {
         }
 
         try {
-            ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile), 32768)).use { zos ->
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(zipFile), 32768), Charsets.UTF_8).use { zos ->
                 for ((idx, note) in notes.withIndex()) {
                     if (isCancelled()) throw IllegalStateException("Exportação cancelada pelo usuário.")
                     val title = note.title.ifBlank { "Nota_${idx + 1}" }

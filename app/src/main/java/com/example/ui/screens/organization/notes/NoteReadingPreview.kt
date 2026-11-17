@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.backup.FinanceNoteMarkdownEngine
 import com.example.ui.theme.isAppDarkTheme
 import com.example.util.InlineMarkdownHelper
-import com.example.util.MathBeautifier
+import com.example.util.LatexFormulaRenderer
 
 enum class NotePreviewBlockKind {
     HEADING,
@@ -127,7 +127,7 @@ object NotePreviewParser {
                     result.add(
                         NotePreviewElement(
                             kind = NotePreviewBlockKind.MATH,
-                            text = MathBeautifier.beautify(mathContent)
+                            text = LatexFormulaRenderer.renderFormulaToText(mathContent)
                         )
                     )
                 }

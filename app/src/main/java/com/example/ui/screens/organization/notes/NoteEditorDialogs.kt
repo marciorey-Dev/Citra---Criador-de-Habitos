@@ -40,7 +40,7 @@ import com.example.data.model.Habit
 import com.example.data.model.Note
 import com.example.data.model.Task
 import com.example.util.CodeHighlighter
-import com.example.util.MathBeautifier
+import com.example.util.LatexFormulaRenderer
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -86,7 +86,7 @@ fun FullScreenBlockDialog(
         if (block is CodeBlock) {
             onUpdate(block.copy(code = newVal, language = selectedLang))
         } else if (block is MathBlock) {
-            onUpdate(block.copy(formula = MathBeautifier.beautify(newVal)))
+            onUpdate(block.copy(formula = newVal))
         }
     }
 
@@ -376,6 +376,9 @@ fun FullScreenBlockDialog(
 
                         Spacer(modifier = Modifier.height(8.dp))
                         // Real-time formatted preview card
+                        val formulaError = remember(textState) {
+                            if (textState.isBlank()) null else LatexFormulaRenderer.validateFormula(textState)
+                        }
                         Card(
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
@@ -383,14 +386,31 @@ fun FullScreenBlockDialog(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text("Pré-visualização Matemática Formatada:", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = MathBeautifier.beautify(textState).ifBlank { "Nenhuma fórmula digitada" },
-                                    fontSize = 18.sp,
-                                    fontFamily = FontFamily.Serif,
-                                    fontStyle = FontStyle.Italic,
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                if (textState.isBlank()) {
+                                    Text(
+                                        text = "Nenhuma fórmula digitada",
+                                        fontSize = 16.sp,
+                                        fontFamily = FontFamily.Serif,
+                                        fontStyle = FontStyle.Italic,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    LatexFormulaRenderer.LatexFormulaBlockView(
+                                        formula = textState,
+                                        textColor = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 18.sp,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                if (formulaError != null) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Aviso de sintaxe: $formulaError",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
                         }
                     }

@@ -492,13 +492,11 @@ fun LatexManualDialog(
                                                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                                         ) {
                                             Column(modifier = Modifier.padding(10.dp)) {
-                                                Text(
-                                                    text = LatexFormulaRenderer.formatAnnotatedBlock(item.formula, false),
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontFamily = FontFamily.Serif,
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
+                                                LatexFormulaRenderer.LatexFormulaBlockView(
+                                                    formula = item.formula,
+                                                    textColor = MaterialTheme.colorScheme.primary,
+                                                    fontSize = 15.sp,
+                                                    modifier = Modifier.fillMaxWidth()
                                                 )
                                                 Spacer(modifier = Modifier.height(6.dp))
                                                 Text(

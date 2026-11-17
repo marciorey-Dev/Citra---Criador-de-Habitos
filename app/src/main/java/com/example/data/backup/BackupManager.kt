@@ -62,10 +62,14 @@ object BackupManager {
         financeWallets: List<FinanceWallet> = emptyList(),
         financeRecurringRules: List<FinanceRecurringRule> = emptyList(),
         financeBudgets: List<FinanceBudget> = emptyList(),
-        financeNoteLinks: List<FinanceNoteLink> = emptyList()
+        financeNoteLinks: List<FinanceNoteLink> = emptyList(),
+        noteVersions: List<NoteVersion> = emptyList(),
+        financeExchangeRates: List<FinanceExchangeRate> = emptyList(),
+        financeLinkExecutions: List<FinanceLinkExecution> = emptyList(),
+        preferences: Map<String, Any> = emptyMap()
     ): String {
         val root = JSONObject()
-        root.put("version", 2)
+        root.put("version", 3)
         root.put("exportedAt", System.currentTimeMillis())
 
         // Tasks
@@ -84,6 +88,8 @@ object BackupManager {
                 put("focusMinutesCompleted", t.focusMinutesCompleted)
                 put("customSoundUri", t.customSoundUri)
                 put("loopAlarm", t.loopAlarm)
+                put("isDisruptive", t.isDisruptive)
+                put("isWontDo", t.isWontDo)
                 put("createdAt", t.createdAt)
             }
             tasksArray.put(obj)
@@ -326,6 +332,65 @@ object BackupManager {
         }
         root.put("financeNoteLinks", finLinksArray)
 
+        // Note Versions
+        val noteVersionsArray = JSONArray()
+        noteVersions.forEach { v ->
+            val obj = JSONObject().apply {
+                put("id", v.id)
+                put("noteId", v.noteId)
+                put("versionNumber", v.versionNumber)
+                put("title", v.title)
+                put("content", v.content)
+                put("authorName", v.authorName)
+                put("timestamp", v.timestamp)
+            }
+            noteVersionsArray.put(obj)
+        }
+        root.put("noteVersions", noteVersionsArray)
+
+        // Finances - Exchange Rates
+        val finRatesArray = JSONArray()
+        financeExchangeRates.forEach { r ->
+            val obj = JSONObject().apply {
+                put("id", r.id)
+                put("fromCurrency", r.fromCurrency)
+                put("toCurrency", r.toCurrency)
+                put("rate", r.rate)
+                put("recordedAt", r.recordedAt)
+                put("updatedAt", r.updatedAt)
+            }
+            finRatesArray.put(obj)
+        }
+        root.put("financeExchangeRates", finRatesArray)
+
+        // Finances - Link Executions
+        val finExecArray = JSONArray()
+        financeLinkExecutions.forEach { ex ->
+            val obj = JSONObject().apply {
+                put("id", ex.id)
+                put("linkId", ex.linkId)
+                put("executedAt", ex.executedAt)
+                put("entriesCount", ex.entriesCount)
+                put("resultStatus", ex.resultStatus)
+                put("previousNoteContent", ex.previousNoteContent ?: JSONObject.NULL)
+            }
+            finExecArray.put(obj)
+        }
+        root.put("financeLinkExecutions", finExecArray)
+
+        // User Profile & App Preferences
+        if (preferences.isNotEmpty()) {
+            val prefsObj = JSONObject()
+            preferences.forEach { (key, value) ->
+                when (value) {
+                    is Collection<*> -> prefsObj.put(key, JSONArray(value.map { it?.toString() ?: "" }))
+                    is Boolean, is Int, is Long, is Float, is Double, is String -> prefsObj.put(key, value)
+                    else -> prefsObj.put(key, value.toString())
+                }
+            }
+            root.put("preferences", prefsObj)
+        }
+
         return root.toString(2)
     }
 
@@ -359,6 +424,8 @@ object BackupManager {
                         focusMinutesCompleted = obj.optInt("focusMinutesCompleted", 0),
                         customSoundUri = obj.optString("customSoundUri", ""),
                         loopAlarm = obj.optBoolean("loopAlarm", false),
+                        isDisruptive = obj.optBoolean("isDisruptive", false),
+                        isWontDo = obj.optBoolean("isWontDo", false),
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                     )
                 )
@@ -377,6 +444,7 @@ object BackupManager {
                         category = obj.optString("category", "Saúde"),
                         iconEmoji = obj.optString("iconEmoji", "✨"),
                         reminderTime = obj.optString("reminderTime", "08:00"),
+                        reminderLeadMinutes = obj.optInt("reminderLeadMinutes", 10),
                         frequencyDays = obj.optString("frequencyDays", "ALL"),
                         currentStreak = obj.optInt("currentStreak", 0),
                         bestStreak = obj.optInt("bestStreak", 0),
@@ -633,6 +701,82 @@ object BackupManager {
             }
         }
 
+        val noteVersionsList = mutableListOf<NoteVersion>()
+        if (root.has("noteVersions")) {
+            val arr = root.getJSONArray("noteVersions")
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                noteVersionsList.add(
+                    NoteVersion(
+                        id = obj.optLong("id", 0L),
+                        noteId = obj.optLong("noteId", 0L),
+                        versionNumber = obj.optInt("versionNumber", 1),
+                        title = obj.optString("title", ""),
+                        content = obj.optString("content", ""),
+                        authorName = obj.optString("authorName", ""),
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+
+        val finRatesList = mutableListOf<FinanceExchangeRate>()
+        if (root.has("financeExchangeRates")) {
+            val arr = root.getJSONArray("financeExchangeRates")
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                finRatesList.add(
+                    FinanceExchangeRate(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        fromCurrency = obj.optString("fromCurrency", "USD"),
+                        toCurrency = obj.optString("toCurrency", "AOA"),
+                        rate = obj.optDouble("rate", 1.0),
+                        recordedAt = obj.optLong("recordedAt", System.currentTimeMillis()),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        }
+
+        val finExecList = mutableListOf<FinanceLinkExecution>()
+        if (root.has("financeLinkExecutions")) {
+            val arr = root.getJSONArray("financeLinkExecutions")
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                finExecList.add(
+                    FinanceLinkExecution(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        linkId = obj.optString("linkId", ""),
+                        executedAt = obj.optLong("executedAt", System.currentTimeMillis()),
+                        entriesCount = obj.optInt("entriesCount", 0),
+                        resultStatus = obj.optString("resultStatus", "SUCCESS"),
+                        previousNoteContent = if (obj.isNull("previousNoteContent")) null else obj.optString("previousNoteContent")
+                    )
+                )
+            }
+        }
+
+        val prefsMap = mutableMapOf<String, Any>()
+        if (root.has("preferences") && !root.isNull("preferences")) {
+            val prefsObj = root.getJSONObject("preferences")
+            val keys = prefsObj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                if (!prefsObj.isNull(k)) {
+                    val rawVal = prefsObj.get(k)
+                    if (rawVal is JSONArray) {
+                        val list = mutableListOf<String>()
+                        for (j in 0 until rawVal.length()) {
+                            rawVal.optString(j)?.let { s -> list.add(s) }
+                        }
+                        prefsMap[k] = list
+                    } else {
+                        prefsMap[k] = rawVal
+                    }
+                }
+            }
+        }
+
         return BackupParsedData(
             tasks = tasksList,
             habits = habitsList,
@@ -645,7 +789,11 @@ object BackupManager {
             financeWallets = finWalletsList,
             financeRecurringRules = finRulesList,
             financeBudgets = finBudgetsList,
-            financeNoteLinks = finLinksList
+            financeNoteLinks = finLinksList,
+            noteVersions = noteVersionsList,
+            financeExchangeRates = finRatesList,
+            financeLinkExecutions = finExecList,
+            preferences = prefsMap
         )
     }
 
@@ -668,6 +816,7 @@ object BackupManager {
                 put("associatedDate", n.associatedDate ?: JSONObject.NULL)
                 put("isPinned", n.isPinned)
                 put("isArchived", n.isArchived)
+                put("noteColor", n.noteColor ?: JSONObject.NULL)
                 put("backgroundImageUri", n.backgroundImageUri ?: JSONObject.NULL)
                 put("backgroundBlur", n.backgroundBlur)
                 put("backgroundBrightness", n.backgroundBrightness)
@@ -710,6 +859,7 @@ object BackupManager {
                         associatedDate = if (obj.isNull("associatedDate")) null else obj.optString("associatedDate"),
                         isPinned = obj.optBoolean("isPinned", false),
                         isArchived = obj.optBoolean("isArchived", false),
+                        noteColor = if (obj.isNull("noteColor")) null else obj.optString("noteColor").takeIf { it.isNotBlank() },
                         backgroundImageUri = if (obj.isNull("backgroundImageUri")) null else obj.optString("backgroundImageUri"),
                         backgroundBlur = obj.optDouble("backgroundBlur", 0.5).toFloat(),
                         backgroundBrightness = obj.optDouble("backgroundBrightness", 0.5).toFloat(),
@@ -871,6 +1021,19 @@ object BackupManager {
             })
         }
         root.put("links", linksArr)
+
+        val execsArr = JSONArray()
+        dao.getAllExecutionsSync().forEach { ex ->
+            execsArr.put(JSONObject().apply {
+                put("id", ex.id)
+                put("linkId", ex.linkId)
+                put("executedAt", ex.executedAt)
+                put("entriesCount", ex.entriesCount)
+                put("resultStatus", ex.resultStatus)
+                put("previousNoteContent", ex.previousNoteContent ?: JSONObject.NULL)
+            })
+        }
+        root.put("executions", execsArr)
 
         return root.toString(2)
     }
@@ -1061,6 +1224,25 @@ object BackupManager {
             }
             if (list.isNotEmpty()) dao.insertLinks(list)
         }
+
+        if (root.has("executions")) {
+            val arr = root.getJSONArray("executions")
+            val list = mutableListOf<FinanceLinkExecution>()
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                list.add(
+                    FinanceLinkExecution(
+                        id = o.optString("id", java.util.UUID.randomUUID().toString()),
+                        linkId = o.optString("linkId", ""),
+                        executedAt = o.optLong("executedAt", System.currentTimeMillis()),
+                        entriesCount = o.optInt("entriesCount", 0),
+                        resultStatus = o.optString("resultStatus", "SUCCESS"),
+                        previousNoteContent = if (o.isNull("previousNoteContent")) null else o.optString("previousNoteContent")
+                    )
+                )
+            }
+            if (list.isNotEmpty()) dao.insertExecutions(list)
+        }
     }
 }
 
@@ -1076,5 +1258,9 @@ data class BackupParsedData(
     val financeWallets: List<FinanceWallet> = emptyList(),
     val financeRecurringRules: List<FinanceRecurringRule> = emptyList(),
     val financeBudgets: List<FinanceBudget> = emptyList(),
-    val financeNoteLinks: List<FinanceNoteLink> = emptyList()
+    val financeNoteLinks: List<FinanceNoteLink> = emptyList(),
+    val noteVersions: List<NoteVersion> = emptyList(),
+    val financeExchangeRates: List<FinanceExchangeRate> = emptyList(),
+    val financeLinkExecutions: List<FinanceLinkExecution> = emptyList(),
+    val preferences: Map<String, Any> = emptyMap()
 )

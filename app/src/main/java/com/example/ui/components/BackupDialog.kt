@@ -70,7 +70,7 @@ fun BackupDialog(
             ) {
                 if (!isRestoreMode) {
                     Text(
-                        text = "Exporte todos os seus dados (Tarefas, Hábitos, Sessões de Foco/Estatísticas, Calendário e Notas, Finanças, Categorias e Conquistas) em um arquivo JSON completo.",
+                        text = "Exporte todos os seus dados (Tarefas, Hábitos, Sessões de Foco/Estatísticas, Calendário, Notas normais/arquivadas/lixeira e versões, Finanças e notas vinculadas, Categorias, Conquistas, Nome de Usuário e Configurações) em um arquivo JSON completo.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -272,7 +272,8 @@ private fun isValidCitraBackup(content: String): Boolean {
             val root = JSONObject(trimmed)
             root.has("version") || root.has("tasks") || root.has("habits") ||
                 root.has("notes") || root.has("focusSessions") || root.has("categories") ||
-                root.has("financeEntries")
+                root.has("financeEntries") || root.has("financeCategories") ||
+                root.has("achievements") || root.has("preferences")
         } else {
             // Might be an array of notes or entities
             val arr = org.json.JSONArray(trimmed)

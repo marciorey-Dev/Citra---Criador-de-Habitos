@@ -283,6 +283,91 @@ object MediaStorageHelper {
     }
 
     /**
+     * Deletes all media files stored in Citra Pic folders (public Pictures/Citra Pic,
+     * app external/internal Citra Pic, note_backgrounds, and restored note images) and MediaStore.
+     */
+    fun deleteAllCitraPicFiles(context: Context): Int {
+        var deletedCount = 0
+        val deletedPaths = mutableListOf<String>()
+        val candidateDirs = mutableListOf<File>()
+
+        try { candidateDirs.add(getCitraPicFolder(context)) } catch (_: Exception) {}
+        try {
+            val pubPictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            candidateDirs.add(File(pubPictures, "Citra Pic"))
+        } catch (_: Exception) {}
+        try {
+            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)?.let {
+                candidateDirs.add(File(it, "Citra Pic"))
+            }
+        } catch (_: Exception) {}
+        try {
+            candidateDirs.add(File(context.filesDir, "Citra Pic"))
+            candidateDirs.add(File(context.filesDir, "note_backgrounds"))
+            candidateDirs.add(File(context.filesDir, "images"))
+        } catch (_: Exception) {}
+
+        for (dir in candidateDirs.distinctBy { it.absolutePath }) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            val files = dir.listFiles() ?: continue
+            for (f in files) {
+                if (f.isFile) {
+                    val path = f.absolutePath
+                    if (f.delete() || !f.exists()) {
+                        deletedCount++
+                        deletedPaths.add(path)
+                    }
+                }
+            }
+        }
+
+        try {
+            val imagesUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            val projection = mutableListOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DATA
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                projection.add(MediaStore.MediaColumns.RELATIVE_PATH)
+            }
+            context.contentResolver.query(imagesUri, projection.toTypedArray(), null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                val dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+                val relCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                } else -1
+
+                while (cursor.moveToNext()) {
+                    val id = if (idCol >= 0) cursor.getLong(idCol) else -1L
+                    val data = if (dataCol >= 0) cursor.getString(dataCol) else null
+                    val rel = if (relCol >= 0) cursor.getString(relCol) else null
+                    val isInCitraPic = (data != null && data.contains("Citra Pic", ignoreCase = true)) ||
+                        (rel != null && rel.contains("Citra Pic", ignoreCase = true))
+                    if (isInCitraPic && id != -1L) {
+                        try {
+                            val deleteUri = android.content.ContentUris.withAppendedId(imagesUri, id)
+                            if (context.contentResolver.delete(deleteUri, null, null) > 0) {
+                                deletedCount++
+                            }
+                            if (data != null) File(data).delete()
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore Citra Pic cleanup error (non-fatal)", e)
+        }
+
+        if (deletedPaths.isNotEmpty()) {
+            try {
+                MediaScannerConnection.scanFile(context, deletedPaths.toTypedArray(), null, null)
+            } catch (_: Exception) {}
+        }
+
+        return deletedCount
+    }
+
+    /**
      * Resolves an existing file if [source] already lives inside one of Citra's standard folders
      * (Citra, Citra Docs, Citra Pic, Citra Records). Returns null if the source is external.
      */

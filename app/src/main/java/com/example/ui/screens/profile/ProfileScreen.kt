@@ -770,8 +770,8 @@ fun ProfileScreen(
             )
             else -> Triple(
                 "Resetar Todos os Dados do App",
-                "ATENÇÃO: Isso irá apagar permanentemente todas as tarefas, hábitos, notas, histórico de foco Arancia e conquistas. Deseja continuar?",
-                { viewModel.resetAllAppData(); Toast.makeText(context, "Todos os dados foram resetados com sucesso.", Toast.LENGTH_LONG).show() }
+                "ATENÇÃO: Isso irá apagar permanentemente todas as tarefas, hábitos, notas, histórico de foco Arancia, conquistas e também eliminará todos os arquivos e mídias das pastas 'Citra Docs' e 'Citra Pic'. Deseja continuar?",
+                { viewModel.resetAllAppData(); Toast.makeText(context, "Dados e arquivos de 'Citra Docs' e 'Citra Pic' apagados.", Toast.LENGTH_LONG).show() }
             )
         }
 

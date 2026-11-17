@@ -389,13 +389,11 @@ private fun MathFormulaView(formula: String) {
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = formula,
-                fontFamily = FontFamily.Serif,
-                fontStyle = FontStyle.Italic,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
-                color = MaterialTheme.colorScheme.onSurface
+            com.example.util.LatexFormulaRenderer.LatexFormulaBlockView(
+                formula = formula,
+                textColor = MaterialTheme.colorScheme.onSurface,
+                fontSize = 16.sp,
+                modifier = Modifier.weight(1f)
             )
         }
     }
@@ -511,5 +509,10 @@ private fun MarkdownImageView(alt: String, url: String) {
 /**
  * Parses bold (**text**), italic (*text*), link ([title](url)), and inline code (`code`)
  */
-private fun parseFormattedSpans(input: String) = 
-    com.example.util.InlineMarkdownHelper.parseInlineFormatting(input, isDark = false, linkColor = Color(0xFFF97316))
+@Composable
+private fun parseFormattedSpans(input: String) =
+    com.example.util.InlineMarkdownHelper.parseInlineFormatting(
+        input,
+        isDark = com.example.ui.theme.isAppDarkTheme(),
+        linkColor = Color(0xFFF97316)
+    )

@@ -400,14 +400,17 @@ class PreferencesManager(private val context: Context) {
 
     fun exportPreferencesMap(): Map<String, Any> {
         val s = _settings.value
-        return mapOf(
+        val result = linkedMapOf<String, Any>(
             "theme_mode" to (prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"),
             "theme_accent" to _themeAccent.value.name,
             "default_start_tab" to _defaultStartTab.value,
             "keep_screen_on" to _keepScreenOn.value,
             "task_sound" to s.taskSound,
+            "task_sound_uri" to s.taskSoundUri,
             "habit_sound" to s.habitSound,
+            "habit_sound_uri" to s.habitSoundUri,
             "pomodoro_sound" to s.pomodoroSound,
+            "pomodoro_sound_uri" to s.pomodoroSoundUri,
             "achievement_sound" to s.achievementSound,
             "alert_sound" to s.alertSound,
             "vibrate" to s.vibrate,
@@ -421,14 +424,41 @@ class PreferencesManager(private val context: Context) {
             "timer_continuous_mode" to _timerContinuousMode.value,
             "timer_tap_to_toggle" to _timerTapToToggle.value,
             "timer_allow_swipe" to _timerAllowSwipe.value,
+            "last_used_focus_mins" to _lastUsedFocusMinutes.value,
             "habit_reward_points" to _habitRewardPoints.value,
             "notes_sort_option" to _notesSortOption.value,
             "notes_sort_ascending" to _notesSortAscending.value,
-            "notes_layout_mode" to _notesLayoutMode.value
+            "notes_layout_mode" to _notesLayoutMode.value,
+            "default_note_open_mode" to _defaultNoteOpenMode.value,
+            "last_note_editor_mode" to getLastNoteEditorMode(),
+            "toolbar_items_order" to getToolbarOrder().joinToString(","),
+            "citra_timer_balls_json" to _citraTimerBallsJson.value,
+            "recent_external_docs_json" to (prefs.getString("recent_external_docs_json", "[]") ?: "[]"),
+            "has_completed_onboarding" to _hasCompletedOnboarding.value,
+            "user_display_name" to _userDisplayName.value,
+            "user_photo_path" to (_userPhotoPath.value ?: ""),
+            "app_bg_uri" to (_appBgUri.value ?: ""),
+            "app_bg_blur" to _appBgBlur.value,
+            "app_bg_brightness" to _appBgBrightness.value,
+            "welcome_phrases_enabled" to _welcomePhrasesEnabled.value,
+            "disabled_welcome_categories" to _disabledWelcomeCategories.value.sorted(),
+            "focus_distraction_free_enabled" to _focusDistractionFreeEnabled.value,
+            "focus_allowed_packages" to _focusAllowedPackages.value.sorted(),
+            "all_tutorials_skipped" to _allTutorialsSkipped.value,
+            "completed_tutorial_areas" to _completedTutorialAreas.value.sorted(),
+            "finances_enabled" to _financesEnabled.value,
+            "finances_setup_completed" to _financesSetupCompleted.value,
+            "finance_default_currency" to _financeDefaultCurrency.value,
+            "finance_base_balance_minor" to _financeBaseBalanceMinor.value,
+            "finance_hide_values" to _financeHideValues.value,
+            "finance_pin_code" to (_financePinCode.value ?: ""),
+            "finance_biometric_enabled" to _financeBiometricEnabled.value
         )
+        return result
     }
 
     fun importPreferencesMap(map: Map<String, Any>) {
+        if (map.isEmpty()) return
         val editor = prefs.edit()
         (map["daily_random_color"] as? Boolean)?.let {
             editor.putBoolean("daily_random_color", it)
@@ -469,6 +499,11 @@ class PreferencesManager(private val context: Context) {
             editor.putBoolean("timer_allow_swipe", it)
             _timerAllowSwipe.value = it
         }
+        (map["last_used_focus_mins"] as? Number)?.toInt()?.let {
+            val safe = it.coerceIn(1, 180)
+            editor.putInt("last_used_focus_mins", safe)
+            _lastUsedFocusMinutes.value = safe
+        }
         (map["habit_reward_points"] as? Number)?.toInt()?.let {
             val safe = it.coerceAtLeast(0)
             editor.putInt("habit_reward_points", safe)
@@ -486,13 +521,116 @@ class PreferencesManager(private val context: Context) {
             editor.putString("notes_layout_mode", it)
             _notesLayoutMode.value = it
         }
+        (map["default_note_open_mode"] as? String)?.let {
+            editor.putString("default_note_open_mode", it)
+            _defaultNoteOpenMode.value = it
+        }
+        (map["last_note_editor_mode"] as? String)?.let {
+            editor.putString("last_note_editor_mode", it)
+        }
+        (map["toolbar_items_order"] as? String)?.takeIf { it.isNotBlank() }?.let {
+            editor.putString("toolbar_items_order", it)
+        }
+        (map["citra_timer_balls_json"] as? String)?.takeIf { it.isNotBlank() }?.let {
+            editor.putString("citra_timer_balls_json", it)
+            _citraTimerBallsJson.value = it
+        }
+        (map["recent_external_docs_json"] as? String)?.takeIf { it.isNotBlank() }?.let {
+            editor.putString("recent_external_docs_json", it)
+        }
+        (map["has_completed_onboarding"] as? Boolean)?.let {
+            editor.putBoolean("has_completed_onboarding", it)
+            _hasCompletedOnboarding.value = it
+        }
+        (map["user_display_name"] as? String)?.takeIf { it.isNotBlank() }?.let {
+            val clean = it.trim()
+            editor.putString("user_display_name", clean)
+            _userDisplayName.value = clean
+        }
+        if (map.containsKey("user_photo_path")) {
+            val photo = (map["user_photo_path"] as? String)?.takeIf { it.isNotBlank() }
+            if (photo != null) editor.putString("user_photo_path", photo) else editor.remove("user_photo_path")
+            _userPhotoPath.value = photo
+        }
+        if (map.containsKey("app_bg_uri") || map.containsKey("app_bg_blur") || map.containsKey("app_bg_brightness")) {
+            val bgUri = (map["app_bg_uri"] as? String)?.takeIf { it.isNotBlank() } ?: _appBgUri.value
+            val bgBlur = (map["app_bg_blur"] as? Number)?.toFloat() ?: _appBgBlur.value
+            val bgBrightness = (map["app_bg_brightness"] as? Number)?.toFloat() ?: _appBgBrightness.value
+            if (map.containsKey("app_bg_uri") && (map["app_bg_uri"] as? String).isNullOrBlank()) {
+                editor.remove("app_bg_uri")
+                _appBgUri.value = null
+            } else if (bgUri != null) {
+                editor.putString("app_bg_uri", bgUri)
+                _appBgUri.value = bgUri
+            }
+            editor.putFloat("app_bg_blur", bgBlur)
+            editor.putFloat("app_bg_brightness", bgBrightness)
+            _appBgBlur.value = bgBlur
+            _appBgBrightness.value = bgBrightness
+        }
+        (map["welcome_phrases_enabled"] as? Boolean)?.let {
+            editor.putBoolean("welcome_phrases_enabled", it)
+            _welcomePhrasesEnabled.value = it
+        }
+        toStringSet(map["disabled_welcome_categories"])?.let { cats ->
+            editor.putStringSet("disabled_welcome_categories", cats)
+            _disabledWelcomeCategories.value = cats
+        }
+        (map["focus_distraction_free_enabled"] as? Boolean)?.let {
+            editor.putBoolean("focus_distraction_free_enabled", it)
+            _focusDistractionFreeEnabled.value = it
+        }
+        toStringSet(map["focus_allowed_packages"])?.let { pkgs ->
+            editor.putStringSet("focus_allowed_packages", pkgs)
+            _focusAllowedPackages.value = pkgs
+        }
+        (map["all_tutorials_skipped"] as? Boolean)?.let {
+            editor.putBoolean("all_tutorials_skipped", it)
+            _allTutorialsSkipped.value = it
+        }
+        toStringSet(map["completed_tutorial_areas"])?.let { areas ->
+            editor.putStringSet("completed_tutorial_areas", areas)
+            _completedTutorialAreas.value = areas
+        }
+        (map["finances_enabled"] as? Boolean)?.let {
+            editor.putBoolean("finances_enabled", it)
+            _financesEnabled.value = it
+        }
+        (map["finances_setup_completed"] as? Boolean)?.let {
+            editor.putBoolean("finances_setup_completed", it)
+            _financesSetupCompleted.value = it
+        }
+        (map["finance_default_currency"] as? String)?.takeIf { it.isNotBlank() }?.let {
+            editor.putString("finance_default_currency", it)
+            _financeDefaultCurrency.value = it
+        }
+        (map["finance_base_balance_minor"] as? Number)?.toLong()?.let {
+            editor.putLong("finance_base_balance_minor", it)
+            _financeBaseBalanceMinor.value = it
+        }
+        (map["finance_hide_values"] as? Boolean)?.let {
+            editor.putBoolean("finance_hide_values", it)
+            _financeHideValues.value = it
+        }
+        if (map.containsKey("finance_pin_code")) {
+            val pin = (map["finance_pin_code"] as? String)?.takeIf { it.isNotBlank() }
+            if (pin != null) editor.putString("finance_pin_code", pin) else editor.remove("finance_pin_code")
+            _financePinCode.value = pin
+        }
+        (map["finance_biometric_enabled"] as? Boolean)?.let {
+            editor.putBoolean("finance_biometric_enabled", it)
+            _financeBiometricEnabled.value = it
+        }
 
         // Standard notification and sound effects settings
         val curSettings = _settings.value
         val newSettings = curSettings.copy(
             taskSound = (map["task_sound"] as? String) ?: curSettings.taskSound,
+            taskSoundUri = (map["task_sound_uri"] as? String) ?: curSettings.taskSoundUri,
             habitSound = (map["habit_sound"] as? String) ?: curSettings.habitSound,
+            habitSoundUri = (map["habit_sound_uri"] as? String) ?: curSettings.habitSoundUri,
             pomodoroSound = (map["pomodoro_sound"] as? String) ?: curSettings.pomodoroSound,
+            pomodoroSoundUri = (map["pomodoro_sound_uri"] as? String) ?: curSettings.pomodoroSoundUri,
             achievementSound = (map["achievement_sound"] as? String) ?: curSettings.achievementSound,
             alertSound = (map["alert_sound"] as? String) ?: curSettings.alertSound,
             vibrate = (map["vibrate"] as? Boolean) ?: curSettings.vibrate,
@@ -504,7 +642,22 @@ class PreferencesManager(private val context: Context) {
             overrideSilentMode = (map["override_silent_mode"] as? Boolean) ?: curSettings.overrideSilentMode
         )
         editor.apply()
+        if (map.containsKey("recent_external_docs_json")) {
+            _recentExternalDocs.value = loadRecentExternalDocs()
+        }
         updateSettings(newSettings)
+    }
+
+    private fun toStringSet(raw: Any?): Set<String>? {
+        return when (raw) {
+            is Collection<*> -> raw.mapNotNull { it?.toString() }.toSet()
+            is org.json.JSONArray -> buildSet {
+                for (i in 0 until raw.length()) {
+                    add(raw.optString(i))
+                }
+            }
+            else -> null
+        }
     }
 
     fun setDefaultStartTab(tab: String) {

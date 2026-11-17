@@ -6,8 +6,10 @@ import com.example.data.local.PreferencesManager
 import com.example.data.model.*
 import com.example.notifications.NextAlarmScheduler
 import com.example.notifications.NotificationHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -387,6 +389,11 @@ class CitraRepository(
         habitDao.deleteAllHabits()
         noteDao.deleteAllNotes()
         focusSessionDao.deleteAllSessions()
+        withContext(Dispatchers.IO) {
+            com.example.data.backup.AutoDeviceStorageManager.clearSnapshot(context)
+            com.example.util.CitraDocsFileManager.deleteAllDocsFiles(context)
+            com.example.util.MediaStorageHelper.deleteAllCitraPicFiles(context)
+        }
     }
 
     private suspend fun checkFocusAchievements(focusMinutes: Int, breakMinutes: Int) {
@@ -445,7 +452,10 @@ class CitraRepository(
         financeWallets: List<FinanceWallet> = emptyList(),
         financeRecurringRules: List<FinanceRecurringRule> = emptyList(),
         financeBudgets: List<FinanceBudget> = emptyList(),
-        financeNoteLinks: List<FinanceNoteLink> = emptyList()
+        financeNoteLinks: List<FinanceNoteLink> = emptyList(),
+        noteVersions: List<NoteVersion> = emptyList(),
+        financeExchangeRates: List<FinanceExchangeRate> = emptyList(),
+        financeLinkExecutions: List<FinanceLinkExecution> = emptyList()
     ) {
         if (tasks.isNotEmpty()) taskDao.insertTasks(tasks)
         if (habits.isNotEmpty()) habitDao.insertHabits(habits)
@@ -480,8 +490,57 @@ class CitraRepository(
                 }
             }
         }
+        val noteIdMap = mutableMapOf<Long, Long>()
         if (notes.isNotEmpty()) {
-            noteDao.insertNotes(notes)
+            val existingNotes = noteDao.getAllNotesIncludingDeletedSync()
+            val existingByUuid = existingNotes.filter { it.uuid.isNotBlank() }.associateBy { it.uuid }.toMutableMap()
+            val usedIds = existingNotes.map { it.id }.toMutableSet()
+
+            notes.forEach { incoming ->
+                val oldId = incoming.id
+                val cleanUuid = incoming.uuid.ifBlank { UUID.randomUUID().toString() }
+                val existingMatch = existingByUuid[cleanUuid]
+                val savedId = if (existingMatch != null) {
+                    val merged = incoming.copy(id = existingMatch.id, uuid = cleanUuid)
+                    noteDao.updateNote(merged)
+                    existingByUuid[cleanUuid] = merged
+                    existingMatch.id
+                } else {
+                    val candidateId = if (incoming.id > 0L && !usedIds.contains(incoming.id)) incoming.id else 0L
+                    val insertedId = noteDao.insertNote(incoming.copy(id = candidateId, uuid = cleanUuid))
+                    usedIds.add(insertedId)
+                    existingByUuid[cleanUuid] = incoming.copy(id = insertedId, uuid = cleanUuid)
+                    insertedId
+                }
+                if (oldId > 0L) {
+                    noteIdMap[oldId] = savedId
+                }
+                if (!incoming.isExternalDocument && !incoming.isDeleted) {
+                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        context = context,
+                        title = incoming.title,
+                        content = incoming.content,
+                        uuid = cleanUuid
+                    )
+                }
+            }
+        }
+        if (noteVersions.isNotEmpty()) {
+            val existingVersions = noteVersionDao.getAllVersionsSync()
+            val existingKeys = existingVersions.map { "${it.noteId}:${it.versionNumber}" }.toMutableSet()
+            val mappedVersions = noteVersions.mapNotNull { v ->
+                val targetNoteId = noteIdMap[v.noteId] ?: v.noteId
+                val key = "$targetNoteId:${v.versionNumber}"
+                if (targetNoteId <= 0L || existingKeys.contains(key)) {
+                    null
+                } else {
+                    existingKeys.add(key)
+                    v.copy(id = 0L, noteId = targetNoteId)
+                }
+            }
+            if (mappedVersions.isNotEmpty()) {
+                noteVersionDao.insertVersions(mappedVersions)
+            }
         }
         if (financeCategories.isNotEmpty()) {
             financeDao.insertCategories(financeCategories)
@@ -499,7 +558,19 @@ class CitraRepository(
             financeDao.insertBudgets(financeBudgets)
         }
         if (financeNoteLinks.isNotEmpty()) {
-            financeDao.insertLinks(financeNoteLinks)
+            val mappedLinks = financeNoteLinks.map { link ->
+                val remappedNoteId = noteIdMap[link.noteId]
+                    ?: (if (link.noteUuid.isNotBlank()) noteDao.getNoteByUuid(link.noteUuid)?.id else null)
+                    ?: link.noteId
+                link.copy(noteId = remappedNoteId)
+            }
+            financeDao.insertLinks(mappedLinks)
+        }
+        if (financeExchangeRates.isNotEmpty()) {
+            financeDao.insertExchangeRates(financeExchangeRates)
+        }
+        if (financeLinkExecutions.isNotEmpty()) {
+            financeDao.insertExecutions(financeLinkExecutions)
         }
         com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(context)
     }
@@ -575,16 +646,35 @@ class CitraRepository(
             noteDao.insertNote(
                 Note(
                     title = "Guia do Citra 🍊",
-                    content = """# Bem-vindo ao Citra!
-Seu companheiro de produtividade, estudos e organização.
+                    content = """# 🍊 Bem-vindo ao Citra!
 
-### Recursos:
-- [x] Temporizador Pomodoro Flexível (15 a 120 min de foco, 5 a 25 min de pausa, ciclos repetíveis)
-- [x] Suporte a músicas e playlists locais do aparelho
-- [x] Lembretes e notificações pontuais para tarefas e hábitos
-- [x] Calendário integrado com tarefas e anotações
-- [x] Sistema rico de conquistas gamificadas
-- [x] Backup e restauração local de dados (.json)""",
+> [!TIP] Produtividade leve, gamificada e 100% offline — sua rotina organizada em um só lugar.
+
+O **Citra** combina foco ==Pomodoro flexível== (`15 a 120 min`), músicas locais e conquistas para ajudar você a manter consistência no dia a dia.
+
+---
+
+## ✨ O que o app faz
+
+| Pilar | Para que serve |
+| --- | --- |
+| **⏱️ Timer & Foco** | Ciclos personalizáveis, pausas e som ambiente |
+| **✅ Tarefas** | Prioridades (*Alta, Média, Baixa*), prazos, alarmes e vínculo com foco |
+| **🌱 Hábitos** | Frequência diária ou personalizada, check-in rápido e **sequências** |
+| **📅 Calendário** | Visão unificada de tarefas, hábitos e notas em cada data |
+| **📝 Notas (.md)** | Editor Markdown com imagens, áudios, cores, PDF/DOCX e pasta `Citra Docs` |
+| **💰 Finanças** | Carteiras, receitas, despesas, metas e **notas vinculadas** automáticas |
+
+---
+
+## 🚀 Primeiros passos
+
+- [x] Conhecer o **Guia do Citra**
+- [ ] Criar sua primeira **tarefa** ou **hábito** na aba de Organização
+- [ ] Iniciar um ciclo no **Timer** e desbloquear conquistas
+- [ ] Personalizar suas notas com `**negrito**`, `*itálico*`, `==destaque==` e tabelas
+
+> *"Pequenos passos constantes constroem grandes resultados."*""",
                     category = "Estudos",
                     iconEmoji = "📘",
                     associatedDate = todayStr

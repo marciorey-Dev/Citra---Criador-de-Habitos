@@ -12,8 +12,14 @@ interface NoteVersionDao {
     @Query("SELECT * FROM note_versions WHERE noteId = :noteId ORDER BY versionNumber DESC")
     suspend fun getVersionsForNoteSync(noteId: Long): List<NoteVersion>
 
+    @Query("SELECT * FROM note_versions ORDER BY noteId ASC, versionNumber ASC")
+    suspend fun getAllVersionsSync(): List<NoteVersion>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVersion(version: NoteVersion): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVersions(versions: List<NoteVersion>)
 
     @Query("DELETE FROM note_versions WHERE noteId = :noteId")
     suspend fun deleteVersionsForNote(noteId: Long)

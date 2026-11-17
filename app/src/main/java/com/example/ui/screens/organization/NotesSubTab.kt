@@ -1474,61 +1474,6 @@ fun NotesSubTab(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 NotesSpeedDialItem(
-                    label = "Criar notas",
-                    icon = Icons.Default.EditNote,
-                    buttonColor = dialColor,
-                    iconTint = dialIconTint,
-                    testTag = "speed_dial_create_note",
-                    onClick = {
-                        isCreateMenuExpanded = false
-                        isCreatingNew = true
-                    }
-                )
-                NotesSpeedDialItem(
-                    label = "Importar notas",
-                    icon = Icons.Default.FileOpen,
-                    buttonColor = dialColor,
-                    iconTint = dialIconTint,
-                    testTag = "speed_dial_import_notes",
-                    onClick = {
-                        isCreateMenuExpanded = false
-                        importMultipleNotesLauncher.launch(ExternalDocumentUriHelper.MARKDOWN_IMPORT_MIME_TYPES)
-                    }
-                )
-                NotesSpeedDialItem(
-                    label = "PDF",
-                    icon = Icons.Default.PictureAsPdf,
-                    buttonColor = dialColor,
-                    iconTint = dialIconTint,
-                    testTag = "speed_dial_pdf",
-                    onClick = {
-                        isCreateMenuExpanded = false
-                        recentPickerDocType = NoteDocumentType.PDF
-                    }
-                )
-                NotesSpeedDialItem(
-                    label = "Word (.docx)",
-                    icon = Icons.Default.Article,
-                    buttonColor = dialColor,
-                    iconTint = dialIconTint,
-                    testTag = "speed_dial_docx",
-                    onClick = {
-                        isCreateMenuExpanded = false
-                        recentPickerDocType = NoteDocumentType.DOCX
-                    }
-                )
-                NotesSpeedDialItem(
-                    label = "Rascunhos",
-                    icon = Icons.Default.DashboardCustomize,
-                    buttonColor = dialColor,
-                    iconTint = dialIconTint,
-                    testTag = "speed_dial_drafts",
-                    onClick = {
-                        isCreateMenuExpanded = false
-                        showTemplatesMenu = true
-                    }
-                )
-                NotesSpeedDialItem(
                     label = "Outro",
                     subtitle = ExternalDocumentUriHelper.OTHER_SUPPORTED_EXTENSIONS_LABEL,
                     icon = Icons.Default.SnippetFolder,
@@ -1553,6 +1498,61 @@ fun NotesSubTab(
                         }
                     )
                 }
+                NotesSpeedDialItem(
+                    label = "Rascunhos",
+                    icon = Icons.Default.DashboardCustomize,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_drafts",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        showTemplatesMenu = true
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Word (.docx)",
+                    icon = Icons.Default.Article,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_docx",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        recentPickerDocType = NoteDocumentType.DOCX
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "PDF",
+                    icon = Icons.Default.PictureAsPdf,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_pdf",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        recentPickerDocType = NoteDocumentType.PDF
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Importar notas",
+                    icon = Icons.Default.FileOpen,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_import_notes",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        importMultipleNotesLauncher.launch(ExternalDocumentUriHelper.MARKDOWN_IMPORT_MIME_TYPES)
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Criar notas",
+                    icon = Icons.Default.EditNote,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_create_note",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        isCreatingNew = true
+                    }
+                )
             }
         }
 

@@ -1477,26 +1477,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (rawContent != null) {
                         // Check if it's a full Citra backup JSON
                         val trimmed = rawContent.trim()
-                        if (filename.lowercase().endsWith(".json") && trimmed.contains("\"version\"") && (trimmed.contains("\"tasks\"") || trimmed.contains("\"notes\""))) {
+                        if (filename.lowercase().endsWith(".json") && trimmed.contains("\"version\"") && (trimmed.contains("\"tasks\"") || trimmed.contains("\"notes\"") || trimmed.contains("\"preferences\"") || trimmed.contains("\"financeEntries\""))) {
                             try {
                                 val backupData = BackupManager.parseBackupJson(rawContent)
-                                val parsedNotes = BackupManager.parseNotesJson(rawContent, context)
-                                for (n in parsedNotes) {
-                                    repository.upsertNoteByUuid(n)
-                                    if (!n.isExternalDocument) {
-                                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, n.title, n.content, uuid = n.uuid)
-                                    }
-                                    importedNotesCount++
+                                repository.restoreBackup(
+                                    tasks = backupData.tasks,
+                                    habits = backupData.habits,
+                                    sessions = backupData.focusSessions,
+                                    categories = backupData.categories,
+                                    achievements = backupData.achievements,
+                                    notes = backupData.notes,
+                                    financeEntries = backupData.financeEntries,
+                                    financeCategories = backupData.financeCategories,
+                                    financeWallets = backupData.financeWallets,
+                                    financeRecurringRules = backupData.financeRecurringRules,
+                                    financeBudgets = backupData.financeBudgets,
+                                    financeNoteLinks = backupData.financeNoteLinks,
+                                    noteVersions = backupData.noteVersions,
+                                    financeExchangeRates = backupData.financeExchangeRates,
+                                    financeLinkExecutions = backupData.financeLinkExecutions
+                                )
+                                if (backupData.preferences.isNotEmpty()) {
+                                    preferencesManager.importPreferencesMap(backupData.preferences)
                                 }
-                                for (t in backupData.tasks) {
-                                    repository.insertTask(t.copy(id = 0L))
-                                }
-                                for (h in backupData.habits) {
-                                    repository.insertHabit(h.copy(id = 0L))
-                                }
-                                for (c in backupData.categories) {
-                                    repository.categoryDao.insertCategory(c)
-                                }
+                                importedNotesCount += backupData.notes.size
                                 continue
                             } catch (_: Exception) {}
                         }
@@ -2214,7 +2218,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun resetAllAppData() {
         viewModelScope.launch {
             repository.resetAllData()
-            _userMessage.emit("Todos os dados do app foram resetados com sucesso.")
+            _userMessage.emit("Todos os dados e os arquivos de 'Citra Docs' e 'Citra Pic' foram apagados com sucesso.")
         }
     }
 
@@ -2225,24 +2229,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Backup & Restore
     fun exportBackupJson(): String {
-        return BackupManager.createBackupJson(
-            tasks = tasks.value,
-            habits = habits.value,
-            focusSessions = focusSessions.value,
-            categories = categories.value,
-            achievements = achievements.value,
-            notes = notes.value,
-            financeEntries = financeEntries.value,
-            financeCategories = financeCategories.value,
-            financeWallets = financeWallets.value,
-            financeRecurringRules = financeRecurringRules.value,
-            financeBudgets = financeBudgets.value,
-            financeNoteLinks = financeNoteLinks.value
-        )
+        return kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+            val dbTasks = database.taskDao().getAllTasksSync()
+            val dbHabits = database.habitDao().getAllHabitsSync()
+            val dbSessions = database.focusSessionDao().getAllSessionsSync()
+            val dbCategories = database.categoryDao().getAllCategories().firstOrNull() ?: categories.value
+            val dbAchievements = database.achievementDao().getAllAchievements().firstOrNull() ?: achievements.value
+            val dbNotes = database.noteDao().getAllNotesIncludingDeletedSync()
+            val dbNoteVersions = database.noteVersionDao().getAllVersionsSync()
+            val finDao = database.financeDao()
+            val dbFinEntries = finDao.getAllEntriesIncludingDeleted()
+            val dbFinCategories = finDao.getAllCategoriesSync()
+            val dbFinWallets = finDao.getAllWalletsSync()
+            val dbFinRules = finDao.getAllRecurringRulesSync()
+            val dbFinBudgets = finDao.getAllBudgetsSync()
+            val dbFinLinks = finDao.getAllLinksSync()
+            val dbFinRates = finDao.getAllExchangeRatesSync()
+            val dbFinExecutions = finDao.getAllExecutionsSync()
+            val prefsMap = preferencesManager.exportPreferencesMap()
+
+            BackupManager.createBackupJson(
+                tasks = dbTasks,
+                habits = dbHabits,
+                focusSessions = dbSessions,
+                categories = dbCategories,
+                achievements = dbAchievements,
+                notes = dbNotes,
+                financeEntries = dbFinEntries,
+                financeCategories = dbFinCategories,
+                financeWallets = dbFinWallets,
+                financeRecurringRules = dbFinRules,
+                financeBudgets = dbFinBudgets,
+                financeNoteLinks = dbFinLinks,
+                noteVersions = dbNoteVersions,
+                financeExchangeRates = dbFinRates,
+                financeLinkExecutions = dbFinExecutions,
+                preferences = prefsMap
+            )
+        }
     }
 
     fun restoreBackupJson(jsonString: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val parsed = BackupManager.parseBackupJson(jsonString)
                 repository.restoreBackup(
@@ -2257,8 +2285,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     financeWallets = parsed.financeWallets,
                     financeRecurringRules = parsed.financeRecurringRules,
                     financeBudgets = parsed.financeBudgets,
-                    financeNoteLinks = parsed.financeNoteLinks
+                    financeNoteLinks = parsed.financeNoteLinks,
+                    noteVersions = parsed.noteVersions,
+                    financeExchangeRates = parsed.financeExchangeRates,
+                    financeLinkExecutions = parsed.financeLinkExecutions
                 )
+                if (parsed.preferences.isNotEmpty()) {
+                    preferencesManager.importPreferencesMap(parsed.preferences)
+                }
                 _userMessage.emit("Backup local completo restaurado com sucesso!")
             } catch (e: Exception) {
                 _userMessage.emit("Erro ao restaurar backup: arquivo inválido.")
@@ -2267,7 +2301,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun exportNotesJson(): String {
-        return BackupManager.exportNotesJson(notes.value)
+        return BackupManager.exportNotesJson(notes.value, context = getApplication())
     }
 
     fun importNotesJson(jsonString: String) {

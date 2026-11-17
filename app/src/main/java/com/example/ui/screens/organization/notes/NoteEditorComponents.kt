@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
 import androidx.compose.material.icons.automirrored.filled.FormatAlignRight
@@ -698,12 +699,13 @@ fun VisualBlockItem(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = LatexFormulaRenderer.formatAnnotatedBlock(block.formula.ifBlank { "E = mc^2" }, isDarkBg),
+                            LatexFormulaRenderer.LatexFormulaBlockView(
+                                formula = block.formula.ifBlank { "E = mc^2" },
+                                textColor = if (isDarkBg) Color(0xFFFDE047) else Color(0xFF9A3412),
+                                fontSize = 17.sp,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                textAlign = TextAlign.Center
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
                             )
                         }
                     } else {
@@ -735,12 +737,13 @@ fun VisualBlockItem(
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = LatexFormulaRenderer.formatAnnotatedBlock(block.formula, isDarkBg),
+                                LatexFormulaRenderer.LatexFormulaBlockView(
+                                    formula = block.formula,
+                                    textColor = if (isDarkBg) Color(0xFFFDE047) else Color(0xFF9A3412),
+                                    fontSize = 17.sp,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    textAlign = TextAlign.Center
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
                                 )
                             }
                         }
@@ -908,7 +911,10 @@ fun VisualBlockItem(
                                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                         singleLine = false,
                                         maxLines = 15,
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                        keyboardOptions = KeyboardOptions(
+                                            capitalization = KeyboardCapitalization.Sentences,
+                                            imeAction = ImeAction.Default
+                                        ),
                                         modifier = Modifier.weight(1f - imageFraction)
                                     )
                                 } else {
@@ -919,7 +925,10 @@ fun VisualBlockItem(
                                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
                                         singleLine = false,
                                         maxLines = 15,
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                        keyboardOptions = KeyboardOptions(
+                                            capitalization = KeyboardCapitalization.Sentences,
+                                            imeAction = ImeAction.Default
+                                        ),
                                         modifier = Modifier.weight(1f - imageFraction)
                                     )
                                     Box(modifier = Modifier.weight(imageFraction)) {
@@ -1233,6 +1242,10 @@ private fun AudioBlockPlayer(
                         BasicTextField(
                             value = block.title,
                             onValueChange = { onUpdate(block.copy(title = it)) },
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Done
+                            ),
                             textStyle = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -1709,7 +1722,10 @@ fun ExcelTableEditor(
                                     },
                                     singleLine = false,
                                     maxLines = 8,
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                    keyboardOptions = KeyboardOptions(
+                                        capitalization = KeyboardCapitalization.Sentences,
+                                        imeAction = ImeAction.Default
+                                    ),
                                     textStyle = MaterialTheme.typography.bodySmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
@@ -1780,7 +1796,10 @@ fun ExcelTableEditor(
                                         },
                                         singleLine = false,
                                         maxLines = 10,
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                                        keyboardOptions = KeyboardOptions(
+                                            capitalization = KeyboardCapitalization.Sentences,
+                                            imeAction = ImeAction.Default
+                                        ),
                                         textStyle = MaterialTheme.typography.bodySmall.copy(
                                             fontSize = 12.sp,
                                             color = cellTextColor
