@@ -544,7 +544,7 @@ fun ExternalPdfReaderScreen(
     }
 
     val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "pdf_top_pad")
-    val bottomSpacer by animateDpAsState(targetValue = if (showChrome) 56.dp else 16.dp, label = "pdf_bottom_pad")
+    val bottomSpacer = 24.dp
 
     Box(
         modifier = Modifier
@@ -732,44 +732,6 @@ fun ExternalPdfReaderScreen(
                     ) {
                         Icon(Icons.Default.ZoomIn, contentDescription = "Aumentar zoom", modifier = Modifier.size(18.dp))
                     }
-                }
-            }
-        }
-
-        // Bottom Footer Overlay (Single-tap hides/restores cleanly)
-        AnimatedVisibility(
-            visible = showChrome,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Caminho: ${ExternalDocumentUriHelper.formatReadablePath(note.externalUri)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
                 }
             }
         }
@@ -965,7 +927,7 @@ fun ExternalDocxReaderScreen(
     }
 
     val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "docx_top_pad")
-    val bottomSpacer by animateDpAsState(targetValue = if (showChrome) 56.dp else 16.dp, label = "docx_bottom_pad")
+    val bottomSpacer = 24.dp
 
     Box(
         modifier = Modifier
@@ -1132,44 +1094,6 @@ fun ExternalDocxReaderScreen(
                     ) {
                         Text("A+", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
-                }
-            }
-        }
-
-        // Bottom Footer Overlay (Single-tap hides/restores cleanly)
-        AnimatedVisibility(
-            visible = showChrome,
-            enter = fadeIn() + slideInVertically { it },
-            exit = fadeOut() + slideOutVertically { it },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Caminho: ${ExternalDocumentUriHelper.formatReadablePath(note.externalUri)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
                 }
             }
         }

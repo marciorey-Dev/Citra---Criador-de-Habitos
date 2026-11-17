@@ -1531,20 +1531,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             } catch (_: Exception) {}
                         }
 
+                        val existingCitraFile = com.example.util.MediaStorageHelper.resolveExistingCitraFile(context, uri.toString())
+                        val isFromCitraDocs = existingCitraFile?.let { f ->
+                            com.example.util.CitraDocsFileManager.getAllDocsFolders(context).any { docsDir ->
+                                f.parentFile?.absolutePath == docsDir.absolutePath
+                            }
+                        } == true
+
                         val markdownContent = com.example.util.CitraDocsFileManager.convertContentToMarkdown(filename, rawContent)
                         val fileUuid = com.example.util.CitraDocsFileManager.extractUuidFromMarkdown(markdownContent)
                         val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(markdownContent)
 
                         val existingByUuid = if (fileUuid != null) repository.getNoteByUuid(fileUuid) else null
-                        if (existingByUuid != null && !existingByUuid.isExternalDocument) {
-                            repository.updateNote(existingByUuid.copy(title = rawTitle, content = cleanContent, updatedAt = System.currentTimeMillis()))
-                            com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, rawTitle, cleanContent, uuid = existingByUuid.uuid)
+                        val existingByTitle = if (existingCitraFile != null) {
+                            currentNotes.firstOrNull {
+                                !it.isExternalDocument && it.title.trim().equals(rawTitle, ignoreCase = true)
+                            }
+                        } else null
+                        val matchedNote = existingByUuid?.takeIf { !it.isExternalDocument } ?: existingByTitle
+
+                        if (matchedNote != null) {
+                            repository.updateNote(
+                                matchedNote.copy(
+                                    title = rawTitle,
+                                    content = cleanContent,
+                                    updatedAt = System.currentTimeMillis(),
+                                    isDeleted = false,
+                                    deletedAt = null
+                                )
+                            )
+                            if (existingCitraFile != null) {
+                                try {
+                                    android.media.MediaScannerConnection.scanFile(
+                                        context,
+                                        arrayOf(existingCitraFile.absolutePath),
+                                        arrayOf("text/markdown", "text/plain"),
+                                        null
+                                    )
+                                } catch (_: Exception) {}
+                            } else if (!isFromCitraDocs) {
+                                com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, rawTitle, cleanContent, uuid = matchedNote.uuid)
+                            }
                             importedNotesCount++
                         } else {
-                            val finalTitle = if (existingTitles.contains(rawTitle.lowercase())) {
-                                "$rawTitle (${System.currentTimeMillis().toString().takeLast(4)})"
-                            } else {
+                            val finalTitle = if (existingCitraFile != null || !existingTitles.contains(rawTitle.lowercase())) {
                                 rawTitle
+                            } else {
+                                "$rawTitle (${System.currentTimeMillis().toString().takeLast(4)})"
                             }
                             existingTitles.add(finalTitle.lowercase())
                             val newUuid = fileUuid ?: java.util.UUID.randomUUID().toString()
@@ -1557,7 +1590,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     updatedAt = System.currentTimeMillis()
                                 )
                             )
-                            com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, cleanContent, uuid = newUuid)
+                            if (existingCitraFile != null) {
+                                try {
+                                    android.media.MediaScannerConnection.scanFile(
+                                        context,
+                                        arrayOf(existingCitraFile.absolutePath),
+                                        arrayOf("text/markdown", "text/plain"),
+                                        null
+                                    )
+                                } catch (_: Exception) {}
+                            } else {
+                                com.example.util.CitraDocsFileManager.saveNoteMarkdown(context, finalTitle, cleanContent, uuid = newUuid)
+                            }
                             importedNotesCount++
                         }
                     } else {

@@ -196,6 +196,10 @@ fun ImageFullScreenCropRotateDialog(
                         // Save button (active if rotated or in crop mode)
                         Button(
                             onClick = {
+                                if (rotationDegrees == 0 && !isCropMode) {
+                                    onDismiss()
+                                    return@Button
+                                }
                                 val bmp = sourceBitmap ?: return@Button
                                 isProcessing = true
                                 coroutineScope.launch {

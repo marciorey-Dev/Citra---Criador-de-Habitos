@@ -456,6 +456,7 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
+                    contentWindowInsets = if (isNoteEditorOpen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                     topBar = {
                         val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
                                 currentScreen == Screen.Timer
@@ -1066,7 +1067,8 @@ private fun CitraTopOverflowMenuBox(
 
         DropdownMenu(
             expanded = showMenu,
-            onDismissRequest = onDismissMenu
+            onDismissRequest = onDismissMenu,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             DropdownMenuItem(
                 text = { Text("Configurações") },

@@ -202,6 +202,16 @@ object PaperNotePalette {
             } else Color(0x18000000).compositeOver(opt.primaryColor.copy(alpha = 0.22f))
         }
         val onBg = if (isDark) DarkTextPrimary else Slate900
+        val metaText = if (isDark) {
+            lerp(Color(0xFFF8FAFC), opt.darkFlap, 0.14f).copy(alpha = 0.90f)
+        } else {
+            lerp(Slate900, opt.primaryColor, 0.16f).copy(alpha = 0.88f)
+        }
+        val mutedIcon = if (isDark) {
+            lerp(Color(0xFFF1F5F9), opt.darkFlap, 0.18f).copy(alpha = 0.88f)
+        } else {
+            lerp(Slate900, opt.primaryColor, 0.18f).copy(alpha = 0.82f)
+        }
         val badgeBg = opt.primaryColor.copy(alpha = if (isDark) 0.25f else 0.15f)
         val badgeFg = if (isDark) opt.primaryColor.copy(alpha = 0.95f) else opt.primaryColor
 
@@ -212,6 +222,8 @@ object PaperNotePalette {
             borderColor = border,
             accentColor = opt.primaryColor,
             onBackgroundColor = onBg,
+            metaTextColor = metaText,
+            mutedIconColor = mutedIcon,
             badgeBg = badgeBg,
             badgeFg = badgeFg
         )
@@ -265,6 +277,8 @@ data class PaperNoteColors(
     val borderColor: Color,
     val accentColor: Color,
     val onBackgroundColor: Color,
+    val metaTextColor: Color,
+    val mutedIconColor: Color,
     val badgeBg: Color,
     val badgeFg: Color
 )

@@ -390,6 +390,7 @@ private fun DialogSoundRow(
                 DropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.heightIn(max = 280.dp)
                 ) {
                     SoundEffectsManager.allSounds.forEach { soundItem ->

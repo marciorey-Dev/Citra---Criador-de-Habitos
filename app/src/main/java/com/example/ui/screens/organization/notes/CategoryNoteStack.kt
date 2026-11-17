@@ -601,8 +601,8 @@ fun CategoryNoteStack(
                                         Text(
                                             text = dateText,
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = paperColors.onBackgroundColor.copy(alpha = 0.95f)
+                                            fontWeight = FontWeight.Bold,
+                                            color = paperColors.metaTextColor
                                         )
                                     }
 
@@ -617,7 +617,7 @@ fun CategoryNoteStack(
                                             Icon(
                                                 imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
                                                 contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                                tint = if (note.isPinned) paperColors.accentColor else paperColors.onBackgroundColor.copy(alpha = 0.45f),
+                                                tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }
@@ -629,7 +629,7 @@ fun CategoryNoteStack(
                                             Icon(
                                                 imageVector = if (onNoteMoreClick != null) Icons.Default.MoreVert else Icons.Default.DeleteOutline,
                                                 contentDescription = if (onNoteMoreClick != null) "Opções" else "Excluir",
-                                                tint = paperColors.onBackgroundColor.copy(alpha = 0.55f),
+                                                tint = paperColors.mutedIconColor,
                                                 modifier = Modifier.size(18.dp)
                                             )
                                         }

@@ -613,7 +613,8 @@ fun FinanceWalletsDialog(
                                                 }
                                                 DropdownMenu(
                                                     expanded = fromMenuExpanded,
-                                                    onDismissRequest = { fromMenuExpanded = false }
+                                                    onDismissRequest = { fromMenuExpanded = false },
+                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                                 ) {
                                                     wallets.forEach { w ->
                                                         DropdownMenuItem(
@@ -669,7 +670,8 @@ fun FinanceWalletsDialog(
                                                 }
                                                 DropdownMenu(
                                                     expanded = toMenuExpanded,
-                                                    onDismissRequest = { toMenuExpanded = false }
+                                                    onDismissRequest = { toMenuExpanded = false },
+                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                                 ) {
                                                     wallets.forEach { w ->
                                                         DropdownMenuItem(

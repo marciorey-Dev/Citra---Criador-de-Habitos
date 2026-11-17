@@ -316,7 +316,8 @@ fun FinancesScreen(
                                 }
                                 DropdownMenu(
                                     expanded = overflowMenuExpanded,
-                                    onDismissRequest = { overflowMenuExpanded = false }
+                                    onDismissRequest = { overflowMenuExpanded = false },
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                 ) {
                                     DropdownMenuItem(
                                         leadingIcon = { Icon(Icons.Default.NoteAdd, contentDescription = null) },
@@ -1563,7 +1564,8 @@ private fun FinanceEntryRowCard(
                 }
                 DropdownMenu(
                     expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
+                    onDismissRequest = { menuExpanded = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
                     DropdownMenuItem(
                         leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },

@@ -187,7 +187,8 @@ fun FullScreenBlockDialog(
 
                                 DropdownMenu(
                                     expanded = showLangPicker,
-                                    onDismissRequest = { showLangPicker = false }
+                                    onDismissRequest = { showLangPicker = false },
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                 ) {
                                     supportedLanguages.forEach { lang ->
                                         DropdownMenuItem(
@@ -616,7 +617,8 @@ fun ConvertChecklistToTaskDialog(
                     )
                     DropdownMenu(
                         expanded = showCategoryDropdown,
-                        onDismissRequest = { showCategoryDropdown = false }
+                        onDismissRequest = { showCategoryDropdown = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                     ) {
                         val allCats = if (categories.isEmpty()) listOf(Category(name = "Geral", emoji = "📁")) else categories
                         allCats.forEach { cat ->

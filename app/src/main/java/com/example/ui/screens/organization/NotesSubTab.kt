@@ -117,7 +117,11 @@ private fun categoryIconFor(category: String): ImageVector {
 private fun extractFirstImageUri(note: Note): String? {
     return remember(note.content) {
         val match = Regex("!\\[(?!audio:)(.*?)\\]\\((.*?)\\)").find(note.content)
-        match?.groupValues?.getOrNull(2)?.takeIf { it.isNotBlank() }
+        match?.groupValues?.getOrNull(2)?.trim()?.takeIf { url ->
+            url.isNotBlank() &&
+                !url.startsWith("http://", ignoreCase = true) &&
+                !url.startsWith("https://", ignoreCase = true)
+        }
     }
 }
 
@@ -828,7 +832,11 @@ fun NotesSubTab(
                             )
                         }
                     }
-                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ) {
                         Text(
                             text = "Ordenar por",
                             style = MaterialTheme.typography.labelSmall,
@@ -1867,7 +1875,7 @@ private fun NotesSpeedDialItem(
     ) {
         Surface(
             shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 4.dp,
             shadowElevation = 4.dp
         ) {
@@ -2187,7 +2195,7 @@ fun SquareNoteCard(
                                 Icon(
                                     imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                     contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                    tint = if (note.isPinned) paperColors.accentColor else MaterialTheme.colorScheme.outline.copy(alpha = 0.65f),
+                                    tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -2201,7 +2209,7 @@ fun SquareNoteCard(
                                 Icon(
                                     imageVector = Icons.Default.MoreVert,
                                     contentDescription = "Opções",
-                                    tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.75f),
+                                    tint = paperColors.mutedIconColor,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -2282,14 +2290,14 @@ fun SquareNoteCard(
                         Icon(
                             imageVector = Icons.Default.Schedule,
                             contentDescription = null,
-                            tint = paperColors.onBackgroundColor.copy(alpha = 0.6f),
+                            tint = paperColors.metaTextColor,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = dateText,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = paperColors.onBackgroundColor.copy(alpha = 0.65f)
+                            color = paperColors.metaTextColor
                         )
                     }
 
@@ -2452,7 +2460,7 @@ fun SmallSquareNoteCard(
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = "Opções",
-                            tint = paperColors.onBackgroundColor.copy(alpha = 0.65f),
+                            tint = paperColors.mutedIconColor,
                             modifier = Modifier.size(14.dp)
                         )
                     }
@@ -2493,7 +2501,7 @@ fun SmallSquareNoteCard(
                 text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Bold,
-                color = paperColors.onBackgroundColor.copy(alpha = 0.6f)
+                color = paperColors.metaTextColor
             )
         }
     }
@@ -2605,14 +2613,15 @@ fun DetailNoteCard(
                     Text(
                         text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
                         fontSize = 10.sp,
-                        color = paperColors.onBackgroundColor.copy(alpha = 0.65f)
+                        fontWeight = FontWeight.SemiBold,
+                        color = paperColors.metaTextColor
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
                         Icon(
                             imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                             contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                            tint = if (note.isPinned) paperColors.accentColor else paperColors.onBackgroundColor.copy(alpha = 0.55f),
+                            tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -2623,7 +2632,7 @@ fun DetailNoteCard(
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = "Opções",
-                            tint = paperColors.onBackgroundColor.copy(alpha = 0.65f),
+                            tint = paperColors.mutedIconColor,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -2814,7 +2823,7 @@ fun ListNoteCard(
                     Icon(
                         imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                         contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                        tint = if (note.isPinned) paperColors.accentColor else paperColors.onBackgroundColor.copy(alpha = 0.5f),
+                        tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -2826,7 +2835,7 @@ fun ListNoteCard(
                     Icon(
                         imageVector = Icons.Default.MoreVert,
                         contentDescription = "Opções",
-                        tint = paperColors.onBackgroundColor.copy(alpha = 0.55f),
+                        tint = paperColors.mutedIconColor,
                         modifier = Modifier.size(16.dp)
                     )
                 }

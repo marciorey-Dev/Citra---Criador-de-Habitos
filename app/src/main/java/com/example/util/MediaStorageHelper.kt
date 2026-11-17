@@ -4,9 +4,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaRecorder
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
@@ -14,6 +16,7 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.net.URLDecoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -21,6 +24,16 @@ import java.util.UUID
 
 object MediaStorageHelper {
     private const val TAG = "MediaStorageHelper"
+
+    private val CITRA_FOLDER_NAMES = setOf(
+        "citra",
+        "citra docs",
+        "citra pic",
+        "citra records",
+        "docs",
+        "pics",
+        "records"
+    )
 
     /**
      * Copies an image from a content Uri or stream into internal private storage
@@ -194,11 +207,199 @@ object MediaStorageHelper {
     }
 
     /**
+     * Checks whether a normalized path or folder chain points inside any standard Citra directory:
+     * Citra, Citra Docs (docs), Citra Pic (pics), or Citra Records (records).
+     */
+    fun isCitraFolderPath(rawPathOrRelative: String?): Boolean {
+        if (rawPathOrRelative.isNullOrBlank()) return false
+        val normalized = rawPathOrRelative.replace('\\', '/').trim()
+        val segments = normalized.split('/').filter { it.isNotBlank() }
+        if (segments.isEmpty()) return false
+        // Check directory segments (exclude the trailing file segment if it has an extension)
+        val dirSegments = if (segments.last().contains('.')) segments.dropLast(1) else segments
+        for (i in dirSegments.indices) {
+            val seg = dirSegments[i].lowercase(Locale.ROOT)
+            if (seg == "citra" || seg == "citra docs" || seg == "citra pic" || seg == "citra records") {
+                return true
+            }
+            if ((seg == "docs" || seg == "pics" || seg == "records") &&
+                i > 0 && dirSegments[i - 1].equals("citra", ignoreCase = true)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Extracts a relative path under primary external storage from SAF ExternalStorageProvider URIs
+     * (e.g. "primary:Pictures/Citra Pic/foto.jpg" -> "Pictures/Citra Pic/foto.jpg").
+     */
+    fun extractExternalStorageRelativePath(uriString: String): String? {
+        if (!uriString.startsWith("content://")) return null
+        return try {
+            val parsed = Uri.parse(uriString)
+            val docId = try {
+                DocumentsContract.getDocumentId(parsed)
+            } catch (_: Exception) {
+                val decoded = URLDecoder.decode(uriString, "UTF-8")
+                decoded.substringAfter("/document/", "")
+                    .substringBefore('?')
+                    .takeIf { it.isNotBlank() }
+            } ?: return null
+
+            when {
+                docId.startsWith("raw:", ignoreCase = true) -> docId.substring(4)
+                docId.startsWith("primary:", ignoreCase = true) -> docId.substringAfter("primary:")
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun getAllCitraDirectories(context: Context): List<File> {
+        val dirs = mutableListOf<File>()
+        try { dirs.add(getCitraPicFolder(context)) } catch (_: Exception) {}
+        try { dirs.add(getCitraRecordsFolder(context)) } catch (_: Exception) {}
+        try { dirs.addAll(CitraDocsFileManager.getAllDocsFolders(context)) } catch (_: Exception) {}
+        try {
+            val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            dirs.add(File(downloads, "Citra"))
+        } catch (_: Exception) {}
+        try {
+            val pubPictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            dirs.add(File(pubPictures, "Citra Pic"))
+        } catch (_: Exception) {}
+        try {
+            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)?.let {
+                dirs.add(File(it, "Citra Pic"))
+            }
+            dirs.add(File(context.filesDir, "Citra Pic"))
+            dirs.add(File(context.filesDir, "Citra Records"))
+            dirs.add(File(context.filesDir, "note_backgrounds"))
+        } catch (_: Exception) {}
+        return dirs.distinctBy { it.absolutePath }
+    }
+
+    /**
+     * Resolves an existing file if [source] already lives inside one of Citra's standard folders
+     * (Citra, Citra Docs, Citra Pic, Citra Records). Returns null if the source is external.
+     */
+    fun resolveExistingCitraFile(context: Context, source: String?): File? {
+        if (source.isNullOrBlank()) return null
+        val clean = source.trim()
+        if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+            return null
+        }
+
+        // 1. Direct file path or file:// URI
+        if (!clean.startsWith("content://")) {
+            val rawPath = if (clean.startsWith("file://")) {
+                Uri.parse(clean).path ?: clean.removePrefix("file://")
+            } else {
+                clean
+            }
+            if (rawPath.startsWith("/")) {
+                val candidate = File(rawPath)
+                if (candidate.exists() && candidate.isFile && candidate.canRead() && isCitraFolderPath(candidate.absolutePath)) {
+                    return candidate
+                }
+            }
+            return null
+        }
+
+        val uri = try { Uri.parse(clean) } catch (_: Exception) { return null }
+
+        // 2. ExternalStorage / Downloads SAF document URI
+        val extracted = extractExternalStorageRelativePath(clean)
+        if (!extracted.isNullOrBlank()) {
+            val candidate = if (extracted.startsWith("/")) {
+                File(extracted)
+            } else {
+                File(Environment.getExternalStorageDirectory(), extracted)
+            }
+            if (isCitraFolderPath(candidate.absolutePath) && candidate.exists() && candidate.isFile && candidate.canRead()) {
+                return candidate
+            }
+        }
+
+        // 3. Query MediaStore DATA / RELATIVE_PATH / DISPLAY_NAME / SIZE
+        var displayName: String? = null
+        var fileSize: Long = 0L
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val dataIdx = cursor.getColumnIndex("_data")
+                    if (dataIdx != -1) {
+                        val path = cursor.getString(dataIdx)
+                        if (!path.isNullOrBlank() && isCitraFolderPath(path)) {
+                            val f = File(path)
+                            if (f.exists() && f.isFile && f.canRead()) return f
+                        }
+                    }
+
+                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIdx != -1) {
+                        displayName = cursor.getString(nameIdx)
+                    }
+                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (sizeIdx != -1) {
+                        fileSize = cursor.getLong(sizeIdx)
+                    }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val relIdx = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                        val relPath = if (relIdx != -1) cursor.getString(relIdx) else null
+                        if (!relPath.isNullOrBlank() && !displayName.isNullOrBlank() && isCitraFolderPath(relPath)) {
+                            val candidate = File(Environment.getExternalStorageDirectory(), relPath.trimEnd('/') + "/" + displayName)
+                            if (candidate.exists() && candidate.isFile && candidate.canRead()) {
+                                return candidate
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 4. Photo Picker / virtual MediaStore URIs: match filename + size inside known Citra folders
+        val targetName = displayName?.takeIf { it.isNotBlank() }
+        if (targetName != null) {
+            for (dir in getAllCitraDirectories(context)) {
+                if (dir.exists() && dir.isDirectory) {
+                    val candidate = File(dir, targetName)
+                    if (candidate.exists() && candidate.isFile && candidate.canRead() && candidate.length() > 0L) {
+                        if (fileSize <= 0L || candidate.length() == fileSize) {
+                            return candidate
+                        }
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
      * Copies an imported note image into "Citra Pic" (under Android's Pictures directory)
      * and returns the exact absolute path so it can be stored directly in the note.
+     * If the image already resides inside Citra's folders, returns its existing path without duplicating.
      */
     fun saveNoteImage(context: Context, source: String): String? {
         return try {
+            val existingCitraFile = resolveExistingCitraFile(context, source)
+            if (existingCitraFile != null) {
+                try {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(existingCitraFile.absolutePath),
+                        arrayOf("image/*"),
+                        null
+                    )
+                } catch (_: Exception) {}
+                return existingCitraFile.absolutePath
+            }
+
             val dir = getCitraPicFolder(context)
             val extension = getExtension(context, source) ?: "jpg"
             val destFile = File(dir, "citra_pic_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
@@ -210,7 +411,7 @@ object MediaStorageHelper {
 
             // Notify MediaScanner so it is visible in Android gallery/file explorer
             try {
-                android.media.MediaScannerConnection.scanFile(
+                MediaScannerConnection.scanFile(
                     context,
                     arrayOf(destFile.absolutePath),
                     arrayOf("image/*"),
@@ -297,9 +498,23 @@ object MediaStorageHelper {
 
     /**
      * Saves an imported note audio file into "Citra Records" and returns its absolute path.
+     * If the audio already resides inside Citra's folders, returns its existing path without duplicating.
      */
     fun saveNoteAudio(context: Context, source: String): String? {
         return try {
+            val existingCitraFile = resolveExistingCitraFile(context, source)
+            if (existingCitraFile != null) {
+                try {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(existingCitraFile.absolutePath),
+                        arrayOf("audio/*"),
+                        null
+                    )
+                } catch (_: Exception) {}
+                return existingCitraFile.absolutePath
+            }
+
             val extension = getExtension(context, source) ?: "m4a"
             val targetDir = getCitraRecordsFolder(context)
             val destFile = File(targetDir, "audio_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.$extension")
@@ -310,7 +525,7 @@ object MediaStorageHelper {
             } ?: return null
 
             try {
-                android.media.MediaScannerConnection.scanFile(
+                MediaScannerConnection.scanFile(
                     context,
                     arrayOf(destFile.absolutePath),
                     arrayOf("audio/*"),
@@ -385,9 +600,14 @@ object MediaStorageHelper {
             val altAndMeta = match.groupValues[1]
             val url = match.groupValues[2].trim()
 
-            if (url.isNotBlank() && !url.contains(permanentStoragePrefix)) {
-                val persistentPath = saveNoteImage(context, url)
-                if (persistentPath != null) {
+            if (url.isNotBlank() &&
+                !url.startsWith("http://", ignoreCase = true) &&
+                !url.startsWith("https://", ignoreCase = true) &&
+                !url.contains(permanentStoragePrefix)
+            ) {
+                val existing = resolveExistingCitraFile(context, url)
+                val persistentPath = existing?.absolutePath ?: saveNoteImage(context, url)
+                if (persistentPath != null && persistentPath != url) {
                     val oldToken = match.value
                     val newToken = "![$altAndMeta]($persistentPath)"
                     processed = processed.replace(oldToken, newToken)
@@ -402,9 +622,14 @@ object MediaStorageHelper {
             val titleAndMeta = match.groupValues[2]
             val url = match.groupValues[3].trim()
 
-            if (url.isNotBlank() && !url.contains(permanentStoragePrefix)) {
-                val persistentPath = saveNoteAudio(context, url)
-                if (persistentPath != null) {
+            if (url.isNotBlank() &&
+                !url.startsWith("http://", ignoreCase = true) &&
+                !url.startsWith("https://", ignoreCase = true) &&
+                !url.contains(permanentStoragePrefix)
+            ) {
+                val existing = resolveExistingCitraFile(context, url)
+                val persistentPath = existing?.absolutePath ?: saveNoteAudio(context, url)
+                if (persistentPath != null && persistentPath != url) {
                     val oldToken = match.value
                     val prefix = if (isExclamation) "!" else ""
                     val newToken = "$prefix[audio:$titleAndMeta]($persistentPath)"

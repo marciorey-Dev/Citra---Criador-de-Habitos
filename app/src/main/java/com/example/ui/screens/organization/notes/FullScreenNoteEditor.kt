@@ -802,6 +802,7 @@ fun FullScreenNoteEditor(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = if (bgUri != null) Color.Black else MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -960,7 +961,8 @@ fun FullScreenNoteEditor(
 
                             DropdownMenu(
                                 expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
+                                onDismissRequest = { showMenu = false },
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                             ) {
                                 DropdownMenuItem(
                                     text = { Text(if (isPinned) "Desafixar nota" else "Fixar nota no topo") },
@@ -1132,6 +1134,7 @@ fun FullScreenNoteEditor(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .consumeWindowInsets(paddingValues)
         ) {
             // Background Image layer (if enabled)
             if (processedBackgroundBitmap != null) {
@@ -1174,10 +1177,12 @@ fun FullScreenNoteEditor(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .imePadding()
+                    .windowInsetsPadding(
+                        WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom)
+                    )
                     .verticalScroll(noteScrollState)
                     .padding(horizontal = 20.dp)
-                    .padding(top = 8.dp, bottom = 140.dp),
+                    .padding(top = 8.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (editorMode != NoteEditorMode.READING) {
@@ -1870,11 +1875,11 @@ fun FullScreenNoteEditor(
                 }
                 }
 
-                // Espaço vazio ajustado para rolagem (+4 parágrafos)
+                // Pequena margem final para rolagem confortável sem espaço excessivo
                 Spacer(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(72.dp)
                 )
             }
 
@@ -1907,7 +1912,8 @@ fun FullScreenNoteEditor(
                         }
                         DropdownMenu(
                             expanded = showTitlesMenu,
-                            onDismissRequest = { showTitlesMenu = false }
+                            onDismissRequest = { showTitlesMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         ) {
                             DropdownMenuItem(
                                 text = { Text("H1 - Título Principal", fontSize = 18.sp, fontWeight = FontWeight.Bold) },
@@ -2044,7 +2050,11 @@ fun FullScreenNoteEditor(
                         ToolbarToolButton(label = "Callout", icon = Icons.Default.Announcement) {
                             showCalloutMenu = true
                         }
-                        DropdownMenu(expanded = showCalloutMenu, onDismissRequest = { showCalloutMenu = false }) {
+                        DropdownMenu(
+                            expanded = showCalloutMenu,
+                            onDismissRequest = { showCalloutMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
                             DropdownMenuItem(text = { Text("ℹ️ Info") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "INFO", "Informação...") })
                             DropdownMenuItem(text = { Text("💡 Dica") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "TIP", "Dica importante...") })
                             DropdownMenuItem(text = { Text("⚠️ Aviso") }, onClick = { showCalloutMenu = false; pushHistory(); editorValue = ObsidianMarkdownEngine.wrapSelectionInCallout(editorValue, "WARNING", "Atenção...") })
@@ -2084,7 +2094,8 @@ fun FullScreenNoteEditor(
                         }
                         DropdownMenu(
                             expanded = showPaginationMenu,
-                            onDismissRequest = { showPaginationMenu = false }
+                            onDismissRequest = { showPaginationMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Nenhuma (Sem numeração)") },
@@ -2146,12 +2157,12 @@ fun FullScreenNoteEditor(
 
                 Surface(
                     shape = toolbarShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     tonalElevation = 6.dp,
                     shadowElevation = 6.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f), toolbarShape)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), toolbarShape)
                 ) {
                     if (isToolbarMinimized) {
                         Row(
@@ -2193,11 +2204,11 @@ fun FullScreenNoteEditor(
                                 AnimatedVisibility(visible = showAdvancedToolbar) {
                                     Surface(
                                         shape = RoundedCornerShape(16.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                         tonalElevation = 4.dp,
                                         modifier = Modifier
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
-                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                                     ) {
                                         Row(
                                             modifier = Modifier
@@ -2312,7 +2323,9 @@ fun FullScreenNoteEditor(
                     shadowElevation = 8.dp,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .imePadding()
+                        .windowInsetsPadding(
+                            WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom)
+                        )
                         .padding(bottom = recordHudBottomPadding)
                         .zIndex(12f)
                 ) {

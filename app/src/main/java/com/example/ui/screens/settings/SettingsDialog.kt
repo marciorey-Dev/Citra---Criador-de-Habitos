@@ -1415,6 +1415,7 @@ fun NotificationSoundSelector(
                 DropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.heightIn(max = 320.dp)
                 ) {
                     soundOptions.forEach { sound ->
