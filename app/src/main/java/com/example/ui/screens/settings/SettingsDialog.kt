@@ -29,8 +29,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.NotificationSettings
 import com.example.ui.MainViewModel
+import com.example.ui.components.AbsoluteClockDiagnosticsCard
 import com.example.ui.theme.ThemeAccent
-import com.example.notifications.NotificationHelper
 import com.example.util.AmbientBreakMusicManager
 import com.example.util.SoundEffectsManager
 
@@ -675,68 +675,7 @@ fun SettingsDialog(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        val isIgnoringBattery = remember { NotificationHelper.isIgnoringBatteryOptimizations(context) }
-                        val canExactAlarms = remember { NotificationHelper.canScheduleExactAlarms(context) }
-
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        ) {
-                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.AlarmOn,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Garantia de Disparo Contínuo",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                                Text(
-                                    text = "O Android desativa tarefas em segundo plano e bloqueia alarmes comuns após longas horas de repouso (Doze Mode). O Citra utiliza AlarmClock e WakeLock de alta precisão para garantir que tarefas e hábitos toquem pontualmente.",
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-
-                                Button(
-                                    onClick = { NotificationHelper.requestIgnoreBatteryOptimizations(context) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isIgnoringBattery) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary,
-                                        contentColor = if (isIgnoringBattery) MaterialTheme.colorScheme.primary else Color.White
-                                    )
-                                ) {
-                                    Icon(
-                                        if (isIgnoringBattery) Icons.Default.CheckCircle else Icons.Default.BatteryChargingFull,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        if (isIgnoringBattery) "Isenção de Bateria Concedida" else "Ignorar Otimização de Bateria"
-                                    )
-                                }
-
-                                if (!canExactAlarms) {
-                                    OutlinedButton(
-                                        onClick = { NotificationHelper.requestExactAlarmPermission(context) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Autorizar Alarmes Exatos")
-                                    }
-                                }
-                            }
-                        }
+                        AbsoluteClockDiagnosticsCard()
                     }
 
                     // 6. NOTAS & ANOTAÇÕES (MODO PADRÃO DE ABERTURA)
@@ -1266,9 +1205,15 @@ fun NotificationSoundSelector(
     var expanded by remember { mutableStateOf(false) }
 
     val audioPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
             SoundEffectsManager.stopPreview()
             onCustomAudioSelected(uri.toString())
         }
@@ -1464,7 +1409,7 @@ fun NotificationSoundSelector(
             TextButton(
                 onClick = {
                     SoundEffectsManager.stopPreview()
-                    audioPicker.launch("audio/*")
+                    audioPicker.launch(arrayOf("audio/*"))
                 },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
             ) {

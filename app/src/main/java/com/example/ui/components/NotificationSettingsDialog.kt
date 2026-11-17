@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.NotificationSettings
-import com.example.notifications.NotificationHelper
 import com.example.util.SoundEffectsManager
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,9 +42,6 @@ fun NotificationSettingsDialog(
     var notifyAchievements by remember { mutableStateOf(currentSettings.notifyAchievements) }
     var notifyMissedHabits by remember { mutableStateOf(currentSettings.notifyMissedHabits) }
     var overrideSilentMode by remember { mutableStateOf(currentSettings.overrideSilentMode) }
-
-    val isIgnoringBattery = remember { NotificationHelper.isIgnoringBatteryOptimizations(context) }
-    val canExactAlarms = remember { NotificationHelper.canScheduleExactAlarms(context) }
 
     Dialog(
         onDismissRequest = {
@@ -102,50 +98,7 @@ fun NotificationSettingsDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Reliability Card
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AlarmOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Garantia de Disparo na Tela Bloqueada", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                            Text(
-                                "O Citra usa AlarmClock e WakeLock com permissão de tela cheia para furar a economia de bateria e tocar pontualmente.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            Button(
-                                onClick = { NotificationHelper.requestIgnoreBatteryOptimizations(context) },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isIgnoringBattery) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary,
-                                    contentColor = if (isIgnoringBattery) MaterialTheme.colorScheme.primary else Color.White
-                                )
-                            ) {
-                                Icon(if (isIgnoringBattery) Icons.Default.CheckCircle else Icons.Default.BatteryChargingFull, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (isIgnoringBattery) "Isenção de Bateria Concedida" else "Ignorar Otimização de Bateria", fontSize = 12.sp)
-                            }
-
-                            if (!canExactAlarms) {
-                                OutlinedButton(
-                                    onClick = { NotificationHelper.requestExactAlarmPermission(context) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(10.dp)
-                                ) {
-                                    Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Autorizar Alarmes Exatos", fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
+                    AbsoluteClockDiagnosticsCard()
 
                     // Sound Selectors
                     Text("Toques do Aplicativo", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
@@ -285,7 +238,7 @@ private fun DialogSoundRow(
     var expanded by remember { mutableStateOf(false) }
 
     val audioPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             try {
@@ -422,7 +375,7 @@ private fun DialogSoundRow(
             TextButton(
                 onClick = {
                     SoundEffectsManager.stopPreview()
-                    audioPicker.launch("audio/*")
+                    audioPicker.launch(arrayOf("audio/*"))
                 },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
             ) {

@@ -50,9 +50,8 @@ class PreferencesManager(private val context: Context) {
     private val _keepScreenOn = MutableStateFlow(prefs.getBoolean("keep_screen_on", true))
     val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
 
-    // Notification settings
-    private val _settings = MutableStateFlow(loadSettings())
-    val settings: StateFlow<NotificationSettings> = _settings.asStateFlow()
+    // Notification settings (backed by process-wide shared StateFlow)
+    val settings: StateFlow<NotificationSettings> get() = sharedSettings.asStateFlow()
 
     private val _hasSeenTutorial = MutableStateFlow(prefs.getBoolean("has_seen_tutorial", true))
     val hasSeenTutorial: StateFlow<Boolean> = _hasSeenTutorial.asStateFlow()
@@ -86,9 +85,31 @@ class PreferencesManager(private val context: Context) {
     private val _appBgBrightness = MutableStateFlow(prefs.getFloat("app_bg_brightness", 0.6f))
     val appBgBrightness: StateFlow<Float> = _appBgBrightness.asStateFlow()
 
-    // Timer Citra Physics Balls (JSON array of diameters/durations)
-    private val _citraTimerBallsJson = MutableStateFlow(prefs.getString("citra_timer_balls_json", "[]") ?: "[]")
-    val citraTimerBallsJson: StateFlow<String> = _citraTimerBallsJson.asStateFlow()
+    init {
+        ensureReactiveStoreSynced()
+    }
+
+    // Timer Citra Physics Balls (JSON array of diameters/durations) backed by process-wide shared StateFlow
+    val citraTimerBallsJson: StateFlow<String> get() = sharedCitraTimerBallsJson.asStateFlow()
+
+    // Pending integrated in-screen celebration after focus finishes (foreground OR background/lockscreen)
+    val pendingTimerCelebration: StateFlow<PendingTimerCelebration?> get() = sharedPendingCelebration.asStateFlow()
+
+    // Increments whenever timer snapshot changes from UI or background Receiver/Service/Worker
+    val timerSnapshotRevision: StateFlow<Long> get() = sharedTimerSnapshotRevision.asStateFlow()
+
+    private fun ensureReactiveStoreSynced() {
+        synchronized(reactiveStoreLock) {
+            val id = System.identityHashCode(prefs)
+            if (boundPrefsIdentity != id) {
+                boundPrefsIdentity = id
+                sharedCitraTimerBallsJson.value = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
+                sharedPendingCelebration.value = loadPendingTimerCelebrationInternal()
+                sharedSettings.value = loadSettings()
+                sharedTimerSnapshotRevision.value = 0L
+            }
+        }
+    }
 
     // Timer Behavior Preferences: continuous cycles, dial tap to pause/resume, horizontal swipe navigation
     private val _timerContinuousMode = MutableStateFlow(prefs.getBoolean("timer_continuous_mode", false))
@@ -246,55 +267,62 @@ class PreferencesManager(private val context: Context) {
 
     fun saveCitraTimerBallsJson(json: String) {
         prefs.edit().putString("citra_timer_balls_json", json).apply()
-        _citraTimerBallsJson.value = json
+        sharedCitraTimerBallsJson.value = json
     }
 
-    fun addCitraTimerBall(durationMinutes: Int, sessionKeyMillis: Long = 0L) {
+    fun addCitraTimerBall(
+        durationMinutes: Int,
+        sessionKeyMillis: Long = 0L,
+        sessionToken: String = ""
+    ) {
         val safeMins = durationMinutes.coerceIn(1, 180)
         synchronized(citraBallLock) {
             val now = System.currentTimeMillis()
+            val lastToken = prefs.getString("last_citra_ball_token", "") ?: ""
             val lastSessionKey = prefs.getLong("last_citra_ball_session_key", 0L)
-            val lastAddedAt = prefs.getLong("last_citra_ball_added_at", 0L)
+            if (sessionToken.isNotBlank() && lastToken == sessionToken) {
+                return
+            }
             if (sessionKeyMillis > 0L && lastSessionKey == sessionKeyMillis) {
                 return
             }
-            if (now - lastAddedAt in 0L until 20_000L) {
-                return
-            }
-            try {
+            val updated = try {
                 val current = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
                 val arr = org.json.JSONArray(current)
                 arr.put(safeMins)
-                val updated = arr.toString()
-                prefs.edit()
-                    .putString("citra_timer_balls_json", updated)
-                    .putLong("last_citra_ball_session_key", sessionKeyMillis)
-                    .putLong("last_citra_ball_added_at", now)
-                    .commit()
-                _citraTimerBallsJson.value = updated
+                arr.toString()
             } catch (_: Exception) {
-                val arr = org.json.JSONArray().apply { put(safeMins) }
-                val updated = arr.toString()
-                prefs.edit()
-                    .putString("citra_timer_balls_json", updated)
-                    .putLong("last_citra_ball_session_key", sessionKeyMillis)
-                    .putLong("last_citra_ball_added_at", now)
-                    .commit()
-                _citraTimerBallsJson.value = updated
+                org.json.JSONArray().apply { put(safeMins) }.toString()
             }
+            prefs.edit()
+                .putString("citra_timer_balls_json", updated)
+                .putString("last_citra_ball_token", sessionToken)
+                .putLong("last_citra_ball_session_key", sessionKeyMillis)
+                .putLong("last_citra_ball_added_at", now)
+                .commit()
+            sharedCitraTimerBallsJson.value = updated
         }
     }
 
     fun clearCitraTimerBalls() {
         prefs.edit().putString("citra_timer_balls_json", "[]").commit()
-        _citraTimerBallsJson.value = "[]"
+        sharedCitraTimerBallsJson.value = "[]"
     }
 
     fun refreshCitraTimerBalls() {
         val current = prefs.getString("citra_timer_balls_json", "[]") ?: "[]"
-        if (_citraTimerBallsJson.value != current) {
-            _citraTimerBallsJson.value = current
+        if (sharedCitraTimerBallsJson.value != current) {
+            sharedCitraTimerBallsJson.value = current
         }
+        val celeb = loadPendingTimerCelebrationInternal()
+        if (sharedPendingCelebration.value != celeb) {
+            sharedPendingCelebration.value = celeb
+        }
+    }
+
+    fun reloadReactiveTimerState() {
+        refreshCitraTimerBalls()
+        sharedTimerSnapshotRevision.value = sharedTimerSnapshotRevision.value + 1L
     }
 
     fun setOnboardingCompleted(completed: Boolean = true) {
@@ -399,7 +427,7 @@ class PreferencesManager(private val context: Context) {
     }
 
     fun exportPreferencesMap(): Map<String, Any> {
-        val s = _settings.value
+        val s = sharedSettings.value
         val result = linkedMapOf<String, Any>(
             "theme_mode" to (prefs.getString("theme_mode", "SYSTEM") ?: "SYSTEM"),
             "theme_accent" to _themeAccent.value.name,
@@ -432,7 +460,7 @@ class PreferencesManager(private val context: Context) {
             "default_note_open_mode" to _defaultNoteOpenMode.value,
             "last_note_editor_mode" to getLastNoteEditorMode(),
             "toolbar_items_order" to getToolbarOrder().joinToString(","),
-            "citra_timer_balls_json" to _citraTimerBallsJson.value,
+            "citra_timer_balls_json" to citraTimerBallsJson.value,
             "recent_external_docs_json" to (prefs.getString("recent_external_docs_json", "[]") ?: "[]"),
             "has_completed_onboarding" to _hasCompletedOnboarding.value,
             "user_display_name" to _userDisplayName.value,
@@ -533,7 +561,7 @@ class PreferencesManager(private val context: Context) {
         }
         (map["citra_timer_balls_json"] as? String)?.takeIf { it.isNotBlank() }?.let {
             editor.putString("citra_timer_balls_json", it)
-            _citraTimerBallsJson.value = it
+            sharedCitraTimerBallsJson.value = it
         }
         (map["recent_external_docs_json"] as? String)?.takeIf { it.isNotBlank() }?.let {
             editor.putString("recent_external_docs_json", it)
@@ -623,7 +651,7 @@ class PreferencesManager(private val context: Context) {
         }
 
         // Standard notification and sound effects settings
-        val curSettings = _settings.value
+        val curSettings = sharedSettings.value
         val newSettings = curSettings.copy(
             taskSound = (map["task_sound"] as? String) ?: curSettings.taskSound,
             taskSoundUri = (map["task_sound_uri"] as? String) ?: curSettings.taskSoundUri,
@@ -689,7 +717,7 @@ class PreferencesManager(private val context: Context) {
             putBoolean("override_silent_mode", newSettings.overrideSilentMode)
             apply()
         }
-        _settings.value = newSettings
+        sharedSettings.value = newSettings
         try {
             com.example.notifications.NotificationHelper.prewarmChannelsForNewSettings(context, newSettings)
         } catch (_: Exception) {}
@@ -748,13 +776,29 @@ class PreferencesManager(private val context: Context) {
                 putString("timer_category", snapshot.selectedCategory)
                 if (snapshot.linkedTaskId != null) putLong("timer_linked_task", snapshot.linkedTaskId)
                 else remove("timer_linked_task")
+                if (!snapshot.linkedTaskTitle.isNullOrBlank()) putString("timer_linked_task_title", snapshot.linkedTaskTitle)
+                else remove("timer_linked_task_title")
+                if (snapshot.linkedHabitId != null) putLong("timer_linked_habit", snapshot.linkedHabitId)
+                else remove("timer_linked_habit")
+                if (!snapshot.linkedHabitTitle.isNullOrBlank()) putString("timer_linked_habit_title", snapshot.linkedHabitTitle)
+                else remove("timer_linked_habit_title")
                 putLong("timer_last_ts", snapshot.lastTimestamp)
                 putLong("timer_target_end_ts", snapshot.targetEndTimeMillis)
                 putBoolean("timer_is_stopwatch", snapshot.isStopwatchMode)
                 putLong("timer_stopwatch_start_ts", snapshot.stopwatchStartTimeMillis)
                 putInt("timer_stopwatch_accum_secs", snapshot.stopwatchAccumulatedSeconds)
+                putString("timer_session_token", snapshot.sessionToken)
+                putBoolean("timer_completed_processed", snapshot.isCompletedProcessed)
                 commit()
             }
+            com.example.notifications.DirectBootAlarmStore.saveTimerSlot(
+                context = context,
+                isRunning = snapshot.isRunning && !snapshot.isStopwatchMode && snapshot.targetEndTimeMillis > 0L,
+                targetEndTimeMillis = snapshot.targetEndTimeMillis,
+                phaseName = snapshot.phaseName,
+                sessionToken = snapshot.sessionToken
+            )
+            sharedTimerSnapshotRevision.value = sharedTimerSnapshotRevision.value + 1L
         }
     }
 
@@ -762,6 +806,7 @@ class PreferencesManager(private val context: Context) {
         synchronized(timerSnapshotLock) {
             if (!prefs.contains("timer_rem_secs") && !prefs.contains("timer_is_stopwatch")) return null
             val linkedTask = if (prefs.contains("timer_linked_task")) prefs.getLong("timer_linked_task", 0L) else null
+            val linkedHabit = if (prefs.contains("timer_linked_habit")) prefs.getLong("timer_linked_habit", 0L) else null
             return SavedTimerSnapshot(
                 focusMinutes = prefs.getInt("timer_focus_mins", 15),
                 breakMinutes = prefs.getInt("timer_break_mins", 5),
@@ -773,32 +818,49 @@ class PreferencesManager(private val context: Context) {
                 isPaused = prefs.getBoolean("timer_paused", false),
                 selectedCategory = prefs.getString("timer_category", "Estudos") ?: "Estudos",
                 linkedTaskId = linkedTask,
+                linkedTaskTitle = prefs.getString("timer_linked_task_title", null),
+                linkedHabitId = linkedHabit,
+                linkedHabitTitle = prefs.getString("timer_linked_habit_title", null),
                 lastTimestamp = prefs.getLong("timer_last_ts", 0L),
                 targetEndTimeMillis = prefs.getLong("timer_target_end_ts", 0L),
                 isStopwatchMode = prefs.getBoolean("timer_is_stopwatch", false),
                 stopwatchStartTimeMillis = prefs.getLong("timer_stopwatch_start_ts", 0L),
-                stopwatchAccumulatedSeconds = prefs.getInt("timer_stopwatch_accum_secs", 0)
+                stopwatchAccumulatedSeconds = prefs.getInt("timer_stopwatch_accum_secs", 0),
+                sessionToken = prefs.getString("timer_session_token", "") ?: "",
+                isCompletedProcessed = prefs.getBoolean("timer_completed_processed", false)
             )
         }
     }
 
     /**
-     * Atomically claims completion of a FOCUS phase for [targetEndTimeMillis] so that
-     * concurrent AlarmReceiver and foreground/onResume ViewModel checks never record
-     * the same FocusSession twice in Room or double stats.
+     * Atomically claims completion of a FOCUS phase for [sessionToken] / [targetEndTimeMillis] so that
+     * concurrent AlarmReceiver, ForegroundService, BootReceiver, and ViewModel checks NEVER record
+     * the same FocusSession twice in Room or double Citra balls.
      */
     fun tryClaimFocusSessionCompletion(
         targetEndTimeMillis: Long,
-        nextBreakSeconds: Int
+        nextBreakSeconds: Int,
+        sessionToken: String = "",
+        celebrationTitle: String = "Sessão Concluída!",
+        completedFocusMinutes: Int = 15,
+        completedCycle: Int = 1,
+        totalCycles: Int = 1
     ): Boolean {
         synchronized(focusClaimLock) {
             val now = System.currentTimeMillis()
+            val lastClaimedToken = prefs.getString("last_claimed_focus_token", "") ?: ""
             val lastClaimedTarget = prefs.getLong("last_claimed_focus_target_ms", 0L)
             val lastClaimedAt = prefs.getLong("last_claimed_focus_at_ms", 0L)
             val snapshotTarget = prefs.getLong("timer_target_end_ts", 0L)
+            val snapshotToken = prefs.getString("timer_session_token", "") ?: ""
+            val snapshotProcessed = prefs.getBoolean("timer_completed_processed", false)
             val currentPhase = prefs.getString("timer_phase", "FOCUS") ?: "FOCUS"
 
+            val effectiveToken = sessionToken.ifBlank { snapshotToken }
             val effectiveKey = if (targetEndTimeMillis > 0L) targetEndTimeMillis else snapshotTarget
+
+            if (effectiveToken.isNotBlank() && effectiveToken == lastClaimedToken) return false
+            if (snapshotProcessed) return false
             if (effectiveKey > 0L) {
                 if (effectiveKey == lastClaimedTarget) return false
             } else {
@@ -810,18 +872,203 @@ class PreferencesManager(private val context: Context) {
                 return false
             }
 
+            val finalBreakMins = (nextBreakSeconds / 60).coerceAtLeast(1)
+            val celebToken = effectiveToken.ifBlank { "focus_${effectiveKey}_${now}" }
+
             prefs.edit().apply {
+                putString("last_claimed_focus_token", celebToken)
                 putLong("last_claimed_focus_target_ms", effectiveKey)
                 putLong("last_claimed_focus_at_ms", now)
+                putBoolean("timer_completed_processed", true)
                 putString("timer_phase", "BREAK")
                 putInt("timer_rem_secs", nextBreakSeconds.coerceAtLeast(0))
                 putBoolean("timer_running", false)
                 putBoolean("timer_paused", false)
                 putLong("timer_target_end_ts", 0L)
                 putLong("timer_last_ts", now)
+                putString("timer_session_token", "")
+
+                putBoolean("pending_celebration_active", true)
+                putString("pending_celebration_token", celebToken)
+                putString("pending_celebration_title", celebrationTitle)
+                putInt("pending_celebration_focus_mins", completedFocusMinutes)
+                putInt("pending_celebration_cycle", completedCycle)
+                putInt("pending_celebration_total_cycles", totalCycles)
+                putInt("pending_celebration_break_mins", finalBreakMins)
+                putBoolean("pending_celebration_all_done", false)
                 commit()
             }
+
+            com.example.notifications.DirectBootAlarmStore.clearTimerSlot(context)
+            sharedPendingCelebration.value = PendingTimerCelebration(
+                sessionToken = celebToken,
+                title = celebrationTitle,
+                completedFocusMinutes = completedFocusMinutes,
+                completedCycle = completedCycle,
+                totalCycles = totalCycles,
+                breakMinutes = finalBreakMins,
+                isAllCyclesCompleted = false
+            )
+            sharedTimerSnapshotRevision.value = sharedTimerSnapshotRevision.value + 1L
             return true
+        }
+    }
+
+    /**
+     * Atomically claims completion of a BREAK phase so UI/Receiver/Service never advance cycles twice.
+     */
+    fun tryClaimBreakCompletion(
+        targetEndTimeMillis: Long,
+        sessionToken: String = "",
+        nextCycle: Int,
+        totalCycles: Int,
+        nextFocusSeconds: Int
+    ): Boolean {
+        synchronized(focusClaimLock) {
+            val now = System.currentTimeMillis()
+            val lastClaimedBreakToken = prefs.getString("last_claimed_break_token", "") ?: ""
+            val lastClaimedBreakTarget = prefs.getLong("last_claimed_break_target_ms", 0L)
+            val snapshotToken = prefs.getString("timer_session_token", "") ?: ""
+            val snapshotTarget = prefs.getLong("timer_target_end_ts", 0L)
+            val currentPhase = prefs.getString("timer_phase", "FOCUS") ?: "FOCUS"
+
+            if (prefs.contains("timer_phase") && currentPhase != "BREAK") return false
+            val effectiveToken = sessionToken.ifBlank { snapshotToken }
+            val effectiveKey = if (targetEndTimeMillis > 0L) targetEndTimeMillis else snapshotTarget
+
+            if (effectiveToken.isNotBlank() && effectiveToken == lastClaimedBreakToken) return false
+            if (effectiveKey > 0L && effectiveKey == lastClaimedBreakTarget) return false
+
+            val finalToken = effectiveToken.ifBlank { "break_${effectiveKey}_$now" }
+            val hasMoreCycles = nextCycle <= totalCycles
+
+            prefs.edit().apply {
+                putString("last_claimed_break_token", finalToken)
+                putLong("last_claimed_break_target_ms", effectiveKey)
+                putBoolean("timer_completed_processed", true)
+                putString("timer_phase", "FOCUS")
+                putInt("timer_current_cycle", if (hasMoreCycles) nextCycle else 1)
+                putInt("timer_rem_secs", nextFocusSeconds.coerceAtLeast(60))
+                putBoolean("timer_running", false)
+                putBoolean("timer_paused", false)
+                putLong("timer_target_end_ts", 0L)
+                putLong("timer_last_ts", now)
+                putString("timer_session_token", "")
+                commit()
+            }
+            com.example.notifications.DirectBootAlarmStore.clearTimerSlot(context)
+            sharedTimerSnapshotRevision.value = sharedTimerSnapshotRevision.value + 1L
+            return true
+        }
+    }
+
+    private fun loadPendingTimerCelebrationInternal(): PendingTimerCelebration? {
+        if (!prefs.getBoolean("pending_celebration_active", false)) return null
+        return PendingTimerCelebration(
+            sessionToken = prefs.getString("pending_celebration_token", "") ?: "",
+            title = prefs.getString("pending_celebration_title", "Sessão Concluída!") ?: "Sessão Concluída!",
+            completedFocusMinutes = prefs.getInt("pending_celebration_focus_mins", 15),
+            completedCycle = prefs.getInt("pending_celebration_cycle", 1),
+            totalCycles = prefs.getInt("pending_celebration_total_cycles", 1),
+            breakMinutes = prefs.getInt("pending_celebration_break_mins", 5),
+            isAllCyclesCompleted = prefs.getBoolean("pending_celebration_all_done", false)
+        )
+    }
+
+    fun loadPendingTimerCelebration(): PendingTimerCelebration? {
+        synchronized(focusClaimLock) {
+            return loadPendingTimerCelebrationInternal()
+        }
+    }
+
+    fun clearPendingTimerCelebration() {
+        synchronized(focusClaimLock) {
+            prefs.edit().apply {
+                putBoolean("pending_celebration_active", false)
+                remove("pending_celebration_token")
+                remove("pending_celebration_title")
+                remove("pending_celebration_focus_mins")
+                remove("pending_celebration_cycle")
+                remove("pending_celebration_total_cycles")
+                remove("pending_celebration_break_mins")
+                remove("pending_celebration_all_done")
+                commit()
+            }
+            sharedPendingCelebration.value = null
+        }
+    }
+
+    fun savePendingSnooze(entityType: String, entityId: Long, title: String, triggerTime: Long, soundUri: String) {
+        synchronized(snoozeLock) {
+            try {
+                val arr = org.json.JSONArray(prefs.getString("pending_snoozes_json", "[]") ?: "[]")
+                val out = org.json.JSONArray()
+                val now = System.currentTimeMillis()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val trig = obj.optLong("triggerTime", 0L)
+                    val same = obj.optString("type") == entityType && obj.optLong("entityId") == entityId
+                    if (!same && trig > now - 60_000L) {
+                        out.put(obj)
+                    }
+                }
+                out.put(
+                    org.json.JSONObject().apply {
+                        put("type", entityType)
+                        put("entityId", entityId)
+                        put("title", title)
+                        put("triggerTime", triggerTime)
+                        put("soundUri", soundUri)
+                    }
+                )
+                prefs.edit().putString("pending_snoozes_json", out.toString()).commit()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun getPendingSnoozes(): List<PendingSnoozeEntry> {
+        synchronized(snoozeLock) {
+            val raw = prefs.getString("pending_snoozes_json", "[]") ?: "[]"
+            val now = System.currentTimeMillis()
+            val list = mutableListOf<PendingSnoozeEntry>()
+            val validArr = org.json.JSONArray()
+            try {
+                val arr = org.json.JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val trigger = obj.optLong("triggerTime", 0L)
+                    if (trigger > now) {
+                        val entry = PendingSnoozeEntry(
+                            type = obj.optString("type", "task"),
+                            entityId = obj.optLong("entityId", -1L),
+                            title = obj.optString("title", "Citra"),
+                            triggerTime = trigger,
+                            soundUri = obj.optString("soundUri", "")
+                        )
+                        list.add(entry)
+                        validArr.put(obj)
+                    }
+                }
+                if (validArr.length() != arr.length()) {
+                    prefs.edit().putString("pending_snoozes_json", validArr.toString()).apply()
+                }
+            } catch (_: Exception) {}
+            return list
+        }
+    }
+
+    fun removePendingSnooze(entityType: String, entityId: Long) {
+        synchronized(snoozeLock) {
+            try {
+                val arr = org.json.JSONArray(prefs.getString("pending_snoozes_json", "[]") ?: "[]")
+                val out = org.json.JSONArray()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val same = obj.optString("type") == entityType && obj.optLong("entityId") == entityId
+                    if (!same) out.put(obj)
+                }
+                prefs.edit().putString("pending_snoozes_json", out.toString()).commit()
+            } catch (_: Exception) {}
         }
     }
 
@@ -838,13 +1085,20 @@ class PreferencesManager(private val context: Context) {
                 remove("timer_paused")
                 remove("timer_category")
                 remove("timer_linked_task")
+                remove("timer_linked_task_title")
+                remove("timer_linked_habit")
+                remove("timer_linked_habit_title")
                 remove("timer_last_ts")
                 remove("timer_target_end_ts")
                 remove("timer_is_stopwatch")
                 remove("timer_stopwatch_start_ts")
                 remove("timer_stopwatch_accum_secs")
+                remove("timer_session_token")
+                remove("timer_completed_processed")
                 commit()
             }
+            com.example.notifications.DirectBootAlarmStore.clearTimerSlot(context)
+            sharedTimerSnapshotRevision.value = sharedTimerSnapshotRevision.value + 1L
         }
     }
 
@@ -1087,6 +1341,16 @@ class PreferencesManager(private val context: Context) {
         private val focusClaimLock = Any()
         private val habitRewardLock = Any()
         private val recentExternalDocsLock = Any()
+        private val snoozeLock = Any()
+        private val reactiveStoreLock = Any()
+
+        @Volatile
+        private var boundPrefsIdentity: Int = 0
+        private val sharedCitraTimerBallsJson = MutableStateFlow("[]")
+        private val sharedPendingCelebration = MutableStateFlow<PendingTimerCelebration?>(null)
+        private val sharedTimerSnapshotRevision = MutableStateFlow(0L)
+        private val sharedSettings = MutableStateFlow(NotificationSettings())
+
         val DEFAULT_TOOLBAR_ORDER = listOf(
             // Primeiro módulo (exatamente os 13 símbolos permitidos no topo por padrão):
             "bold", "italic", "inline_code", "titles", "checklist", "list",
@@ -1099,6 +1363,24 @@ class PreferencesManager(private val context: Context) {
     }
 }
 
+data class PendingTimerCelebration(
+    val sessionToken: String,
+    val title: String,
+    val completedFocusMinutes: Int,
+    val completedCycle: Int,
+    val totalCycles: Int,
+    val breakMinutes: Int,
+    val isAllCyclesCompleted: Boolean = false
+)
+
+data class PendingSnoozeEntry(
+    val type: String,
+    val entityId: Long,
+    val title: String,
+    val triggerTime: Long,
+    val soundUri: String
+)
+
 data class SavedTimerSnapshot(
     val focusMinutes: Int = 15,
     val breakMinutes: Int = 5,
@@ -1110,11 +1392,16 @@ data class SavedTimerSnapshot(
     val isPaused: Boolean = false,
     val selectedCategory: String = "Estudos",
     val linkedTaskId: Long? = null,
+    val linkedTaskTitle: String? = null,
+    val linkedHabitId: Long? = null,
+    val linkedHabitTitle: String? = null,
     val lastTimestamp: Long = 0L,
     val targetEndTimeMillis: Long = 0L,
     val isStopwatchMode: Boolean = false,
     val stopwatchStartTimeMillis: Long = 0L,
-    val stopwatchAccumulatedSeconds: Int = 0
+    val stopwatchAccumulatedSeconds: Int = 0,
+    val sessionToken: String = "",
+    val isCompletedProcessed: Boolean = false
 )
 
 data class RecentExternalDocEntry(

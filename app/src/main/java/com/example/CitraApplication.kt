@@ -25,6 +25,14 @@ import java.io.IOException
  */
 class CitraApplication : Application(), ImageLoaderFactory {
 
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            com.example.notifications.NotificationHelper.initNotificationChannels(this)
+            com.example.notifications.AlarmWatchdogWorker.schedulePeriodicWatchdog(this)
+        } catch (_: Exception) {}
+    }
+
     override fun newImageLoader(): ImageLoader {
         val hasInternetPermission = ContextCompat.checkSelfPermission(
             this,

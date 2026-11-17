@@ -1,10 +1,17 @@
 package com.example.ui.screens.timer
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -65,6 +72,7 @@ fun TimerScreen(
     val timerAllowSwipe by viewModel.timerAllowSwipe.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val citraTimerBallsJson by viewModel.citraTimerBallsJson.collectAsState()
+    val pendingCelebration by viewModel.pendingTimerCelebration.collectAsState()
     val isDistractionFreeEnabled by viewModel.focusDistractionFreeEnabled.collectAsState()
     val scrollState = rememberScrollState()
 
@@ -132,29 +140,104 @@ fun TimerScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Os Citras surgem exclusivamente quando o timer DE PAUSA estiver contando ativamente
-        val isTimerInBreakCounting = !pomodoroState.isStopwatchMode &&
-            pomodoroState.currentPhase == PomodoroPhase.BREAK &&
-            pomodoroState.isRunning
+        // Os Citras permanecem visíveis durante TODA a fase de pausa (idle, pausada ou rodando) e na celebração
+        val showCitraBallsOrCelebration = !pomodoroState.isStopwatchMode &&
+            (pomodoroState.currentPhase == PomodoroPhase.BREAK || pendingCelebration != null)
+        val hasCitraBalls = citraTimerBallsJson.isNotBlank() && citraTimerBallsJson != "[]"
         AnimatedVisibility(
-            visible = isTimerInBreakCounting && citraTimerBallsJson.isNotBlank() && citraTimerBallsJson != "[]",
+            visible = showCitraBallsOrCelebration && (hasCitraBalls || pendingCelebration != null),
             enter = fadeIn(tween(350)),
             exit = fadeOut(tween(280))
         ) {
             CitraPhysicsOverlay(
                 ballsJson = citraTimerBallsJson,
-                onBallsChanged = { viewModel.saveTimerCitraBallsJson(it) }
+                onBallsChanged = { viewModel.saveTimerCitraBallsJson(it) },
+                celebrationMode = pendingCelebration != null
             )
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(if (!isSessionActive) Modifier.verticalScroll(scrollState) else Modifier)
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = if (isSessionActive) Arrangement.Center else Arrangement.Top
+        // Integrated celebratory view when a focus session finishes (dial collapses smoothly)
+        AnimatedVisibility(
+            visible = pendingCelebration != null,
+            enter = fadeIn(tween(380)) + scaleIn(initialScale = 0.85f, animationSpec = tween(420)),
+            exit = fadeOut(tween(260)) + scaleOut(targetScale = 0.92f, animationSpec = tween(260))
         ) {
+            val celebration = pendingCelebration
+            if (celebration != null) {
+                val pulse = rememberInfiniteTransition(label = "celebration_emoji_pulse")
+                val emojiScale by pulse.animateFloat(
+                    initialValue = 0.96f,
+                    targetValue = 1.12f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(750),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "emoji_scale"
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 28.dp)
+                        .testTag("timer_celebration_overlay"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(20.dp)
+                    ) {
+                        Text(
+                            text = "🎉",
+                            fontSize = 86.sp,
+                            modifier = Modifier
+                                .scale(emojiScale)
+                                .testTag("timer_celebration_emoji")
+                        )
+                        Text(
+                            text = celebration.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.testTag("timer_celebration_title")
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = { viewModel.confirmTimerCelebration() },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth(0.82f)
+                                .height(54.dp)
+                                .testTag("timer_celebration_continue_btn")
+                        ) {
+                            Text(
+                                text = "Continuar",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = pendingCelebration == null,
+            enter = fadeIn(tween(350)) + scaleIn(initialScale = 0.94f, animationSpec = tween(350)),
+            exit = fadeOut(tween(260)) + scaleOut(targetScale = 0.90f, animationSpec = tween(260))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (!isSessionActive) Modifier.verticalScroll(scrollState) else Modifier)
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = if (isSessionActive) Arrangement.Center else Arrangement.Top
+            ) {
             // 1. IDLE TOP BANNER + OPTIONAL SETTINGS ICON (Fades out when active)
             AnimatedVisibility(
                 visible = !isSessionActive,
@@ -899,6 +982,10 @@ fun TimerScreen(
                             }
                         }
                     }
+
+                    com.example.ui.components.AlarmHealthWarningBanner(
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
                 }
             }
 
@@ -981,6 +1068,7 @@ fun TimerScreen(
                     }
                 }
             }
+        }
         }
     }
 
@@ -1287,24 +1375,6 @@ fun TimerScreen(
             dismissButton = {
                 TextButton(onClick = { categoryToDelete = null }) {
                     Text("Cancelar")
-                }
-            }
-        )
-    }
-
-    if (pomodoroState.showCycleCompletedDialog) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissCycleCompletedDialog() },
-            icon = { Text("🎉", fontSize = 36.sp) },
-            title = { Text("Sessão Completa!", fontWeight = FontWeight.Bold) },
-            text = { Text(pomodoroState.completedSummary) },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.dismissCycleCompletedDialog() },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Continuar", color = MaterialTheme.colorScheme.onPrimary)
                 }
             }
         )

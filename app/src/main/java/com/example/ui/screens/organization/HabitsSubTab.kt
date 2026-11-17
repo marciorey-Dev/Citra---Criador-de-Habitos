@@ -942,6 +942,13 @@ fun AddHabitDialog(
                         }
                     }
 
+                    if (reminderTime.isNotBlank() || loopAlarm) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        com.example.ui.components.AlarmHealthWarningBanner(
+                            requireFullScreenCheck = false
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(20.dp))
 
                     // Action buttons: Cancelar | Criar Hábito
@@ -1276,6 +1283,13 @@ fun EditHabitDialog(
                         }
                     }
 
+                    if (reminderTime.isNotBlank() || loopAlarm) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        com.example.ui.components.AlarmHealthWarningBanner(
+                            requireFullScreenCheck = false
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(20.dp))
 
                     Row(
@@ -1592,7 +1606,7 @@ fun HabitAudioSelectionRow(
 ) {
     val context = LocalContext.current
     val audioPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             try {
@@ -1627,7 +1641,7 @@ fun HabitAudioSelectionRow(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { audioPicker.launch("audio/*") }
+                        .clickable { audioPicker.launch(arrayOf("audio/*")) }
                 ) {
                     Icon(
                         imageVector = if (customSoundUri.isNotBlank()) Icons.Default.MusicNote else Icons.Default.NotificationsNone,
@@ -1664,7 +1678,7 @@ fun HabitAudioSelectionRow(
                         }
                     } else {
                         TextButton(
-                            onClick = { audioPicker.launch("audio/*") },
+                            onClick = { audioPicker.launch(arrayOf("audio/*")) },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text("Escolher", fontSize = 11.sp)

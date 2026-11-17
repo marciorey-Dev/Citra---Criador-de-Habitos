@@ -14,9 +14,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.notifications.ActiveAlarmData
@@ -26,7 +28,11 @@ fun AlarmScreen(
     alarmData: ActiveAlarmData,
     onDismiss: () -> Unit,
     onSnooze: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    clockText: String = "00:00",
+    subtitleText: String? = null,
+    secondaryActionLabel: String = "Adiar 10 minutos",
+    secondaryActionIcon: ImageVector = Icons.Default.Snooze
 ) {
     // Intercept back button to prevent accidental dismissal without action
     BackHandler {
@@ -62,7 +68,7 @@ fun AlarmScreen(
         ) {
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Central task/habit title + "00:00" blinking clock
+            // Central task/timer title + "00:00" blinking clock
             Column(
                 modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -79,6 +85,7 @@ fun AlarmScreen(
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFF8FAFC),
+                            textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .padding(horizontal = 20.dp, vertical = 10.dp)
                                 .testTag("alarm_title_text")
@@ -86,17 +93,26 @@ fun AlarmScreen(
                     }
                 }
                 Text(
-                    text = "00:00",
+                    text = clockText,
                     fontSize = 84.sp,
                     fontWeight = FontWeight.Black,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = 4.sp,
-                    color = Color(0xFFF97316).copy(alpha = clockAlpha),
+                    color = Color(0xFFFF6A00).copy(alpha = clockAlpha),
                     modifier = Modifier.testTag("alarm_blinking_clock")
                 )
+                if (!subtitleText.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = subtitleText,
+                        fontSize = 15.sp,
+                        color = Color(0xFFCBD5E1),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
-            // Exactly two buttons: "Adiar 10 minutos" and "Desligar"
+            // Action buttons
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -116,13 +132,13 @@ fun AlarmScreen(
                         .testTag("btn_alarm_snooze")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Snooze,
+                        imageVector = secondaryActionIcon,
                         contentDescription = null,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Adiar 10 minutos",
+                        text = secondaryActionLabel,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )

@@ -1397,6 +1397,12 @@ fun QuickAddTaskDialog(
                                 }
                             }
 
+                            if (loopAlarm || selectedTimestamp != null) {
+                                com.example.ui.components.AlarmHealthWarningBanner(
+                                    requireFullScreenCheck = loopAlarm
+                                )
+                            }
+
                             // Disruptive / Urgent Task Card
                             Surface(
                                 shape = RoundedCornerShape(18.dp),
@@ -1900,6 +1906,12 @@ fun EditTaskDialog(
                             }
                         }
 
+                        if (loopAlarm || selectedTimestamp != null) {
+                            com.example.ui.components.AlarmHealthWarningBanner(
+                                requireFullScreenCheck = loopAlarm
+                            )
+                        }
+
                         // Disruptive / Urgent Task Card
                         Surface(
                             shape = RoundedCornerShape(18.dp),
@@ -2024,7 +2036,7 @@ fun TaskAudioSelectionRow(
 ) {
     val context = LocalContext.current
     val audioPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             try {
@@ -2059,7 +2071,7 @@ fun TaskAudioSelectionRow(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { audioPicker.launch("audio/*") }
+                        .clickable { audioPicker.launch(arrayOf("audio/*")) }
                 ) {
                     Icon(
                         imageVector = if (customSoundUri.isNotBlank()) Icons.Default.MusicNote else Icons.Default.NotificationsNone,
@@ -2096,7 +2108,7 @@ fun TaskAudioSelectionRow(
                         }
                     } else {
                         TextButton(
-                            onClick = { audioPicker.launch("audio/*") },
+                            onClick = { audioPicker.launch(arrayOf("audio/*")) },
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text("Escolher", fontSize = 11.sp)

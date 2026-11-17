@@ -70,7 +70,8 @@ private fun durationToRadiusDp(minutes: Int): Float {
 fun CitraPhysicsOverlay(
     ballsJson: String,
     onBallsChanged: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    celebrationMode: Boolean = false
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -84,7 +85,7 @@ fun CitraPhysicsOverlay(
         }
     }
 
-    if (durations.isEmpty()) return
+    if (durations.isEmpty() && !celebrationMode) return
 
     // Accelerometer gravity state (in px/s^2)
     var gravityX by remember { mutableFloatStateOf(0f) }
@@ -147,6 +148,39 @@ fun CitraPhysicsOverlay(
                         angleDeg = (Random.nextFloat() - 0.5f) * 30f
                     )
                 )
+            }
+        }
+
+        // Celebratory Citrus particle bursts while pendingCelebration is visible
+        LaunchedEffect(celebrationMode, widthPx, heightPx) {
+            if (!celebrationMode || widthPx <= 0f || heightPx <= 0f) return@LaunchedEffect
+            val palette = listOf(
+                Color(0xFFFF6A00),
+                Color(0xFFFFB300),
+                Color(0xFFFDD835),
+                Color(0xFF43A047),
+                Color(0xFFFF9800),
+                Color(0xFFFFEB3B)
+            )
+            while (celebrationMode) {
+                val centerX = widthPx * (0.25f + Random.nextFloat() * 0.5f)
+                val centerY = heightPx * (0.25f + Random.nextFloat() * 0.3f)
+                repeat(24) {
+                    val angle = Random.nextFloat() * (2f * PI.toFloat())
+                    val speed = 160f + Random.nextFloat() * 440f
+                    particles.add(
+                        ExplosionParticle(
+                            x = centerX,
+                            y = centerY,
+                            vx = cos(angle) * speed,
+                            vy = sin(angle) * speed - 180f,
+                            radius = 4f + Random.nextFloat() * 6f,
+                            color = palette.random(),
+                            alpha = 1.35f
+                        )
+                    )
+                }
+                kotlinx.coroutines.delay(950L)
             }
         }
 

@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
     private var pendingWidgetNoteId by mutableStateOf<Long?>(null)
     private var pendingExternalDocumentUri by mutableStateOf<android.net.Uri?>(null)
     private var pendingExternalDocumentMime by mutableStateOf<String?>(null)
+    private var pendingOpenTimerTab by mutableStateOf(false)
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
@@ -89,6 +90,9 @@ class MainActivity : ComponentActivity() {
         checkAlarmIntent(intent)
         handleWidgetIntent(intent)
         handleExternalViewIntent(intent)
+        if (intent.getBooleanExtra(NotificationHelper.EXTRA_OPEN_TIMER_TAB, false)) {
+            pendingOpenTimerTab = true
+        }
     }
 
     private fun handleExternalViewIntent(intent: android.content.Intent?) {
@@ -112,9 +116,15 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAlarmIntent(intent: android.content.Intent?) {
         ActiveAlarmManager.checkAndRestore(this)
-        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_LOOP_ALARM, false) == true) {
+        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_OPEN_TIMER_TAB, false) == true) {
+            pendingOpenTimerTab = true
+        }
+        val extraType = intent?.getStringExtra(NotificationHelper.EXTRA_TYPE) ?: NotificationHelper.TYPE_TASK
+        if (intent?.getBooleanExtra(NotificationHelper.EXTRA_LOOP_ALARM, false) == true &&
+            extraType != NotificationHelper.TYPE_HABIT &&
+            extraType != NotificationHelper.TYPE_HABIT_MISSED
+        ) {
             val id = intent.getIntExtra(NotificationHelper.EXTRA_ID, -1)
-            val type = intent.getStringExtra(NotificationHelper.EXTRA_TYPE) ?: NotificationHelper.TYPE_TASK
             val title = intent.getStringExtra(NotificationHelper.EXTRA_TITLE) ?: "Citra"
             val taskId = intent.getLongExtra(NotificationHelper.EXTRA_TASK_ID, -1L)
             val habitId = intent.getLongExtra(NotificationHelper.EXTRA_HABIT_ID, -1L)
@@ -123,7 +133,7 @@ class MainActivity : ComponentActivity() {
                 this,
                 ActiveAlarmData(
                     notificationId = id,
-                    type = type,
+                    type = extraType,
                     title = title,
                     taskId = taskId,
                     habitId = habitId,
@@ -212,22 +222,27 @@ class MainActivity : ComponentActivity() {
 
                 // If active alarm loop is ringing, display AlarmScreen immediately
                 activeAlarm?.let { currentAlarm ->
+                    val isPomodoroAlarm = currentAlarm.type == NotificationHelper.TYPE_POMODORO
                     AlarmScreen(
                         alarmData = currentAlarm,
+                        secondaryActionLabel = if (isPomodoroAlarm) "Abrir Pausa" else "Adiar 10 minutos",
+                        secondaryActionIcon = if (isPomodoroAlarm) Icons.Default.PlayArrow else Icons.Default.Snooze,
                         onDismiss = {
                             val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
                             if (currentAlarm.notificationId > 0) nm.cancel(currentAlarm.notificationId)
+                            com.example.service.AlarmRingService.stopAlarm(this@MainActivity)
                             ActiveAlarmManager.dismissAlarm(this@MainActivity)
                         },
                         onSnooze = {
                             val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
                             if (currentAlarm.notificationId > 0) nm.cancel(currentAlarm.notificationId)
-                            val snoozeTime = System.currentTimeMillis() + 10 * 60 * 1000L
-                            if (currentAlarm.type == NotificationHelper.TYPE_HABIT) {
-                                NotificationHelper.scheduleHabitSnooze(this@MainActivity, currentAlarm.habitId, currentAlarm.title, snoozeTime, currentAlarm.soundUri)
+                            if (isPomodoroAlarm) {
+                                pendingOpenTimerTab = true
                             } else {
+                                val snoozeTime = System.currentTimeMillis() + 10 * 60 * 1000L
                                 NotificationHelper.scheduleTaskSnooze(this@MainActivity, currentAlarm.taskId, currentAlarm.title, snoozeTime, currentAlarm.soundUri)
                             }
+                            com.example.service.AlarmRingService.stopAlarm(this@MainActivity)
                             ActiveAlarmManager.dismissAlarm(this@MainActivity)
                         }
                     )
@@ -287,6 +302,14 @@ class MainActivity : ComponentActivity() {
                     initialPage = initialPageIndex,
                     pageCount = { screens.size }
                 )
+
+                LaunchedEffect(pendingOpenTimerTab, screens) {
+                    if (pendingOpenTimerTab) {
+                        val timerIdx = screens.indexOf(Screen.Timer).takeIf { it >= 0 } ?: 1
+                        pagerState.scrollToPage(timerIdx)
+                        pendingOpenTimerTab = false
+                    }
+                }
 
                 // Handle Widget Actions
                 LaunchedEffect(pendingWidgetAction, pendingWidgetNoteId, screens) {
@@ -999,6 +1022,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        com.example.notifications.AppForegroundTracker.onActivityStarted()
         AmbientBreakMusicManager.onAppForegrounded(this)
     }
 
@@ -1006,6 +1030,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         AmbientBreakMusicManager.onAppForegrounded(this)
         ActiveAlarmManager.checkAndRestore(this)
+        viewModel.preferencesManager.reloadReactiveTimerState()
         com.example.notifications.NextAlarmScheduler.scheduleNextAlarm(this)
         viewModel.restoreTimerSnapshotOnStartup()
     }
@@ -1019,21 +1044,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        com.example.notifications.AppForegroundTracker.onActivityStopped()
         // Pause note audio and background ambient audio on leaving app
         com.example.util.NoteAudioPlaybackManager.pause()
         AmbientBreakMusicManager.onAppBackgrounded()
 
         viewModel.triggerAutoBackup()
 
-        // Ongoing floating notification when user leaves app while timer is running
+        // Ensure TimerForegroundService owns ongoing notification seamlessly while app is in background
         val state = viewModel.pomodoroState.value
         if (state.isRunning || state.isPaused) {
-            NotificationHelper.showTimerOngoingNotification(
-                context = this,
-                remainingSeconds = state.remainingSeconds,
-                phaseLabel = state.currentPhase.label,
-                isPaused = state.isPaused
-            )
+            com.example.service.TimerForegroundService.syncWithSnapshot(this)
         }
     }
 }

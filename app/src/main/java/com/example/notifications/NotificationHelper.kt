@@ -27,7 +27,9 @@ object NotificationHelper {
     const val CHANNEL_ALERTS = "citra_alerts"
     const val CHANNEL_TIMER_ONGOING = "citra_timer_ongoing"
 
-    const val TIMER_NOTIFICATION_ID = 99999
+    const val TIMER_ONGOING_NOTIFICATION_ID = 99998
+    const val TIMER_ALERT_NOTIFICATION_ID = 99999
+    const val TIMER_NOTIFICATION_ID = TIMER_ALERT_NOTIFICATION_ID
 
     const val EXTRA_TYPE = "notification_type"
     const val EXTRA_TITLE = "notification_title"
@@ -43,6 +45,8 @@ object NotificationHelper {
     const val EXTRA_TASK_ID = "notification_task_id"
     const val EXTRA_IS_DISRUPTIVE = "notification_is_disruptive"
     const val EXTRA_IS_ALARM_SCREEN = "notification_is_alarm_screen"
+    const val EXTRA_USE_FULL_SCREEN = "notification_use_full_screen"
+    const val EXTRA_OPEN_TIMER_TAB = "extra_open_timer_tab"
 
     const val TYPE_TASK = "task"
     const val TYPE_HABIT = "habit"
@@ -106,22 +110,23 @@ object NotificationHelper {
     }
 
     fun canScheduleExactAlarms(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-            am?.canScheduleExactAlarms() ?: true
-        } else true
+        return AlarmHealthChecker.inspect(context).canScheduleExactAlarms
+    }
+
+    fun canUseFullScreenIntent(context: Context): Boolean {
+        return AlarmHealthChecker.inspect(context).canUseFullScreenIntent
+    }
+
+    fun areNotificationsEnabled(context: Context): Boolean {
+        return AlarmHealthChecker.inspect(context).areNotificationsEnabled
     }
 
     fun requestExactAlarmPermission(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                    data = Uri.parse("package:${context.packageName}")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                context.startActivity(intent)
-            } catch (_: Exception) {}
-        }
+        AlarmHealthChecker.openExactAlarmSettings(context)
+    }
+
+    fun openFullScreenIntentSettings(context: Context) {
+        AlarmHealthChecker.openFullScreenIntentSettings(context)
     }
 
     /**
@@ -252,7 +257,8 @@ object NotificationHelper {
         vibratePhone: Boolean = true,
         loopAlarm: Boolean = false,
         taskId: Long = -1L,
-        habitId: Long = -1L
+        habitId: Long = -1L,
+        useFullScreen: Boolean = loopAlarm
     ) {
         val prefs = PreferencesManager(context)
         val settings = prefs.settings.value
@@ -266,24 +272,27 @@ object NotificationHelper {
         val shouldPlaySound = overrideSilent || !isSilentOrVibrate
         val shouldVibrate = if (!overrideSilent && isSilent) false else vibratePhone
 
+        val isHabitNotification = channelId.contains("habit") || channelId == CHANNEL_HABITS
+        val effectiveFullScreen = useFullScreen && !isHabitNotification
+
         // Resolve effective sound
         val effectiveSound = if (customSoundUriString.isNotBlank()) {
             customSoundUriString
         } else {
             when {
-                channelId.contains("habit") -> if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
+                isHabitNotification -> if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
                 channelId.contains("alert") -> if (settings.pomodoroSoundUri.isNotBlank()) settings.pomodoroSoundUri else settings.pomodoroSound
                 else -> if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
             }
         }
 
         val baseChannel = when {
-            channelId.contains("habit") -> CHANNEL_HABITS
+            isHabitNotification -> CHANNEL_HABITS
             channelId.contains("alert") -> CHANNEL_ALERTS
             else -> CHANNEL_TASKS
         }
         val channelName = when {
-            channelId.contains("habit") -> "Lembretes de Hábitos"
+            isHabitNotification -> "Lembretes de Hábitos"
             channelId.contains("alert") -> "Arancia & Conquistas"
             else -> "Lembretes de Tarefas"
         }
@@ -295,37 +304,37 @@ object NotificationHelper {
         }
         val soundUri = if (shouldPlaySound) SoundEffectsManager.getSoundUri(context, effectiveSound) else null
 
-        // Activity intent
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_LOOP_ALARM, loopAlarm)
-            putExtra(EXTRA_ID, id)
-            putExtra(EXTRA_TITLE, title)
-            putExtra(EXTRA_TASK_ID, taskId)
-            putExtra(EXTRA_HABIT_ID, habitId)
-            putExtra(EXTRA_IS_ALARM_SCREEN, loopAlarm)
+        val notificationType = when {
+            isHabitNotification -> TYPE_HABIT
+            channelId == CHANNEL_ALERTS && id == TIMER_ALERT_NOTIFICATION_ID -> TYPE_POMODORO
+            else -> TYPE_TASK
+        }
+
+        // Activity intent (tap notification)
+        val intent = if (effectiveFullScreen) {
+            Intent(context, com.example.ui.screens.alarm.AlarmActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(EXTRA_LOOP_ALARM, loopAlarm)
+                putExtra(EXTRA_ID, id)
+                putExtra(EXTRA_TYPE, notificationType)
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_MESSAGE, message)
+                putExtra(EXTRA_SOUND_URI, effectiveSound)
+                putExtra(EXTRA_TASK_ID, taskId)
+                putExtra(EXTRA_HABIT_ID, habitId)
+            }
+        } else {
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (notificationType == TYPE_POMODORO) {
+                    putExtra(EXTRA_OPEN_TIMER_TAB, true)
+                }
+            }
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
             id,
             intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        // Full Screen Intent to wake up and display on lock screen
-        val fullScreenIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_LOOP_ALARM, loopAlarm)
-            putExtra(EXTRA_ID, id)
-            putExtra(EXTRA_TITLE, title)
-            putExtra(EXTRA_TASK_ID, taskId)
-            putExtra(EXTRA_HABIT_ID, habitId)
-            putExtra(EXTRA_IS_ALARM_SCREEN, loopAlarm)
-        }
-        val fullScreenPendingIntent = PendingIntent.getActivity(
-            context,
-            id + 80000,
-            fullScreenIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -336,10 +345,30 @@ object NotificationHelper {
             .setAutoCancel(!loopAlarm)
             .setOngoing(loopAlarm)
             .setContentIntent(pendingIntent)
-            .setFullScreenIntent(fullScreenPendingIntent, loopAlarm)
-            .setPriority(if (overrideSilent || loopAlarm) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
-            .setCategory(if (overrideSilent) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(if (overrideSilent || loopAlarm || effectiveFullScreen) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
+            .setCategory(if (overrideSilent || effectiveFullScreen) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+        if (effectiveFullScreen) {
+            val fullScreenIntent = Intent(context, com.example.ui.screens.alarm.AlarmActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(EXTRA_LOOP_ALARM, loopAlarm)
+                putExtra(EXTRA_ID, id)
+                putExtra(EXTRA_TYPE, notificationType)
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_MESSAGE, message)
+                putExtra(EXTRA_SOUND_URI, effectiveSound)
+                putExtra(EXTRA_TASK_ID, taskId)
+                putExtra(EXTRA_HABIT_ID, habitId)
+            }
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                context,
+                id + 80000,
+                fullScreenIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            notificationBuilder.setFullScreenIntent(fullScreenPendingIntent, true)
+        }
 
         if (soundUri != null) {
             notificationBuilder.setSound(soundUri)
@@ -354,7 +383,7 @@ object NotificationHelper {
         }
 
         val notification = notificationBuilder.build()
-        if (loopAlarm) {
+        if (loopAlarm && effectiveFullScreen) {
             if (shouldPlaySound) {
                 notification.flags = notification.flags or Notification.FLAG_INSISTENT
             }
@@ -362,7 +391,7 @@ object NotificationHelper {
                 context = context,
                 data = ActiveAlarmData(
                     notificationId = id,
-                    type = if (channelId.contains("habit")) TYPE_HABIT else TYPE_TASK,
+                    type = notificationType,
                     title = title,
                     taskId = taskId,
                     habitId = habitId,
@@ -392,11 +421,12 @@ object NotificationHelper {
         isPaused: Boolean
     ) {
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_OPEN_TIMER_TAB, true)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            TIMER_NOTIFICATION_ID,
+            TIMER_ONGOING_NOTIFICATION_ID,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -412,13 +442,15 @@ object NotificationHelper {
             .setContentText("Status: $statusText • Toque para retornar ao app")
             .setOngoing(!isPaused)
             .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .build()
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(TIMER_NOTIFICATION_ID, notification)
+        notificationManager.notify(TIMER_ONGOING_NOTIFICATION_ID, notification)
     }
 
     const val ACTION_TIMER_END = "com.example.citra.TIMER_END"
@@ -438,7 +470,7 @@ object NotificationHelper {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        tryScheduleExact(context, alarmManager, triggerTimeMillis, pendingIntent)
+        tryScheduleExact(context, alarmManager, triggerTimeMillis, pendingIntent, openTimerTab = true)
     }
 
     fun cancelTimerEndAlarm(context: Context) {
@@ -455,10 +487,19 @@ object NotificationHelper {
         alarmManager.cancel(pendingIntent)
     }
 
+    /**
+     * Cancels ONLY the ongoing timer notification (ID 99998) and the scheduled timer-end alarm.
+     * Deliberately leaves TIMER_ALERT_NOTIFICATION_ID (99999) intact so completion alerts aren't wiped.
+     */
     fun cancelTimerNotification(context: Context) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(TIMER_NOTIFICATION_ID)
+        notificationManager.cancel(TIMER_ONGOING_NOTIFICATION_ID)
         cancelTimerEndAlarm(context)
+    }
+
+    fun cancelTimerAlertNotification(context: Context) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(TIMER_ALERT_NOTIFICATION_ID)
     }
 
     fun scheduleTaskReminder(
@@ -531,18 +572,28 @@ object NotificationHelper {
         triggerTime: Long,
         customSoundUri: String = ""
     ) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val prefs = PreferencesManager(context)
         val effectiveSound = if (customSoundUri.isNotBlank()) {
             customSoundUri
         } else {
-            val settings = PreferencesManager(context).settings.value
+            val settings = prefs.settings.value
             if (settings.taskSoundUri.isNotBlank()) settings.taskSoundUri else settings.taskSound
         }
+        prefs.savePendingSnooze(
+            entityType = TYPE_TASK,
+            entityId = taskId,
+            title = title,
+            triggerTime = triggerTime,
+            soundUri = effectiveSound
+        )
+        NextAlarmScheduler.scheduleNextAlarm(context)
+
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, TYPE_TASK)
             putExtra(EXTRA_TITLE, "Tarefa: $title")
             putExtra(EXTRA_MESSAGE, "Lembrete adiado por 10 minutos.")
-            putExtra(EXTRA_ID, if (taskId > 0) (taskId + 70000).toInt() else (System.currentTimeMillis() % 10000).toInt())
+            putExtra(EXTRA_ID, if (taskId > 0) (taskId + 70000).toInt() else 77777)
             putExtra(EXTRA_SOUND_URI, effectiveSound)
             putExtra(EXTRA_LOOP_ALARM, true)
             putExtra(EXTRA_TASK_ID, taskId)
@@ -563,20 +614,30 @@ object NotificationHelper {
         triggerTime: Long,
         customSoundUri: String = ""
     ) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val prefs = PreferencesManager(context)
         val effectiveSound = if (customSoundUri.isNotBlank()) {
             customSoundUri
         } else {
-            val settings = PreferencesManager(context).settings.value
+            val settings = prefs.settings.value
             if (settings.habitSoundUri.isNotBlank()) settings.habitSoundUri else settings.habitSound
         }
+        prefs.savePendingSnooze(
+            entityType = TYPE_HABIT,
+            entityId = habitId,
+            title = title,
+            triggerTime = triggerTime,
+            soundUri = effectiveSound
+        )
+        NextAlarmScheduler.scheduleNextAlarm(context)
+
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val intent = Intent(context, CitraNotificationReceiver::class.java).apply {
             putExtra(EXTRA_TYPE, TYPE_HABIT)
             putExtra(EXTRA_TITLE, "Hábito: $title")
             putExtra(EXTRA_MESSAGE, "Lembrete adiado por 10 minutos.")
-            putExtra(EXTRA_ID, if (habitId > 0) (habitId + 80000).toInt() else (System.currentTimeMillis() % 10000).toInt())
+            putExtra(EXTRA_ID, if (habitId > 0) (habitId + 80000).toInt() else 88888)
             putExtra(EXTRA_SOUND_URI, effectiveSound)
-            putExtra(EXTRA_LOOP_ALARM, true)
+            putExtra(EXTRA_LOOP_ALARM, false)
             putExtra(EXTRA_HABIT_ID, habitId)
         }
         val pIntent = PendingIntent.getBroadcast(
@@ -592,19 +653,36 @@ object NotificationHelper {
      * Schedules alarm using AlarmClockInfo as first-class citizen.
      * AlarmClockInfo pierces through Doze mode, app standby, and OEM restrictions.
      */
-    private fun tryScheduleExact(context: Context, alarmManager: AlarmManager, triggerTime: Long, pendingIntent: PendingIntent) {
+    fun tryScheduleExact(
+        context: Context,
+        alarmManager: AlarmManager,
+        triggerTime: Long,
+        pendingIntent: PendingIntent,
+        openTimerTab: Boolean = false
+    ) {
         try {
             val showIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (openTimerTab) {
+                    putExtra(EXTRA_OPEN_TIMER_TAB, true)
+                }
             }
             val showPendingIntent = PendingIntent.getActivity(
                 context,
-                (triggerTime % 100000).toInt(),
+                ((triggerTime % 100000).toInt().let { if (it == 0) 1 else it }),
                 showIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val clockInfo = AlarmManager.AlarmClockInfo(triggerTime, showPendingIntent)
             alarmManager.setAlarmClock(clockInfo, pendingIntent)
+        } catch (_: SecurityException) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                } else {
+                    alarmManager.set(AlarmManager.RTC_WAKEUP, triggerTime, pendingIntent)
+                }
+            } catch (_: Exception) {}
         } catch (_: Exception) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

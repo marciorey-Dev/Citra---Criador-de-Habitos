@@ -21,6 +21,9 @@ import com.example.data.model.*
 import com.example.data.repository.CitraRepository
 import com.example.notifications.NextAlarmScheduler
 import com.example.notifications.NotificationHelper
+import com.example.notifications.TimerCompletionCoordinator
+import com.example.service.AlarmRingService
+import com.example.service.TimerForegroundService
 import com.example.ui.theme.ThemeAccent
 import com.example.ui.tutorial.ActiveTutorialState
 import com.example.ui.tutorial.CitraTutorialArea
@@ -269,6 +272,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val citraTimerBallsJson: StateFlow<String> = preferencesManager.citraTimerBallsJson
+    val pendingTimerCelebration: StateFlow<com.example.data.local.PendingTimerCelebration?> =
+        preferencesManager.pendingTimerCelebration
 
     fun saveTimerCitraBallsJson(json: String) {
         preferencesManager.saveCitraTimerBallsJson(json)
@@ -278,8 +283,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.clearCitraTimerBalls()
     }
 
-    private fun spawnTimerCitraBall(durationMinutes: Int, sessionKeyMillis: Long = 0L) {
-        preferencesManager.addCitraTimerBall(durationMinutes, sessionKeyMillis)
+    fun confirmTimerCelebration() {
+        AlarmRingService.stopAlarm(getApplication())
+        NotificationHelper.cancelTimerAlertNotification(getApplication())
+        preferencesManager.clearPendingTimerCelebration()
+        syncPomodoroStateFromSnapshot()
+        if (preferencesManager.timerContinuousMode.value &&
+            _pomodoroState.value.currentPhase == PomodoroPhase.BREAK &&
+            !_pomodoroState.value.isRunning
+        ) {
+            startPomodoro()
+        }
     }
 
     // Database Flows
@@ -507,6 +521,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var timerJob: Job? = null
     private var timerTargetEndTimeMillis: Long = 0L
     private var stopwatchStartTimeMillis: Long = 0L
+    private var currentSessionToken: String = ""
+    private var isInternalPhaseTransition: Boolean = false
 
     // Organization sub-tab: 0=Tasks, 1=Habits, 2=Notes
     private val _organizationSubTab = MutableStateFlow(0)
@@ -618,6 +634,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.seedInitialDataIfNeeded()
         }
+        preferencesManager.timerSnapshotRevision
+            .drop(1)
+            .onEach {
+                if (!isInternalPhaseTransition) {
+                    syncPomodoroStateFromSnapshot()
+                }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun triggerAutoBackup() {
@@ -636,7 +660,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun restoreTimerSnapshotOnStartup() {
         preferencesManager.refreshCitraTimerBalls()
-        val snapshot = preferencesManager.loadTimerSnapshot() ?: return
+        val snapshot = preferencesManager.loadTimerSnapshot()
+        if (snapshot == null) {
+            NotificationHelper.cancelTimerNotification(getApplication())
+            return
+        }
         try {
             val phase = try {
                 PomodoroPhase.valueOf(snapshot.phaseName)
@@ -644,6 +672,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 PomodoroPhase.FOCUS
             }
             val totalSec = if (phase == PomodoroPhase.FOCUS) snapshot.focusMinutes * 60 else snapshot.breakMinutes * 60
+            currentSessionToken = snapshot.sessionToken
 
             if (snapshot.isStopwatchMode) {
                 if (snapshot.isRunning) {
@@ -666,8 +695,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             selectedCategory = snapshot.selectedCategory
                         )
                     }
-                    startPomodoro()
+                    startUiTimerTickLoop()
+                    TimerForegroundService.syncWithSnapshot(getApplication())
                 } else if (snapshot.isPaused) {
+                    timerJob?.cancel()
+                    timerJob = null
                     _pomodoroState.update {
                         it.copy(
                             isStopwatchMode = true,
@@ -677,6 +709,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             selectedCategory = snapshot.selectedCategory
                         )
                     }
+                    TimerForegroundService.syncWithSnapshot(getApplication())
                 }
                 return
             }
@@ -710,25 +743,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             selectedCategory = snapshot.selectedCategory
                         )
                     }
-                    startPomodoro()
+                    startUiTimerTickLoop()
+                    NotificationHelper.scheduleTimerEndAlarm(
+                        context = getApplication(),
+                        triggerTimeMillis = targetEnd,
+                        phaseLabel = phase.label
+                    )
+                    TimerForegroundService.syncWithSnapshot(getApplication())
                 } else {
-                    _pomodoroState.update {
-                        it.copy(
-                            focusMinutes = snapshot.focusMinutes,
-                            breakMinutes = snapshot.breakMinutes,
-                            totalCycles = snapshot.totalCycles,
-                            currentCycle = snapshot.currentCycle,
-                            currentPhase = phase,
-                            remainingSeconds = 0,
-                            totalPhaseSeconds = totalSec,
-                            isRunning = true,
-                            isPaused = false,
-                            selectedCategory = snapshot.selectedCategory
+                    // Expired while app was closed/backgrounded: coordinate atomically
+                    timerJob?.cancel()
+                    timerJob = null
+                    viewModelScope.launch {
+                        TimerCompletionCoordinator.completeExpiredTimerIfNeeded(
+                            context = getApplication(),
+                            triggerSource = "MainViewModel.restore",
+                            forceNow = true
                         )
+                        syncPomodoroStateFromSnapshot()
                     }
-                    onPhaseCompleted()
                 }
             } else if (snapshot.isPaused) {
+                timerJob?.cancel()
+                timerJob = null
+                timerTargetEndTimeMillis = 0L
                 _pomodoroState.update {
                     it.copy(
                         focusMinutes = snapshot.focusMinutes,
@@ -743,13 +781,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         selectedCategory = snapshot.selectedCategory
                     )
                 }
-                NotificationHelper.showTimerOngoingNotification(
-                    context = getApplication(),
-                    remainingSeconds = snapshot.remainingSeconds,
-                    phaseLabel = phase.label,
-                    isPaused = true
-                )
+                TimerForegroundService.syncWithSnapshot(getApplication())
             } else if (phase == PomodoroPhase.BREAK && snapshot.remainingSeconds > 0) {
+                timerJob?.cancel()
+                timerJob = null
+                timerTargetEndTimeMillis = 0L
                 _pomodoroState.update {
                     it.copy(
                         focusMinutes = snapshot.focusMinutes,
@@ -765,32 +801,88 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } else {
+                timerJob?.cancel()
+                timerJob = null
+                timerTargetEndTimeMillis = 0L
+                _pomodoroState.update {
+                    it.copy(
+                        focusMinutes = snapshot.focusMinutes,
+                        breakMinutes = snapshot.breakMinutes,
+                        totalCycles = snapshot.totalCycles,
+                        currentCycle = snapshot.currentCycle,
+                        currentPhase = phase,
+                        remainingSeconds = snapshot.remainingSeconds.coerceAtLeast(0),
+                        totalPhaseSeconds = totalSec,
+                        isRunning = false,
+                        isPaused = false,
+                        selectedCategory = snapshot.selectedCategory
+                    )
+                }
+                TimerForegroundService.stop(getApplication())
                 NotificationHelper.cancelTimerNotification(getApplication())
             }
         } catch (_: Exception) {}
     }
 
-    fun persistTimerState() {
+    private fun syncPomodoroStateFromSnapshot() {
+        val snap = preferencesManager.loadTimerSnapshot()
+        if (snap == null) {
+            val cur = _pomodoroState.value
+            if (cur.isRunning || cur.isPaused) {
+                timerJob?.cancel()
+                timerJob = null
+                timerTargetEndTimeMillis = 0L
+                stopwatchStartTimeMillis = 0L
+                currentSessionToken = ""
+                val sec = cur.focusMinutes * 60
+                _pomodoroState.update {
+                    it.copy(
+                        isRunning = false,
+                        isPaused = false,
+                        stopwatchSeconds = 0,
+                        currentPhase = PomodoroPhase.FOCUS,
+                        currentCycle = 1,
+                        remainingSeconds = sec,
+                        totalPhaseSeconds = sec
+                    )
+                }
+            }
+            return
+        }
+        restoreTimerSnapshotOnStartup()
+    }
+
+    fun persistTimerState(isCompletedProcessed: Boolean = false) {
         val s = _pomodoroState.value
-        preferencesManager.saveTimerSnapshot(
-            SavedTimerSnapshot(
-                focusMinutes = s.focusMinutes,
-                breakMinutes = s.breakMinutes,
-                totalCycles = s.totalCycles,
-                currentCycle = s.currentCycle,
-                remainingSeconds = s.remainingSeconds,
-                phaseName = s.currentPhase.name,
-                isRunning = s.isRunning,
-                isPaused = s.isPaused,
-                selectedCategory = s.selectedCategory,
-                linkedTaskId = s.linkedTask?.id,
-                lastTimestamp = System.currentTimeMillis(),
-                targetEndTimeMillis = timerTargetEndTimeMillis,
-                isStopwatchMode = s.isStopwatchMode,
-                stopwatchStartTimeMillis = stopwatchStartTimeMillis,
-                stopwatchAccumulatedSeconds = s.stopwatchSeconds
+        isInternalPhaseTransition = true
+        try {
+            preferencesManager.saveTimerSnapshot(
+                SavedTimerSnapshot(
+                    focusMinutes = s.focusMinutes,
+                    breakMinutes = s.breakMinutes,
+                    totalCycles = s.totalCycles,
+                    currentCycle = s.currentCycle,
+                    remainingSeconds = s.remainingSeconds,
+                    phaseName = s.currentPhase.name,
+                    isRunning = s.isRunning,
+                    isPaused = s.isPaused,
+                    selectedCategory = s.selectedCategory,
+                    linkedTaskId = s.linkedTask?.id,
+                    linkedTaskTitle = s.linkedTask?.title,
+                    linkedHabitId = s.linkedHabit?.id,
+                    linkedHabitTitle = s.linkedHabit?.title,
+                    lastTimestamp = System.currentTimeMillis(),
+                    targetEndTimeMillis = timerTargetEndTimeMillis,
+                    isStopwatchMode = s.isStopwatchMode,
+                    stopwatchStartTimeMillis = stopwatchStartTimeMillis,
+                    stopwatchAccumulatedSeconds = s.stopwatchSeconds,
+                    sessionToken = currentSessionToken,
+                    isCompletedProcessed = isCompletedProcessed
+                )
             )
-        )
+        } finally {
+            isInternalPhaseTransition = false
+        }
     }
 
     // Category actions
@@ -941,6 +1033,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startPomodoro() {
         vibrate(40)
+        // Clear any pending celebration or ringing timer alarm when user explicitly starts/resumes
+        AlarmRingService.stopAlarm(getApplication())
+        NotificationHelper.cancelTimerAlertNotification(getApplication())
+        preferencesManager.clearPendingTimerCelebration()
+
+        if (currentSessionToken.isBlank() || !_pomodoroState.value.isPaused) {
+            currentSessionToken = UUID.randomUUID().toString()
+        }
         _pomodoroState.update { it.copy(isRunning = true, isPaused = false) }
 
         if (preferencesManager.focusDistractionFreeEnabled.value && _pomodoroState.value.currentPhase == PomodoroPhase.FOCUS) {
@@ -951,29 +1051,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         if (_pomodoroState.value.isStopwatchMode) {
             stopwatchStartTimeMillis = System.currentTimeMillis() - (_pomodoroState.value.stopwatchSeconds * 1000L)
-            persistTimerState()
-
-            timerJob?.cancel()
-            timerJob = viewModelScope.launch {
-                while (_pomodoroState.value.isRunning && _pomodoroState.value.isStopwatchMode) {
-                    val now = System.currentTimeMillis()
-                    val elapsed = ((now - stopwatchStartTimeMillis) / 1000L).toInt().coerceAtLeast(0)
-                    _pomodoroState.update { it.copy(stopwatchSeconds = elapsed) }
-                    persistTimerState()
-
-                    NotificationHelper.showTimerOngoingNotification(
-                        context = getApplication(),
-                        remainingSeconds = elapsed,
-                        phaseLabel = "Cronômetro",
-                        isPaused = false
-                    )
-                    delay(500L)
-                }
-            }
+            persistTimerState(isCompletedProcessed = false)
+            TimerForegroundService.syncWithSnapshot(getApplication())
+            startUiTimerTickLoop()
         } else {
             val now = System.currentTimeMillis()
             timerTargetEndTimeMillis = now + (_pomodoroState.value.remainingSeconds * 1000L)
-            persistTimerState()
+            persistTimerState(isCompletedProcessed = false)
 
             // Schedule system AlarmClock that pierces Doze mode and lockscreen
             NotificationHelper.scheduleTimerEndAlarm(
@@ -981,21 +1065,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 triggerTimeMillis = timerTargetEndTimeMillis,
                 phaseLabel = _pomodoroState.value.currentPhase.label
             )
+            TimerForegroundService.syncWithSnapshot(getApplication())
+            startUiTimerTickLoop()
+        }
+    }
 
-            timerJob?.cancel()
+    private fun startUiTimerTickLoop() {
+        timerJob?.cancel()
+        if (_pomodoroState.value.isStopwatchMode) {
+            timerJob = viewModelScope.launch {
+                while (_pomodoroState.value.isRunning && _pomodoroState.value.isStopwatchMode) {
+                    val elapsed = ((System.currentTimeMillis() - stopwatchStartTimeMillis) / 1000L).toInt().coerceAtLeast(0)
+                    _pomodoroState.update { it.copy(stopwatchSeconds = elapsed) }
+                    delay(500L)
+                }
+            }
+        } else {
             timerJob = viewModelScope.launch {
                 while (_pomodoroState.value.isRunning && !_pomodoroState.value.isStopwatchMode) {
                     val currentTime = System.currentTimeMillis()
                     val rem = ((timerTargetEndTimeMillis - currentTime + 999L) / 1000L).toInt().coerceAtLeast(0)
                     _pomodoroState.update { it.copy(remainingSeconds = rem) }
-                    persistTimerState()
-
-                    NotificationHelper.showTimerOngoingNotification(
-                        context = getApplication(),
-                        remainingSeconds = rem,
-                        phaseLabel = _pomodoroState.value.currentPhase.label,
-                        isPaused = false
-                    )
 
                     if (rem <= 0) {
                         onPhaseCompleted()
@@ -1024,15 +1114,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val rem = ((timerTargetEndTimeMillis - now + 999L) / 1000L).toInt().coerceAtLeast(0)
             _pomodoroState.update { it.copy(isRunning = false, isPaused = true, remainingSeconds = rem) }
         }
-        persistTimerState()
-
-        val state = _pomodoroState.value
-        NotificationHelper.showTimerOngoingNotification(
-            context = getApplication(),
-            remainingSeconds = if (state.isStopwatchMode) state.stopwatchSeconds else state.remainingSeconds,
-            phaseLabel = if (state.isStopwatchMode) "Cronômetro" else state.currentPhase.label,
-            isPaused = true
-        )
+        persistTimerState(isCompletedProcessed = false)
+        TimerForegroundService.syncWithSnapshot(getApplication())
     }
 
     fun resetPomodoro() {
@@ -1040,11 +1123,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()
         timerJob = null
         NotificationHelper.cancelTimerEndAlarm(getApplication())
+        TimerForegroundService.stop(getApplication())
+        AlarmRingService.stopAlarm(getApplication())
+        NotificationHelper.cancelTimerAlertNotification(getApplication())
+        preferencesManager.clearPendingTimerCelebration()
         try {
             com.example.service.FocusDistractionService.stop(getApplication())
         } catch (_: Exception) {}
         timerTargetEndTimeMillis = 0L
         stopwatchStartTimeMillis = 0L
+        currentSessionToken = ""
         val state = _pomodoroState.value
 
         if (state.isStopwatchMode && state.stopwatchSeconds >= 60 && state.selectedCategory.isNotBlank()) {
@@ -1081,147 +1169,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun onPhaseCompleted() {
         vibrate(250)
-        NotificationHelper.cancelTimerNotification(getApplication())
-        NotificationHelper.cancelTimerEndAlarm(getApplication())
-        try {
-            com.example.service.FocusDistractionService.stop(getApplication())
-        } catch (_: Exception) {}
-        val completedSessionKey = timerTargetEndTimeMillis
-        timerTargetEndTimeMillis = 0L
-        stopwatchStartTimeMillis = 0L
-        val state = _pomodoroState.value
-        val isContinuous = preferencesManager.timerContinuousMode.value
+        timerJob?.cancel()
+        timerJob = null
+        musicPlayer.stop()
 
-        if (state.currentPhase == PomodoroPhase.FOCUS) {
-            val breakSec = state.breakMinutes * 60
-            // Atomically claim focus session completion so AlarmReceiver and foreground timerJob/onResume NEVER double-insert
-            val claimed = preferencesManager.tryClaimFocusSessionCompletion(
-                targetEndTimeMillis = completedSessionKey,
-                nextBreakSeconds = breakSec
+        val wasBreak = _pomodoroState.value.currentPhase == PomodoroPhase.BREAK
+        val wasContinuous = preferencesManager.timerContinuousMode.value
+        val previousCycle = _pomodoroState.value.currentCycle
+        val totalCycles = _pomodoroState.value.totalCycles
+
+        viewModelScope.launch {
+            val completedNow = TimerCompletionCoordinator.completeExpiredTimerIfNeeded(
+                context = getApplication(),
+                triggerSource = "MainViewModel.onPhaseCompleted",
+                forceNow = true
             )
+            timerTargetEndTimeMillis = 0L
+            stopwatchStartTimeMillis = 0L
+            currentSessionToken = ""
+            syncPomodoroStateFromSnapshot()
 
-            if (claimed) {
-                viewModelScope.launch {
-                    val session = FocusSession(
-                        category = state.selectedCategory,
-                        durationMinutes = state.focusMinutes,
-                        breakMinutes = 0,
-                        cycleCount = state.currentCycle,
-                        linkedTaskId = state.linkedTask?.id,
-                        linkedTaskTitle = state.linkedTask?.title
-                    )
-                    repository.recordFocusSession(session)
-                    spawnTimerCitraBall(state.focusMinutes, completedSessionKey)
-
-                    val awardMessage = when {
-                        state.focusMinutes >= 120 -> "🌟 Incrível! Você ganhou o Citra Dourado (120 min)!"
-                        state.focusMinutes >= 60 -> "🍋 Parabéns! Você ganhou o Citra Amarelo (60 min)!"
-                        else -> "🍊 Novo Citra criado no menu do timer!"
-                    }
-                    _userMessage.emit(awardMessage)
-
-                    if (state.linkedHabit != null) {
-                        val isAlreadyDone = state.linkedHabit.completedDatesCsv.split(",")
-                            .any { it.trim() == todayString }
-                        if (!isAlreadyDone) {
-                            repository.toggleHabitToday(state.linkedHabit)
-                            _userMessage.emit("Hábito '${state.linkedHabit.title}' marcado como feito hoje!")
-                        }
-                    }
+            if (completedNow && !wasBreak) {
+                val focusMins = _pomodoroState.value.focusMinutes
+                val awardMessage = when {
+                    focusMins >= 120 -> "🌟 Incrível! Você ganhou o Citra Dourado (120 min)!"
+                    focusMins >= 60 -> "🍋 Parabéns! Você ganhou o Citra Amarelo (60 min)!"
+                    else -> "🍊 Novo Citra criado no menu do timer!"
                 }
-            }
-
-            timerJob?.cancel()
-            timerJob = null
-            musicPlayer.stop()
-
-            val vibEnabled = notificationSettings.value.vibrate
-            _pomodoroState.update {
-                it.copy(
-                    isRunning = false,
-                    isPaused = false,
-                    currentPhase = PomodoroPhase.BREAK,
-                    remainingSeconds = breakSec,
-                    totalPhaseSeconds = breakSec
-                )
-            }
-            persistTimerState()
-
-            if (claimed) {
-                NotificationHelper.showInstantNotification(
-                    context = getApplication(),
-                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
-                    channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "Sessão ${state.currentCycle} de ${state.totalCycles} Concluída!",
-                    message = "Excelente dedicação de ${state.focusMinutes}m! Pausa de ${state.breakMinutes}m pronta.",
-                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
-                    vibratePhone = vibEnabled
-                )
-            }
-
-            if (isContinuous) {
+                _userMessage.emit(awardMessage)
+            } else if (completedNow && wasBreak && wasContinuous && previousCycle < totalCycles) {
                 startPomodoro()
-            }
-        } else {
-            timerJob?.cancel()
-            timerJob = null
-            musicPlayer.stop()
-
-            val vibEnabled = notificationSettings.value.vibrate
-            if (state.currentCycle < state.totalCycles) {
-                val nextCycle = state.currentCycle + 1
-                val focusSec = state.focusMinutes * 60
-                _pomodoroState.update {
-                    it.copy(
-                        isRunning = false,
-                        isPaused = false,
-                        currentPhase = PomodoroPhase.FOCUS,
-                        currentCycle = nextCycle,
-                        remainingSeconds = focusSec,
-                        totalPhaseSeconds = focusSec
-                    )
-                }
-                persistTimerState()
-
-                NotificationHelper.showInstantNotification(
-                    context = getApplication(),
-                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
-                    channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "Pausa Concluída",
-                    message = if (isContinuous) "Iniciando Ciclo $nextCycle de ${state.totalCycles} automaticamente!" else "Pronto para o Ciclo $nextCycle de ${state.totalCycles} de foco?",
-                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
-                    vibratePhone = vibEnabled
-                )
-
-                if (isContinuous) {
-                    startPomodoro()
-                }
-            } else {
-                val focusSec = state.focusMinutes * 60
-                val randomQuote = getRandomQuote()
-                _pomodoroState.update {
-                    it.copy(
-                        isRunning = false,
-                        isPaused = false,
-                        currentPhase = PomodoroPhase.FOCUS,
-                        currentCycle = 1,
-                        remainingSeconds = focusSec,
-                        totalPhaseSeconds = focusSec,
-                        showCycleCompletedDialog = true,
-                        completedSummary = "Você completou todos os ${state.totalCycles} ciclos de foco!\n\n\"$randomQuote\""
-                    )
-                }
-                preferencesManager.clearTimerSnapshot()
-
-                NotificationHelper.showInstantNotification(
-                    context = getApplication(),
-                    id = NotificationHelper.TIMER_NOTIFICATION_ID,
-                    channelId = NotificationHelper.CHANNEL_ALERTS,
-                    title = "🎉 Ciclos Concluídos!",
-                    message = "Parabéns! Todos os ${state.totalCycles} ciclos foram finalizados com êxito.",
-                    customSoundUriString = notificationSettings.value.pomodoroSoundUri,
-                    vibratePhone = vibEnabled
-                )
+            } else if (completedNow && wasBreak && previousCycle >= totalCycles) {
+                _userMessage.emit("🎉 Todos os $totalCycles ciclos concluídos!")
             }
         }
     }
