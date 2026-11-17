@@ -41,10 +41,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.ui.MainViewModel
 import com.example.ui.PomodoroPhase
 import com.example.ui.components.AchievementsDialog
@@ -77,12 +80,25 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var pendingWidgetAction by mutableStateOf<String?>(null)
     private var pendingWidgetNoteId by mutableStateOf<Long?>(null)
+    private var pendingExternalDocumentUri by mutableStateOf<android.net.Uri?>(null)
+    private var pendingExternalDocumentMime by mutableStateOf<String?>(null)
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         checkAlarmIntent(intent)
         handleWidgetIntent(intent)
+        handleExternalViewIntent(intent)
+    }
+
+    private fun handleExternalViewIntent(intent: android.content.Intent?) {
+        if (intent?.action == android.content.Intent.ACTION_VIEW) {
+            val dataUri = intent.data ?: intent.clipData?.getItemAt(0)?.uri
+            if (dataUri != null) {
+                pendingExternalDocumentUri = dataUri
+                pendingExternalDocumentMime = intent.type
+            }
+        }
     }
 
     private fun handleWidgetIntent(intent: android.content.Intent?) {
@@ -124,6 +140,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         checkAlarmIntent(intent)
         handleWidgetIntent(intent)
+        handleExternalViewIntent(intent)
 
         setContent {
             val isDarkThemeSetting by viewModel.isDarkTheme.collectAsState()
@@ -272,8 +289,9 @@ class MainActivity : ComponentActivity() {
                 )
 
                 // Handle Widget Actions
-                LaunchedEffect(pendingWidgetAction, pendingWidgetNoteId) {
+                LaunchedEffect(pendingWidgetAction, pendingWidgetNoteId, screens) {
                     val action = pendingWidgetAction ?: return@LaunchedEffect
+                    val notesPageIndex = screens.indexOf(Screen.Notes).coerceAtLeast(0)
                     when (action) {
                         com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_TIMER -> {
                             pagerState.scrollToPage(1)
@@ -283,7 +301,7 @@ class MainActivity : ComponentActivity() {
                             pagerState.scrollToPage(2)
                         }
                         com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_NEW_NOTE -> {
-                            pagerState.scrollToPage(3)
+                            pagerState.scrollToPage(notesPageIndex)
                             viewModel.triggerCreateNote()
                         }
                         com.example.widget.CitraWidgetHelper.ACTION_NAVIGATE_OPEN_NOTE -> {
@@ -295,15 +313,29 @@ class MainActivity : ComponentActivity() {
                                     }
                                 if (targetNote != null) {
                                     viewModel.openNote(targetNote)
-                                    pagerState.scrollToPage(3)
+                                    pagerState.scrollToPage(notesPageIndex)
                                 }
                             } else {
-                                pagerState.scrollToPage(3)
+                                pagerState.scrollToPage(notesPageIndex)
                             }
                         }
                     }
                     pendingWidgetAction = null
                     pendingWidgetNoteId = null
+                }
+
+                // Handle OS "Open with / Default app" intents for PDF and Word (.docx)
+                LaunchedEffect(pendingExternalDocumentUri, screens) {
+                    val externalUri = pendingExternalDocumentUri ?: return@LaunchedEffect
+                    val notesPageIndex = screens.indexOf(Screen.Notes).coerceAtLeast(0)
+                    pagerState.scrollToPage(notesPageIndex)
+                    viewModel.openOrRegisterExternalDocumentFromIntent(
+                        uri = externalUri,
+                        mimeType = pendingExternalDocumentMime,
+                        context = this@MainActivity
+                    )
+                    pendingExternalDocumentUri = null
+                    pendingExternalDocumentMime = null
                 }
 
                 var showMenu by remember { mutableStateOf(false) }
@@ -419,39 +451,211 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val currentScreen = screens[pagerState.currentPage]
+                val notesSearchQuery by viewModel.notesSearchQuery.collectAsState()
+                val trashNotes by viewModel.trashNotes.collectAsState()
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     topBar = {
                         val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
-                                screens[pagerState.currentPage] == Screen.Timer
+                                currentScreen == Screen.Timer
+                        val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
                         if (!isNoteEditorOpen && !isTimerImmersive) {
-                            TopAppBar(
-                                navigationIcon = {
-                                    if (screens[pagerState.currentPage] == Screen.Home) {
-                                        Spacer(modifier = Modifier.width(48.dp))
-                                    }
-                                },
-                                title = {
-                                    val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
-                                    if (screens[pagerState.currentPage] == Screen.Home) {
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            contentAlignment = Alignment.Center
+                            if (currentScreen == Screen.Notes) {
+                                // Flush-left Notes search bar on the exact same top strip as the 3-dots menu
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .statusBarsPadding()
+                                            .height(64.dp)
+                                            .padding(start = 10.dp, end = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(44.dp)
+                                                .tutorialTarget("notes_search_input")
+                                                .testTag("notes_search_input")
                                         ) {
                                             Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.Center
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 14.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text(
-                                                    text = "🍊 Citra",
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    fontSize = 20.sp,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    textAlign = TextAlign.Center
+                                                Icon(
+                                                    imageVector = Icons.Default.Search,
+                                                    contentDescription = "Pesquisar",
+                                                    tint = MaterialTheme.colorScheme.outline,
+                                                    modifier = Modifier.size(19.dp)
                                                 )
-                                                if (isTimerActive) {
-                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Box(
+                                                    modifier = Modifier.weight(1f),
+                                                    contentAlignment = Alignment.CenterStart
+                                                ) {
+                                                    if (notesSearchQuery.isEmpty()) {
+                                                        Text(
+                                                            text = "Pesquisar notas, PDFs ou Words...",
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            color = MaterialTheme.colorScheme.outline,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                    BasicTextField(
+                                                        value = notesSearchQuery,
+                                                        onValueChange = { viewModel.setNotesSearchQuery(it) },
+                                                        singleLine = true,
+                                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        ),
+                                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    )
+                                                }
+                                                if (notesSearchQuery.isNotEmpty()) {
+                                                    IconButton(
+                                                        onClick = { viewModel.setNotesSearchQuery("") },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Clear,
+                                                            contentDescription = "Limpar pesquisa",
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        if (isTimerActive) {
+                                            val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
+                                            val mins = displaySec / 60
+                                            val secs = displaySec % 60
+                                            val formatted = String.format("%02d:%02d", mins, secs)
+
+                                            Surface(
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        coroutineScope.launch { pagerState.scrollToPage(1) }
+                                                    }
+                                                    .testTag("top_floating_timer_pill")
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(text = "🍊", fontSize = 12.sp)
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text(
+                                                        text = formatted,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        CitraTopOverflowMenuBox(
+                                            showMenu = showMenu,
+                                            onOpenMenu = { showMenu = true },
+                                            onDismissMenu = { showMenu = false },
+                                            isNotesScreen = true,
+                                            trashCount = trashNotes.size,
+                                            onOpenSettings = { showSettingsDialog = true },
+                                            onOpenAddCategory = { showAddCategoryDialog = true },
+                                            onOpenAchievements = { showAchievementsDialog = true },
+                                            onOpenBackup = { showBackupDialog = true },
+                                            onOpenCredits = { showCreditsDialog = true },
+                                            onOpenNotesTrash = { viewModel.triggerOpenNotesTrash() },
+                                            onOpenArchivedNotes = { viewModel.triggerOpenArchivedNotes() }
+                                        )
+                                    }
+                                }
+                            } else {
+                                TopAppBar(
+                                    navigationIcon = {
+                                        if (currentScreen == Screen.Home) {
+                                            Spacer(modifier = Modifier.width(48.dp))
+                                        }
+                                    },
+                                    title = {
+                                        if (currentScreen == Screen.Home) {
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center
+                                                ) {
+                                                    Text(
+                                                        text = "🍊 Citra",
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        fontSize = 20.sp,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                    if (isTimerActive) {
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
+                                                        val mins = displaySec / 60
+                                                        val secs = displaySec % 60
+                                                        val formatted = String.format("%02d:%02d", mins, secs)
+
+                                                        Surface(
+                                                            shape = RoundedCornerShape(16.dp),
+                                                            color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                                            modifier = Modifier
+                                                                .clickable {
+                                                                    coroutineScope.launch { pagerState.scrollToPage(1) }
+                                                                }
+                                                                .testTag("top_floating_timer_pill")
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Text(text = "🍊", fontSize = 12.sp)
+                                                                Spacer(modifier = Modifier.width(4.dp))
+                                                                Text(
+                                                                    text = formatted,
+                                                                    fontSize = 12.sp,
+                                                                    fontWeight = FontWeight.ExtraBold,
+                                                                    color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                                Spacer(modifier = Modifier.width(4.dp))
+                                                                Icon(
+                                                                    imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                                    contentDescription = null,
+                                                                    modifier = Modifier.size(14.dp),
+                                                                    tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                // Floating Top Mini-timer counter when timer is active outside the Timer tab
+                                                if (isTimerActive && currentScreen != Screen.Timer) {
                                                     val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
                                                     val mins = displaySec / 60
                                                     val secs = displaySec % 60
@@ -490,158 +694,44 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                    } else {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            // Floating Top Mini-timer counter when timer is active outside the Timer tab
-                                            if (isTimerActive && screens[pagerState.currentPage] != Screen.Timer) {
-                                                val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
-                                                val mins = displaySec / 60
-                                                val secs = displaySec % 60
-                                                val formatted = String.format("%02d:%02d", mins, secs)
-
-                                                Surface(
-                                                    shape = RoundedCornerShape(16.dp),
-                                                    color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                                    modifier = Modifier
-                                                        .clickable {
-                                                            coroutineScope.launch { pagerState.scrollToPage(1) }
-                                                        }
-                                                        .testTag("top_floating_timer_pill")
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Text(text = "🍊", fontSize = 12.sp)
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = formatted,
-                                                            fontSize = 12.sp,
-                                                            fontWeight = FontWeight.ExtraBold,
-                                                            color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Icon(
-                                                            imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                            contentDescription = null,
-                                                            modifier = Modifier.size(14.dp),
-                                                            tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-                                                }
+                                    },
+                                    actions = {
+                                        // Settings button on "Eu" screen
+                                        if (currentScreen == Screen.Profile) {
+                                            IconButton(
+                                                onClick = { showSettingsDialog = true },
+                                                modifier = Modifier.testTag("top_settings_gear_btn")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Settings,
+                                                    contentDescription = "Configurações",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
                                             }
                                         }
-                                    }
-                                },
-                            actions = {
-                                // Settings button on "Eu" screen (page 4) per request
-                                if (pagerState.currentPage == 4) {
-                                    IconButton(
-                                        onClick = { showSettingsDialog = true },
-                                        modifier = Modifier.testTag("top_settings_gear_btn")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Settings,
-                                            contentDescription = "Configurações",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
 
-                                // 3-Dots Menu Button
-                                Box {
-                                    IconButton(
-                                        onClick = { showMenu = true },
-                                        modifier = Modifier
-                                            .testTag("top_menu_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.MoreVert,
-                                            contentDescription = "Mais Opções",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        CitraTopOverflowMenuBox(
+                                            showMenu = showMenu,
+                                            onOpenMenu = { showMenu = true },
+                                            onDismissMenu = { showMenu = false },
+                                            isNotesScreen = false,
+                                            trashCount = trashNotes.size,
+                                            onOpenSettings = { showSettingsDialog = true },
+                                            onOpenAddCategory = { showAddCategoryDialog = true },
+                                            onOpenAchievements = { showAchievementsDialog = true },
+                                            onOpenBackup = { showBackupDialog = true },
+                                            onOpenCredits = { showCreditsDialog = true },
+                                            onOpenNotesTrash = { viewModel.triggerOpenNotesTrash() },
+                                            onOpenArchivedNotes = { viewModel.triggerOpenArchivedNotes() }
                                         )
-                                    }
-
-                                    DropdownMenu(
-                                        expanded = showMenu,
-                                        onDismissRequest = { showMenu = false }
-                                    ) {
-                                        // Configurações
-                                        DropdownMenuItem(
-                                            text = { Text("Configurações") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            },
-                                            modifier = Modifier.tutorialTarget("top_menu_settings"),
-                                            onClick = {
-                                                showMenu = false
-                                                showSettingsDialog = true
-                                            }
-                                        )
-
-                                        // Nova Categoria
-                                        DropdownMenuItem(
-                                            text = { Text("Nova Categoria") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            },
-                                            onClick = {
-                                                showMenu = false
-                                                showAddCategoryDialog = true
-                                            }
-                                        )
-
-                                        // Conquistas (Renamed per user request)
-                                        DropdownMenuItem(
-                                            text = { Text("Conquistas") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Stars, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            },
-                                            modifier = Modifier.tutorialTarget("top_menu_achievements"),
-                                            onClick = {
-                                                showMenu = false
-                                                showAchievementsDialog = true
-                                            }
-                                        )
-
-                                        // Backup & Restauração
-                                        DropdownMenuItem(
-                                            text = { Text("Backup & Restauração") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Backup, contentDescription = null)
-                                            },
-                                            modifier = Modifier.tutorialTarget("top_menu_backup"),
-                                            onClick = {
-                                                showMenu = false
-                                                showBackupDialog = true
-                                            }
-                                        )
-
-                                        Divider()
-
-                                        // Sobre (Renamed from Créditos e Copyright)
-                                        DropdownMenuItem(
-                                            text = { Text("Sobre") },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Info, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showMenu = false
-                                                showCreditsDialog = true
-                                            }
-                                        )
-                                    }
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    }
-                },
+                                    },
+                                    colors = TopAppBarDefaults.topAppBarColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    )
+                                )
+                            }
+                        }
+                    },
                 snackbarHost = {
                     SnackbarHost(
                         hostState = snackbarHostState,
@@ -943,6 +1033,168 @@ class MainActivity : ComponentActivity() {
                 phaseLabel = state.currentPhase.label,
                 isPaused = state.isPaused
             )
+        }
+    }
+}
+
+@Composable
+private fun CitraTopOverflowMenuBox(
+    showMenu: Boolean,
+    onOpenMenu: () -> Unit,
+    onDismissMenu: () -> Unit,
+    isNotesScreen: Boolean,
+    trashCount: Int,
+    onOpenSettings: () -> Unit,
+    onOpenAddCategory: () -> Unit,
+    onOpenAchievements: () -> Unit,
+    onOpenBackup: () -> Unit,
+    onOpenCredits: () -> Unit,
+    onOpenNotesTrash: () -> Unit,
+    onOpenArchivedNotes: () -> Unit
+) {
+    Box {
+        IconButton(
+            onClick = onOpenMenu,
+            modifier = Modifier.testTag("top_menu_button")
+        ) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Mais Opções",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = onDismissMenu
+        ) {
+            DropdownMenuItem(
+                text = { Text("Configurações") },
+                leadingIcon = {
+                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                },
+                modifier = Modifier.tutorialTarget("top_menu_settings"),
+                onClick = {
+                    onDismissMenu()
+                    onOpenSettings()
+                }
+            )
+
+            DropdownMenuItem(
+                text = { Text("Nova Categoria") },
+                leadingIcon = {
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                },
+                onClick = {
+                    onDismissMenu()
+                    onOpenAddCategory()
+                }
+            )
+
+            DropdownMenuItem(
+                text = { Text("Conquistas") },
+                leadingIcon = {
+                    Icon(Icons.Default.Stars, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                },
+                modifier = Modifier.tutorialTarget("top_menu_achievements"),
+                onClick = {
+                    onDismissMenu()
+                    onOpenAchievements()
+                }
+            )
+
+            DropdownMenuItem(
+                text = { Text("Backup & Restauração") },
+                leadingIcon = {
+                    Icon(Icons.Default.Backup, contentDescription = null)
+                },
+                modifier = Modifier.tutorialTarget("top_menu_backup"),
+                onClick = {
+                    onDismissMenu()
+                    onOpenBackup()
+                }
+            )
+
+            HorizontalDivider()
+
+            DropdownMenuItem(
+                text = { Text("Sobre") },
+                leadingIcon = {
+                    Icon(Icons.Default.Info, contentDescription = null)
+                },
+                onClick = {
+                    onDismissMenu()
+                    onOpenCredits()
+                }
+            )
+
+            if (isNotesScreen) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Trash icon button with ONLY a number badge when waiting notes > 0
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        IconButton(
+                            onClick = {
+                                onDismissMenu()
+                                onOpenNotesTrash()
+                            },
+                            modifier = Modifier.testTag("menu_notes_trash_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "Lixeira",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        if (trashCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-4).dp, y = 4.dp)
+                                    .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                                    .background(MaterialTheme.colorScheme.error, CircleShape)
+                                    .padding(horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "$trashCount",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    // Archived icon button with ZERO signals/badges
+                    IconButton(
+                        onClick = {
+                            onDismissMenu()
+                            onOpenArchivedNotes()
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("menu_notes_archived_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Archive,
+                            contentDescription = "Arquivadas",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }

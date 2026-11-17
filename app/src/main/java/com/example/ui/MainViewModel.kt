@@ -315,7 +315,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setNoteArchived(note: Note, isArchived: Boolean) {
         viewModelScope.launch {
             repository.setNoteArchived(note, isArchived)
-            _userMessage.emit(if (isArchived) "Nota arquivada com sucesso" else "Nota restaurada para as notas principais")
+            val msg = when (note.resolvedDocumentType) {
+                NoteDocumentType.PDF -> if (isArchived) "PDF arquivado com sucesso" else "PDF restaurado para as notas"
+                NoteDocumentType.DOCX -> if (isArchived) "Word (.docx) arquivado com sucesso" else "Word (.docx) restaurado para as notas"
+                NoteDocumentType.MARKDOWN -> if (isArchived) "Nota arquivada com sucesso" else "Nota restaurada para as notas principais"
+            }
+            _userMessage.emit(msg)
         }
     }
 
@@ -365,9 +370,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _organizationSubTab = MutableStateFlow(0)
     val organizationSubTab: StateFlow<Int> = _organizationSubTab.asStateFlow()
 
+    // Hoisted Notes search query (shared between TopAppBar and NotesSubTab)
+    private val _notesSearchQuery = MutableStateFlow("")
+    val notesSearchQuery: StateFlow<String> = _notesSearchQuery.asStateFlow()
+
+    fun setNotesSearchQuery(query: String) {
+        _notesSearchQuery.value = query
+    }
+
     // Trigger to immediately start creating note from Home shortcut
     private val _openCreateNoteTrigger = MutableStateFlow(false)
     val openCreateNoteTrigger: StateFlow<Boolean> = _openCreateNoteTrigger.asStateFlow()
+
+    // Triggers for Trash and Archived dialogs from top 3-dots menu
+    private val _openNotesTrashTrigger = MutableStateFlow(false)
+    val openNotesTrashTrigger: StateFlow<Boolean> = _openNotesTrashTrigger.asStateFlow()
+
+    private val _openArchivedNotesTrigger = MutableStateFlow(false)
+    val openArchivedNotesTrigger: StateFlow<Boolean> = _openArchivedNotesTrigger.asStateFlow()
 
     fun setOrganizationSubTab(tab: Int) {
         _organizationSubTab.value = tab
@@ -379,6 +399,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetCreateNoteTrigger() {
         _openCreateNoteTrigger.value = false
+    }
+
+    fun triggerOpenNotesTrash() {
+        _openNotesTrashTrigger.value = true
+    }
+
+    fun resetOpenNotesTrashTrigger() {
+        _openNotesTrashTrigger.value = false
+    }
+
+    fun triggerOpenArchivedNotes() {
+        _openArchivedNotesTrigger.value = true
+    }
+
+    fun resetOpenArchivedNotesTrigger() {
+        _openArchivedNotesTrigger.value = false
     }
 
     // What's New dialog for v0.7.11
@@ -1386,19 +1422,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val parts = mutableListOf<String>()
             if (linkedDocsCount > 0) {
-                parts.add("$linkedDocsCount documento(s) vinculado(s) por caminho")
+                parts.add("$linkedDocsCount documento(s) (PDF/Word) adicionado(s)")
             }
             if (importedNotesCount > 0) {
                 parts.add("$importedNotesCount nota(s) importada(s)")
             }
             if (skippedDuplicatesCount > 0) {
-                parts.add("$skippedDuplicatesCount já vinculado(s)")
+                parts.add("$skippedDuplicatesCount já adicionado(s)")
             }
             if (errorCount > 0) {
                 parts.add("$errorCount com erro")
             }
             val msg = if (parts.isEmpty()) "Nenhum arquivo importado." else parts.joinToString(" • ") + "!"
             _userMessage.emit(msg)
+        }
+    }
+
+    fun openOrRegisterExternalDocumentFromIntent(
+        uri: Uri,
+        mimeType: String?,
+        context: Context
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, uri)
+                val filename = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, uri)
+                    ?: queryFileName(context, uri)
+                    ?: "Documento_${System.currentTimeMillis()}"
+                val docType = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(
+                    context = context,
+                    uri = uri,
+                    displayName = filename,
+                    mimeTypeHint = mimeType
+                )
+                if (docType == null) {
+                    _userMessage.emit("Formato de arquivo não suportado para leitura externa.")
+                    return@launch
+                }
+
+                val uriStr = uri.toString()
+                val existingNotes = repository.getAllNotesSync()
+                val existing = existingNotes.firstOrNull {
+                    it.externalUri?.trim() == uriStr && it.resolvedDocumentType == docType
+                }
+
+                if (existing != null) {
+                    if (existing.isArchived) {
+                        repository.setNoteArchived(existing, false)
+                    }
+                    _noteToOpen.value = existing.copy(isArchived = false)
+                } else {
+                    val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+                    val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
+                    val newDoc = Note(
+                        uuid = java.util.UUID.randomUUID().toString(),
+                        title = rawTitle,
+                        content = "",
+                        category = "Geral",
+                        iconEmoji = docIcon,
+                        documentType = docType.id,
+                        externalUri = uriStr,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val newId = repository.insertNote(newDoc)
+                    com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+                    _noteToOpen.value = newDoc.copy(id = newId)
+                    val label = if (docType == NoteDocumentType.PDF) "PDF" else "Word (.docx)"
+                    _userMessage.emit("$label '$rawTitle' adicionado ao menu de notas!")
+                }
+            } catch (_: Exception) {
+                _userMessage.emit("Não foi possível abrir o arquivo selecionado.")
+            }
         }
     }
 
@@ -1639,7 +1733,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val markdownResult: Pair<String?, String?> = try {
                 val stream = com.example.util.ExternalDocumentUriHelper.openInputStream(context, uriString)
                 if (stream == null) {
-                    null to "Não foi possível abrir o arquivo externo. Verifique se ele ainda existe ou re-vincule o caminho."
+                    null to "Não foi possível abrir o arquivo. Verifique se o PDF ou Word (.docx) ainda existe ou selecione-o novamente."
                 } else {
                     stream.use { input ->
                         when (docNote.resolvedDocumentType) {
@@ -1733,10 +1827,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.moveToTrash(note)
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
-            val msg = if (note.isExternalDocument) {
-                "Vínculo movido para a Lixeira (seu arquivo original permanece intacto)."
-            } else {
-                "Anotação movida para a Lixeira (30 dias)."
+            val msg = when (note.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "PDF movido para a Lixeira (seu arquivo original permanece intacto)."
+                NoteDocumentType.DOCX -> "Documento Word (.docx) movido para a Lixeira (seu arquivo original permanece intacto)."
+                NoteDocumentType.MARKDOWN -> "Anotação movida para a Lixeira (30 dias)."
             }
             _userMessage.emit(msg)
         }
@@ -1776,10 +1870,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
             }
             repository.permanentlyDeleteNote(note)
-            val msg = if (note.isExternalDocument) {
-                "Vínculo removido do Citra (arquivo original preservado)."
-            } else {
-                "Anotação excluída definitivamente do Citra e dos arquivos do dispositivo."
+            val msg = when (note.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "PDF removido do Citra (arquivo original preservado)."
+                NoteDocumentType.DOCX -> "Word (.docx) removido do Citra (arquivo original preservado)."
+                NoteDocumentType.MARKDOWN -> "Anotação excluída definitivamente do Citra e dos arquivos do dispositivo."
             }
             _userMessage.emit(msg)
         }

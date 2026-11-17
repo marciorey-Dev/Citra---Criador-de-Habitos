@@ -1,13 +1,22 @@
 package com.example.ui.screens.organization
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -16,9 +25,11 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
@@ -30,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -104,13 +116,16 @@ fun NotesSubTab(
 ) {
     val context = LocalContext.current
     val notes by viewModel.notes.collectAsState()
+    val archivedNotes by viewModel.archivedNotes.collectAsState()
     val trashNotes by viewModel.trashNotes.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val selectedCategoryFilter by viewModel.selectedNoteCategoryFilter.collectAsState()
-    val selectedDocumentFilter by viewModel.selectedNoteDocumentFilter.collectAsState()
     val openCreateTrigger by viewModel.openCreateNoteTrigger.collectAsState()
+    val openTrashTrigger by viewModel.openNotesTrashTrigger.collectAsState()
+    val openArchivedTrigger by viewModel.openArchivedNotesTrigger.collectAsState()
+    val pendingOpenNoteFromFinances by viewModel.pendingOpenNoteFromFinances.collectAsState()
 
-    var searchQuery by remember { mutableStateOf("") }
+    val searchQuery by viewModel.notesSearchQuery.collectAsState()
     var activeNoteToEdit by remember { mutableStateOf<Note?>(null) }
     var activePdfToRead by remember { mutableStateOf<Note?>(null) }
     var activeDocxToRead by remember { mutableStateOf<Note?>(null) }
@@ -118,10 +133,12 @@ fun NotesSubTab(
     var noteForCategoryPicker by remember { mutableStateOf<Note?>(null) }
     var noteAwaitingRelink by remember { mutableStateOf<Note?>(null) }
     var isCreatingNew by remember { mutableStateOf(false) }
+    var isCreateMenuExpanded by remember { mutableStateOf(false) }
+    var showSpeedDialFinanceDialog by remember { mutableStateOf(false) }
     var noteToDelete by remember { mutableStateOf<Note?>(null) }
     var noteForSubmenu by remember { mutableStateOf<Note?>(null) }
     var showTrashDialog by remember { mutableStateOf(false) }
-    var showAddFolderDialog by remember { mutableStateOf(false) }
+    var showArchivedDialog by remember { mutableStateOf(false) }
     val notesSortOptionName by viewModel.notesSortOption.collectAsState()
     val isSortAscending by viewModel.notesSortAscending.collectAsState()
     val notesLayoutModeName by viewModel.notesLayoutMode.collectAsState()
@@ -135,12 +152,14 @@ fun NotesSubTab(
             NoteDocumentType.PDF -> {
                 activeNoteToEdit = null
                 isCreatingNew = false
+                isCreateMenuExpanded = false
                 activeDocxToRead = null
                 activePdfToRead = target
             }
             NoteDocumentType.DOCX -> {
                 activeNoteToEdit = null
                 isCreatingNew = false
+                isCreateMenuExpanded = false
                 activePdfToRead = null
                 activeDocxToRead = target
             }
@@ -149,6 +168,7 @@ fun NotesSubTab(
                 activeDocxToRead = null
                 activeNoteToEdit = target
                 isCreatingNew = false
+                isCreateMenuExpanded = false
             }
         }
     }
@@ -165,7 +185,31 @@ fun NotesSubTab(
         }
     }
 
-    val linkExternalDocsLauncher = rememberLauncherForActivityResult(
+    val pickPdfDocsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importMultipleMarkdownFiles(
+                uris = uris,
+                context = context,
+                preferredCategory = selectedCategoryFilter
+            )
+        }
+    }
+
+    val pickDocxDocsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importMultipleMarkdownFiles(
+                uris = uris,
+                context = context,
+                preferredCategory = selectedCategoryFilter
+            )
+        }
+    }
+
+    val importOtherFilesLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
@@ -197,12 +241,35 @@ fun NotesSubTab(
         if (openCreateTrigger) {
             activePdfToRead = null
             activeDocxToRead = null
+            isCreateMenuExpanded = false
             isCreatingNew = true
             viewModel.resetCreateNoteTrigger()
         }
     }
 
-    // Respond to notification / social click to open specific note or linked document
+    // Respond to top 3-dots menu Trash / Archived triggers
+    LaunchedEffect(openTrashTrigger) {
+        if (openTrashTrigger) {
+            showTrashDialog = true
+            viewModel.resetOpenNotesTrashTrigger()
+        }
+    }
+
+    LaunchedEffect(openArchivedTrigger) {
+        if (openArchivedTrigger) {
+            showArchivedDialog = true
+            viewModel.resetOpenArchivedNotesTrigger()
+        }
+    }
+
+    LaunchedEffect(pendingOpenNoteFromFinances) {
+        pendingOpenNoteFromFinances?.let { created ->
+            openNoteItem(created)
+            viewModel.clearPendingOpenNoteFromFinances()
+        }
+    }
+
+    // Respond to notification / social / intent click to open specific note, PDF, or Word document
     LaunchedEffect(noteToOpen) {
         noteToOpen?.let { note ->
             openNoteItem(note)
@@ -211,7 +278,7 @@ fun NotesSubTab(
     }
 
     // Filter notes by search query AND category AND 72h rule
-    val categoryAndSearchNotes = remember(notes, searchQuery, selectedCategoryFilter) {
+    val filteredNotes = remember(notes, searchQuery, selectedCategoryFilter) {
         notes.filter { note ->
             val isReady = note.isReadyForMainList()
             val matchesCategory = (selectedCategoryFilter == "Todas" || note.category.equals(selectedCategoryFilter, ignoreCase = true))
@@ -223,11 +290,6 @@ fun NotesSubTab(
             }
             isReady && matchesCategory && matchesSearch
         }
-    }
-
-    // Apply Document Type filter (ALL, NOTES, PDF, DOCX)
-    val filteredNotes = remember(categoryAndSearchNotes, selectedDocumentFilter) {
-        filterNotesByDocumentType(categoryAndSearchNotes, selectedDocumentFilter)
     }
 
     // Sorted notes: Pinned notes ALWAYS stay at top, combined with primary sort + secondary asc/desc
@@ -577,168 +639,9 @@ fun NotesSubTab(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // 1. Pill Search Bar & Utility Quick Actions
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Pill Search Input
-                Surface(
-                    shape = CircleShape,
-                    color = surfaceContainerLow,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .tutorialTarget("notes_search_input")
-                        .testTag("notes_search_input")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Pesquisar",
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Box(
-                            modifier = Modifier.weight(1f),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    text = "Pesquisar notas ou ideias...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.outline,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            BasicTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { searchQuery = "" },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Clear,
-                                    contentDescription = "Limpar pesquisa",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Create New Folder Circular Button
-                Surface(
-                    shape = CircleShape,
-                    color = surfaceContainerLow,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .clickable { showAddFolderDialog = true }
-                        .testTag("notes_create_folder_btn")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.CreateNewFolder,
-                            contentDescription = "Criar nova pasta",
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(21.dp)
-                        )
-                    }
-                }
-
-                // Import Notes & Link PDF/.docx Circular Button
-                Surface(
-                    shape = CircleShape,
-                    color = surfaceContainerLow,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            importMultipleNotesLauncher.launch(ExternalDocumentUriHelper.ALL_IMPORT_AND_LINK_MIME_TYPES)
-                        }
-                        .testTag("notes_import_multiple_btn")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.FileOpen,
-                            contentDescription = "Importar notas ou vincular PDF / .docx",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                // Trash Circular Button with Badge
-                Box(modifier = Modifier.size(48.dp)) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (trashNotes.isNotEmpty()) {
-                            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-                        } else {
-                            surfaceContainerLow
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .clickable { showTrashDialog = true }
-                            .testTag("notes_trash_btn")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteOutline,
-                                contentDescription = "Lixeira (30 dias)",
-                                tint = if (trashNotes.isNotEmpty()) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.outline
-                                },
-                                modifier = Modifier.size(21.dp)
-                            )
-                        }
-                    }
-                    if (trashNotes.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = (-2).dp, y = 2.dp)
-                                .size(18.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "${trashNotes.size}",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 2. Scrollable Folder Tabs (Pill Chips)
+            // 1. Scrollable Category Tabs (Pill Chips)
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -778,350 +681,177 @@ fun NotesSubTab(
                         onClick = { viewModel.setSelectedNoteCategoryFilter(cat.name) }
                     )
                 }
-
-                // "+ Pasta" Pill
-                item {
-                    Surface(
-                        shape = CircleShape,
-                        color = surfaceContainerHigh,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { showAddFolderDialog = true }
-                            .testTag("notes_add_folder_chip")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Pasta",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
             }
 
-            // 2b. Document Type Filter Strip (Todos, Notas, PDFs, .docx) + Quick Link Button
-            val allDocCount = categoryAndSearchNotes.size
-            val mdDocCount = categoryAndSearchNotes.count { it.resolvedDocumentType == NoteDocumentType.MARKDOWN }
-            val pdfDocCount = categoryAndSearchNotes.count { it.resolvedDocumentType == NoteDocumentType.PDF }
-            val docxDocCount = categoryAndSearchNotes.count { it.resolvedDocumentType == NoteDocumentType.DOCX }
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("notes_doc_filter_bar")
-            ) {
-                items(NoteDocumentFilter.entries) { filter ->
-                    val count = when (filter) {
-                        NoteDocumentFilter.ALL -> allDocCount
-                        NoteDocumentFilter.NOTES -> mdDocCount
-                        NoteDocumentFilter.PDF -> pdfDocCount
-                        NoteDocumentFilter.DOCX -> docxDocCount
-                    }
-                    val isSelected = selectedDocumentFilter == filter
-                    val chipColor = when {
-                        isSelected && filter == NoteDocumentFilter.PDF -> Color(0xFFDC2626)
-                        isSelected && filter == NoteDocumentFilter.DOCX -> Color(0xFF2563EB)
-                        isSelected -> MaterialTheme.colorScheme.primary
-                        else -> surfaceContainerLow
-                    }
-                    val contentCol = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
-                    val chipIcon = when (filter) {
-                        NoteDocumentFilter.ALL -> Icons.Default.Apps
-                        NoteDocumentFilter.NOTES -> Icons.Default.Description
-                        NoteDocumentFilter.PDF -> Icons.Default.PictureAsPdf
-                        NoteDocumentFilter.DOCX -> Icons.Default.Article
-                    }
-                    Surface(
-                        shape = CircleShape,
-                        color = chipColor,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { viewModel.setSelectedNoteDocumentFilter(filter) }
-                            .testTag("notes_doc_filter_${filter.name.lowercase()}")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = chipIcon,
-                                contentDescription = null,
-                                tint = contentCol,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = filter.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                color = contentCol
-                            )
-                            Text(
-                                text = "$count",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = contentCol.copy(alpha = if (isSelected) 0.9f else 0.65f)
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable {
-                                linkExternalDocsLauncher.launch(ExternalDocumentUriHelper.DOCUMENT_PICKER_MIME_TYPES)
-                            }
-                            .testTag("notes_link_external_doc_btn")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AttachFile,
-                                contentDescription = "Vincular PDF ou .docx",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "+ PDF / .docx",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 3. View & Sort Controls Row (Primary Sort + Secondary Asc/Desc + Layout Modes incl. Stacked Folders)
+            // 2. View & Sort Controls Row (Primary Sort + Secondary Asc/Desc inside menu + Layout Modes incl. Stacked Folders)
             @OptIn(ExperimentalLayoutApi::class)
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Primary Sort Dropdown Pill
-                    Box {
-                        Surface(
-                            shape = CircleShape,
-                            color = surfaceContainerLow,
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .clickable { showSortMenu = true }
-                                .testTag("notes_sort_menu_btn")
+                // Primary Sort Dropdown Pill (includes Ascendente / Decrescente secondary order inside menu)
+                Box {
+                    Surface(
+                        shape = CircleShape,
+                        color = surfaceContainerLow,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { showSortMenu = true }
+                            .testTag("notes_sort_menu_btn")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Sort,
-                                    contentDescription = "Ordenar notas",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = currentSort.shortLabel,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Icon(
-                                    imageVector = Icons.Default.ExpandMore,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.outline
-                                )
-                            }
-                        }
-                        DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Ordenar notas",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                             Text(
-                                text = "Ordenar por",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                text = currentSort.shortLabel,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            NoteSortOption.entries.forEach { opt ->
-                                val selected = opt == currentSort
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = opt.label,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            when (opt) {
-                                                NoteSortOption.LAST_UPDATED -> Icons.Default.Update
-                                                NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
-                                                NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
-                                                NoteSortOption.CATEGORY -> Icons.Default.Label
-                                                NoteSortOption.SIZE -> Icons.Default.FormatSize
-                                            },
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    },
-                                    trailingIcon = if (selected) {
-                                        {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(16.dp),
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    } else null,
-                                    onClick = {
-                                        viewModel.setNotesSortOption(opt.name)
-                                        showSortMenu = false
-                                    }
-                                )
-                            }
-
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                            Text(
-                                text = "Ordem secundária",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.outline,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                            Icon(
+                                imageVector = if (isSortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.primary
                             )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Ascendente",
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSortAscending) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowUpward,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = if (isSortAscending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                },
-                                trailingIcon = if (isSortAscending) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                } else null,
-                                onClick = {
-                                    viewModel.setNotesSortAscending(true)
-                                    showSortMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = "Decrescente",
-                                        fontSize = 12.sp,
-                                        fontWeight = if (!isSortAscending) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDownward,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp),
-                                        tint = if (!isSortAscending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                },
-                                trailingIcon = if (!isSortAscending) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                } else null,
-                                onClick = {
-                                    viewModel.setNotesSortAscending(false)
-                                    showSortMenu = false
-                                }
+                            Icon(
+                                imageVector = Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.outline
                             )
                         }
                     }
-
-                    // Secondary 1-Tap Ascendente / Decrescente Pill
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isSortAscending) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            surfaceContainerLow
-                        },
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { viewModel.toggleNotesSortAscending() }
-                            .testTag("notes_sort_direction_btn")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isSortAscending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-                                contentDescription = if (isSortAscending) "Ordem Ascendente" else "Ordem Decrescente",
-                                modifier = Modifier.size(15.dp),
-                                tint = if (isSortAscending) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.primary
+                    DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                        Text(
+                            text = "Ordenar por",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                        NoteSortOption.entries.forEach { opt ->
+                            val selected = opt == currentSort
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = opt.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        when (opt) {
+                                            NoteSortOption.LAST_UPDATED -> Icons.Default.Update
+                                            NoteSortOption.CREATION_DATE -> Icons.Default.CalendarToday
+                                            NoteSortOption.ALPHABETICAL -> Icons.Default.SortByAlpha
+                                            NoteSortOption.CATEGORY -> Icons.Default.Label
+                                            NoteSortOption.SIZE -> Icons.Default.FormatSize
+                                        },
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                trailingIcon = if (selected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    viewModel.setNotesSortOption(opt.name)
+                                    showSortMenu = false
                                 }
                             )
-                            Text(
-                                text = if (isSortAscending) "Asc" else "Desc",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isSortAscending) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                maxLines = 1
-                            )
                         }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        Text(
+                            text = "Ordem secundária",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Ascendente",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSortAscending) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowUpward,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (isSortAscending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            trailingIcon = if (isSortAscending) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else null,
+                            onClick = {
+                                viewModel.setNotesSortAscending(true)
+                                showSortMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Decrescente",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (!isSortAscending) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDownward,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (!isSortAscending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                            },
+                            trailingIcon = if (!isSortAscending) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else null,
+                            onClick = {
+                                viewModel.setNotesSortAscending(false)
+                                showSortMenu = false
+                            }
+                        )
                     }
                 }
 
@@ -1417,12 +1147,138 @@ fun NotesSubTab(
             }
         }
 
+        // Dimmed backdrop when FAB speed-dial is open
+        AnimatedVisibility(
+            visible = isCreateMenuExpanded,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = if (isAppDarkTheme()) 0.58f else 0.44f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { isCreateMenuExpanded = false }
+                    .testTag("notes_speed_dial_scrim")
+            )
+        }
+
+        BackHandler(enabled = isCreateMenuExpanded) {
+            isCreateMenuExpanded = false
+        }
+
+        // Speed-Dial circular action buttons stacked cleanly ABOVE the FAB
+        AnimatedVisibility(
+            visible = isCreateMenuExpanded,
+            enter = fadeIn() + slideInVertically { it / 3 } + scaleIn(initialScale = 0.9f),
+            exit = fadeOut() + slideOutVertically { it / 3 } + scaleOut(targetScale = 0.9f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 84.dp)
+        ) {
+            val dialColor = MaterialTheme.colorScheme.primary
+            val dialIconTint = if (dialColor.luminance() > 0.45f) Color(0xFF141218) else Color.White
+
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 310.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                NotesSpeedDialItem(
+                    label = "Criar notas",
+                    icon = Icons.Default.EditNote,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_create_note",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        isCreatingNew = true
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Importar notas",
+                    icon = Icons.Default.FileOpen,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_import_notes",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        importMultipleNotesLauncher.launch(ExternalDocumentUriHelper.MARKDOWN_IMPORT_MIME_TYPES)
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "PDF",
+                    icon = Icons.Default.PictureAsPdf,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_pdf",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        pickPdfDocsLauncher.launch(ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES)
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Word (.docx)",
+                    icon = Icons.Default.Article,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_docx",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        pickDocxDocsLauncher.launch(ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES)
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Rascunhos",
+                    icon = Icons.Default.DashboardCustomize,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_drafts",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        showTemplatesMenu = true
+                    }
+                )
+                NotesSpeedDialItem(
+                    label = "Outro",
+                    subtitle = ExternalDocumentUriHelper.OTHER_SUPPORTED_EXTENSIONS_LABEL,
+                    icon = Icons.Default.SnippetFolder,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_other",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        importOtherFilesLauncher.launch(ExternalDocumentUriHelper.OTHER_IMPORT_MIME_TYPES)
+                    }
+                )
+                if (financesEnabled) {
+                    NotesSpeedDialItem(
+                        label = "Bloco de Finanças",
+                        icon = Icons.Default.AccountBalanceWallet,
+                        buttonColor = dialColor,
+                        iconTint = dialIconTint,
+                        testTag = "speed_dial_finance_block",
+                        onClick = {
+                            isCreateMenuExpanded = false
+                            showSpeedDialFinanceDialog = true
+                        }
+                    )
+                }
+            }
+        }
+
         // Circular Citrus Glow FAB
+        val fabTint = if (MaterialTheme.colorScheme.primary.luminance() > 0.45f) Color(0xFF141218) else Color.White
         FloatingActionButton(
-            onClick = { isCreatingNew = true },
+            onClick = { isCreateMenuExpanded = !isCreateMenuExpanded },
             shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            contentColor = fabTint,
             elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -1432,20 +1288,36 @@ fun NotesSubTab(
                 .testTag("add_note_fab")
         ) {
             Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = "Nova Anotação",
+                imageVector = if (isCreateMenuExpanded) Icons.Default.Close else Icons.Default.Add,
+                contentDescription = if (isCreateMenuExpanded) "Fechar menu de criação" else "Opções de criação",
                 modifier = Modifier.size(28.dp)
             )
         }
     }
 
-    // Add Folder / Category Dialog
-    if (showAddFolderDialog) {
-        AddCategoryDialog(
-            onDismiss = { showAddFolderDialog = false },
-            onConfirm = { name, emoji ->
-                viewModel.addCustomCategory(name, emoji)
-                showAddFolderDialog = false
+    // Finance Note Link Creator Dialog called directly from Notes Speed-Dial (identical menu to Finances)
+    if (showSpeedDialFinanceDialog && financesEnabled) {
+        val finCategories by viewModel.allFinanceCategories.collectAsState()
+        val finEntries by viewModel.financeEntries.collectAsState()
+        val baseBal by viewModel.financeBaseBalanceMinor.collectAsState()
+        val currCode by viewModel.financeDefaultCurrency.collectAsState()
+        val activeCurr = remember(currCode) { com.example.data.model.FinanceCurrency.fromCode(currCode) }
+        val currentBal = remember(baseBal, finEntries) {
+            baseBal + finEntries.sumOf {
+                if (it.type == com.example.data.model.FinanceEntryType.INCOME.id) it.totalAmountMinor else -it.totalAmountMinor
+            }
+        }
+        com.example.ui.screens.finances.FinanceNoteLinkCreatorDialog(
+            notes = notes,
+            categories = finCategories,
+            entries = finEntries,
+            currentBalanceMinor = currentBal,
+            defaultCurrency = activeCurr,
+            preselectedNote = null,
+            onDismiss = { showSpeedDialFinanceDialog = false },
+            onConfirmCreateLink = { link, createNewNote, newNoteTitle, template ->
+                viewModel.createAndRunFinanceNoteLink(link, createNewNote, newNoteTitle, template)
+                showSpeedDialFinanceDialog = false
             }
         )
     }
@@ -1465,18 +1337,21 @@ fun NotesSubTab(
         )
     }
 
-    // Confirmation dialog before deleting note or unlinking external document
+    // Confirmation dialog before deleting note or removing PDF / Word from list
     if (noteToDelete != null) {
         val target = noteToDelete!!
-        val isExternal = target.isExternalDocument
         ConfirmDeleteDialog(
-            title = if (isExternal) "Remover Vínculo" else "Mover para a Lixeira",
-            message = if (isExternal) {
-                "Deseja remover o vínculo com '${target.title}' da lista? O arquivo original no seu aparelho não será apagado."
-            } else {
-                "Deseja mover a anotação '${target.title}' para a lixeira? Ela ficará disponível por 30 dias para restauração."
+            title = when (target.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "Remover PDF"
+                NoteDocumentType.DOCX -> "Remover Word (.docx)"
+                NoteDocumentType.MARKDOWN -> "Mover para a Lixeira"
             },
-            confirmButtonText = if (isExternal) "Mover Vínculo" else "Mover para Lixeira",
+            message = when (target.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "Deseja mover este PDF ('${target.title}') para a lixeira? O arquivo original no seu aparelho não será apagado."
+                NoteDocumentType.DOCX -> "Deseja mover este Word (.docx) ('${target.title}') para a lixeira? O arquivo original no seu aparelho não será apagado."
+                NoteDocumentType.MARKDOWN -> "Deseja mover a anotação '${target.title}' para a lixeira? Ela ficará disponível por 30 dias para restauração."
+            },
+            confirmButtonText = "Mover para Lixeira",
             onConfirm = {
                 viewModel.moveNoteToTrash(target)
                 noteToDelete = null
@@ -1491,6 +1366,7 @@ fun NotesSubTab(
             note = note,
             onDismiss = { noteForSubmenu = null },
             onTogglePin = { viewModel.togglePinNote(note) },
+            onToggleArchive = { viewModel.setNoteArchived(note, !note.isArchived) },
             onDelete = { noteToDelete = note },
             onChangeCategory = { noteForCategoryPicker = note },
             onOpenReadOnly = if (note.isExternalDocument) {
@@ -1512,9 +1388,9 @@ fun NotesSubTab(
                 {
                     noteAwaitingRelink = note
                     val mime = if (note.isPdfDocument) {
-                        arrayOf("application/pdf")
+                        ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES
                     } else {
-                        arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+                        ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES
                     }
                     relinkExternalDocLauncher.launch(mime)
                 }
@@ -1546,6 +1422,90 @@ fun NotesSubTab(
             onEmptyTrash = { viewModel.emptyNoteTrash(context) },
             onDismiss = { showTrashDialog = false }
         )
+    }
+
+    // Archived Notes Dialog
+    if (showArchivedDialog) {
+        ArchivedNotesDialog(
+            archivedNotes = archivedNotes,
+            onOpenNote = { note ->
+                showArchivedDialog = false
+                openNoteItem(note)
+            },
+            onUnarchive = { viewModel.setNoteArchived(it, false) },
+            onMoveToTrash = { noteToDelete = it },
+            onDismiss = { showArchivedDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun NotesSpeedDialItem(
+    label: String,
+    subtitle: String? = null,
+    icon: ImageVector,
+    buttonColor: Color,
+    iconTint: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .testTag(testTag)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 4.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        Surface(
+            shape = CircleShape,
+            color = buttonColor,
+            shadowElevation = 5.dp,
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onClick)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = iconTint,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
     }
 }
 
@@ -2556,6 +2516,7 @@ fun NoteSubmenuDialog(
     note: Note,
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
+    onToggleArchive: (() -> Unit)? = null,
     onDelete: () -> Unit,
     onDuplicate: () -> Unit,
     onChangeCategory: (() -> Unit)? = null,
@@ -2887,7 +2848,37 @@ fun NoteSubmenuDialog(
                     }
                 }
 
-                // Move to trash (or remove link)
+                // Archive / Unarchive
+                if (onToggleArchive != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onToggleArchive()
+                                onDismiss()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                            .testTag("submenu_archive_note")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (note.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (note.isArchived) "Desarquivar" else "Arquivar",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+
+                // Move to trash
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = Color.Transparent,
@@ -2903,7 +2894,11 @@ fun NoteSubmenuDialog(
                         Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = if (isExternal) "Remover Vínculo (Lixeira)" else "Mover para a Lixeira",
+                            text = when (note.resolvedDocumentType) {
+                                NoteDocumentType.PDF -> "Mover PDF para a Lixeira"
+                                NoteDocumentType.DOCX -> "Mover Word para a Lixeira"
+                                NoteDocumentType.MARKDOWN -> "Mover para a Lixeira"
+                            },
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -2917,4 +2912,191 @@ fun NoteSubmenuDialog(
             }
         }
     )
+}
+
+/**
+ * Dialog showing Archived Notes (regular notes, PDFs, and Word docs).
+ * Clicking any archived note opens it normally; users can also unarchive or move to trash.
+ */
+@Composable
+fun ArchivedNotesDialog(
+    archivedNotes: List<Note>,
+    onOpenNote: (Note) -> Unit,
+    onUnarchive: (Note) -> Unit,
+    onMoveToTrash: (Note) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp)
+                .testTag("archived_notes_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Archive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Notas Arquivadas",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Suas notas arquivadas não aparecem na tela inicial, mas abrem normalmente por aqui.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (archivedNotes.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Archive,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f),
+                                modifier = Modifier.size(40.dp)
+                            )
+                            Text(
+                                text = "Nenhuma nota arquivada",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(archivedNotes, key = { it.id }) { note ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { onOpenNote(note) }
+                                    .testTag("archived_note_item_${note.id}")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = when {
+                                                note.isPdfDocument -> Icons.Default.PictureAsPdf
+                                                note.isDocxDocument -> Icons.Default.Article
+                                                else -> Icons.Default.Description
+                                            },
+                                            contentDescription = null,
+                                            tint = when {
+                                                note.isPdfDocument -> Color(0xFFDC2626)
+                                                note.isDocxDocument -> Color(0xFF2563EB)
+                                                else -> MaterialTheme.colorScheme.primary
+                                            },
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = note.title.ifBlank { "Sem título" },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = note.category.ifBlank { "Geral" },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { onUnarchive(note) },
+                                            modifier = Modifier.size(40.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Unarchive,
+                                                contentDescription = "Desarquivar",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { onMoveToTrash(note) },
+                                            modifier = Modifier.size(40.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Mover para a Lixeira",
+                                                tint = MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Fechar")
+                }
+            }
+        }
+    }
 }

@@ -667,6 +667,7 @@ object BackupManager {
                 put("iconEmoji", n.iconEmoji)
                 put("associatedDate", n.associatedDate ?: JSONObject.NULL)
                 put("isPinned", n.isPinned)
+                put("isArchived", n.isArchived)
                 put("backgroundImageUri", n.backgroundImageUri ?: JSONObject.NULL)
                 put("backgroundBlur", n.backgroundBlur)
                 put("backgroundBrightness", n.backgroundBrightness)
@@ -708,6 +709,7 @@ object BackupManager {
                         iconEmoji = obj.optString("iconEmoji", "📝"),
                         associatedDate = if (obj.isNull("associatedDate")) null else obj.optString("associatedDate"),
                         isPinned = obj.optBoolean("isPinned", false),
+                        isArchived = obj.optBoolean("isArchived", false),
                         backgroundImageUri = if (obj.isNull("backgroundImageUri")) null else obj.optString("backgroundImageUri"),
                         backgroundBlur = obj.optDouble("backgroundBlur", 0.5).toFloat(),
                         backgroundBrightness = obj.optDouble("backgroundBrightness", 0.5).toFloat(),

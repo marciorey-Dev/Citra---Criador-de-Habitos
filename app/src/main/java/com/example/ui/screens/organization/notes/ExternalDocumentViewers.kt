@@ -7,11 +7,24 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.LruCache
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,7 +33,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -29,15 +41,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -265,7 +282,7 @@ private fun ExternalDocumentReaderHeader(
     secondaryControls: @Composable RowScope.() -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         tonalElevation = 3.dp,
         shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth()
@@ -273,6 +290,7 @@ private fun ExternalDocumentReaderHeader(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -416,7 +434,22 @@ fun ExternalPdfReaderScreen(
 
     val context = LocalContext.current
     var showCategoryPicker by remember { mutableStateOf(false) }
-    var zoomPercent by remember { mutableIntStateOf(100) }
+    var showChrome by remember { mutableStateOf(true) }
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val animatedScale by animateFloatAsState(
+        targetValue = zoomScale,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "pdf_zoom_scale"
+    )
+    val animatedPan by animateOffsetAsState(
+        targetValue = panOffset,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "pdf_zoom_pan"
+    )
+
     var loadError by remember { mutableStateOf<String?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
 
@@ -435,7 +468,7 @@ fun ExternalPdfReaderScreen(
     DisposableEffect(note.externalUri) {
         val pfd = ExternalDocumentUriHelper.openParcelFileDescriptor(context, note.externalUri)
         if (pfd == null) {
-            loadError = "Arquivo PDF inacessível neste caminho. Se o arquivo foi movido ou a permissão expirou, toque em Re-vincular PDF."
+            loadError = "Arquivo PDF inacessível neste caminho. Se o arquivo foi movido ou a permissão expirou, toque em Selecionar PDF novamente."
             activePfd = null
             activeRenderer = null
             pageCount = 0
@@ -484,10 +517,164 @@ fun ExternalPdfReaderScreen(
         derivedStateOf { (listState.firstVisibleItemIndex + 1).coerceAtLeast(1) }
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
+    fun applyDoubleTapZoomAt(tapOffset: Offset) {
+        val current = zoomScale
+        val nextScale = when {
+            current < 1.35f -> 1.55f
+            current < 1.95f -> 2.15f
+            else -> 1f
+        }
+        if (nextScale <= 1.01f || viewportSize.width <= 0 || viewportSize.height <= 0) {
+            zoomScale = 1f
+            panOffset = Offset.Zero
+        } else {
+            val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            val factor = nextScale / current
+            val rawPan = tapOffset - center - (tapOffset - center - panOffset) * factor
+            val maxX = (viewportSize.width * (nextScale - 1f)) / 2f
+            val maxY = (viewportSize.height * (nextScale - 1f)) / 2f
+            zoomScale = nextScale
+            panOffset = Offset(
+                x = rawPan.x.coerceIn(-maxX, maxX),
+                y = rawPan.y.coerceIn(-maxY, maxY)
+            )
+        }
+    }
+
+    val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "pdf_top_pad")
+    val bottomSpacer by animateDpAsState(targetValue = if (showChrome) 56.dp else 16.dp, label = "pdf_bottom_pad")
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .clipToBounds()
+    ) {
+        // Main PDF Reader Surface (supports single-tap chrome toggle + area double-tap zoom + 2-finger pinch)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { viewportSize = it }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { showChrome = !showChrome },
+                        onDoubleTap = { tapOffset -> applyDoubleTapZoomAt(tapOffset) }
+                    )
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } >= 2) {
+                                val zoomFactor = event.calculateZoom()
+                                if (kotlin.math.abs(zoomFactor - 1f) > 0.01f) {
+                                    val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                    zoomScale = updated
+                                    if (updated <= 1.02f) {
+                                        panOffset = Offset.Zero
+                                    } else if (viewportSize.width > 0 && viewportSize.height > 0) {
+                                        val maxX = (viewportSize.width * (updated - 1f)) / 2f
+                                        val maxY = (viewportSize.height * (updated - 1f)) / 2f
+                                        panOffset = Offset(
+                                            x = panOffset.x.coerceIn(-maxX, maxX),
+                                            y = panOffset.y.coerceIn(-maxY, maxY)
+                                        )
+                                    }
+                                    event.changes.forEach { it.consume() }
+                                }
+                            }
+                            if (event.changes.none { it.pressed }) break
+                        }
+                    }
+                }
+                .pointerInput(zoomScale > 1.02f, viewportSize) {
+                    if (zoomScale > 1.02f) {
+                        detectHorizontalDragGestures { change, dragAmount ->
+                            change.consume()
+                            val maxX = (viewportSize.width * (zoomScale - 1f)) / 2f
+                            panOffset = Offset(
+                                x = (panOffset.x + dragAmount).coerceIn(-maxX, maxX),
+                                y = panOffset.y
+                            )
+                        }
+                    }
+                }
+        ) {
+            when {
+                loadError != null -> {
+                    ExternalDocumentMissingState(
+                        message = loadError!!,
+                        relinkLabel = "Selecionar PDF novamente",
+                        onRelink = onRelinkClick,
+                        onRemoveLink = onRemoveLink,
+                        onClose = onClose,
+                        relinkTestTag = "pdf_reader_relink_btn"
+                    )
+                }
+                activeRenderer != null && pageCount > 0 -> {
+                    val renderer = activeRenderer!!
+                    val density = LocalDensity.current
+                    val zoomPercent = (zoomScale * 100).toInt()
+                    val renderBucket = when {
+                        zoomPercent <= 115 -> 100
+                        zoomPercent <= 170 -> 150
+                        else -> 225
+                    }
+
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val baseWidthPx = with(density) { (maxWidth - 24.dp).toPx().toInt().coerceAtLeast(480) }
+                        val targetWidthPx = (baseWidthPx * (renderBucket / 100f)).toInt().coerceAtMost(2200)
+                        val displayWidthDp = (maxWidth - 24.dp)
+
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer(
+                                    scaleX = animatedScale,
+                                    scaleY = animatedScale,
+                                    translationX = animatedPan.x,
+                                    translationY = animatedPan.y
+                                ),
+                            contentPadding = PaddingValues(
+                                start = 12.dp,
+                                end = 12.dp,
+                                top = topSpacer,
+                                bottom = bottomSpacer
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            items(count = pageCount, key = { it }) { pageIdx ->
+                                PdfPageCard(
+                                    renderer = renderer,
+                                    renderMutex = renderMutex,
+                                    bitmapCache = bitmapCache,
+                                    pageIndex = pageIdx,
+                                    pageCount = pageCount,
+                                    targetWidthPx = targetWidthPx,
+                                    renderBucket = renderBucket,
+                                    displayWidthDp = displayWidthDp
+                                )
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+            }
+        }
+
+        // Top Bar Overlay (Single-tap hides/restores)
+        AnimatedVisibility(
+            visible = showChrome || loadError != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
             ExternalDocumentReaderHeader(
                 title = note.title,
                 badgeLabel = "PDF · Somente leitura",
@@ -507,7 +694,7 @@ fun ExternalPdfReaderScreen(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
                 ) {
                     Text(
-                        text = if (pageCount > 0) "Pág. $currentPageIndex de $pageCount" else "PDF externo",
+                        text = if (pageCount > 0) "Pág. $currentPageIndex de $pageCount" else "PDF",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -520,35 +707,48 @@ fun ExternalPdfReaderScreen(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     IconButton(
-                        onClick = { zoomPercent = (zoomPercent - 25).coerceAtLeast(75) },
-                        enabled = zoomPercent > 75,
+                        onClick = {
+                            val next = (zoomScale - 0.25f).coerceAtLeast(0.75f)
+                            zoomScale = next
+                            if (next <= 1.02f) panOffset = Offset.Zero
+                        },
+                        enabled = zoomScale > 0.76f,
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(Icons.Default.ZoomOut, contentDescription = "Diminuir zoom", modifier = Modifier.size(18.dp))
                     }
                     Text(
-                        text = "$zoomPercent%",
+                        text = "${(zoomScale * 100).toInt()}%",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
                     )
                     IconButton(
-                        onClick = { zoomPercent = (zoomPercent + 25).coerceAtMost(225) },
-                        enabled = zoomPercent < 225,
+                        onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(2.5f) },
+                        enabled = zoomScale < 2.49f,
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(Icons.Default.ZoomIn, contentDescription = "Aumentar zoom", modifier = Modifier.size(18.dp))
                     }
                 }
             }
-        },
-        bottomBar = {
+        }
+
+        // Bottom Footer Overlay (Single-tap hides/restores cleanly)
+        AnimatedVisibility(
+            visible = showChrome,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+                tonalElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -567,80 +767,6 @@ fun ExternalPdfReaderScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .pointerInput(Unit) {
-                    detectTransformGestures { _, _, zoom, _ ->
-                        if (zoom > 1.04f) {
-                            zoomPercent = (zoomPercent + 10).coerceAtMost(225)
-                        } else if (zoom < 0.96f) {
-                            zoomPercent = (zoomPercent - 10).coerceAtLeast(75)
-                        }
-                    }
-                }
-        ) {
-            if (loadError != null) {
-                ExternalDocumentMissingState(
-                    message = loadError!!,
-                    relinkLabel = "Re-vincular PDF",
-                    onRelink = onRelinkClick,
-                    onRemoveLink = onRemoveLink,
-                    onClose = onClose,
-                    relinkTestTag = "pdf_reader_relink_btn"
-                )
-            } else if (activeRenderer != null && pageCount > 0) {
-                val renderer = activeRenderer!!
-                val density = LocalDensity.current
-                val horizontalScroll = rememberScrollState()
-
-                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                    val baseWidthPx = with(density) { (maxWidth - 24.dp).toPx().toInt().coerceAtLeast(480) }
-                    val renderBucket = when {
-                        zoomPercent <= 100 -> 100
-                        zoomPercent <= 150 -> 150
-                        else -> 225
-                    }
-                    val targetWidthPx = (baseWidthPx * (renderBucket / 100f)).toInt().coerceAtMost(2200)
-                    val displayWidthDp = (maxWidth - 24.dp) * (zoomPercent / 100f)
-
-                    val listModifier = if (zoomPercent > 100) {
-                        Modifier
-                            .fillMaxSize()
-                            .horizontalScroll(horizontalScroll)
-                    } else {
-                        Modifier.fillMaxSize()
-                    }
-
-                    LazyColumn(
-                        state = listState,
-                        modifier = listModifier,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        items(count = pageCount, key = { it }) { pageIdx ->
-                            PdfPageCard(
-                                renderer = renderer,
-                                renderMutex = renderMutex,
-                                bitmapCache = bitmapCache,
-                                pageIndex = pageIdx,
-                                pageCount = pageCount,
-                                targetWidthPx = targetWidthPx,
-                                renderBucket = renderBucket,
-                                displayWidthDp = displayWidthDp
-                            )
-                        }
-                    }
-                }
-            } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
                 }
             }
         }
@@ -767,7 +893,23 @@ fun ExternalDocxReaderScreen(
 
     val context = LocalContext.current
     var showCategoryPicker by remember { mutableStateOf(false) }
+    var showChrome by remember { mutableStateOf(true) }
     var textScale by remember { mutableFloatStateOf(1.0f) }
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val animatedScale by animateFloatAsState(
+        targetValue = zoomScale,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "docx_zoom_scale"
+    )
+    val animatedPan by animateOffsetAsState(
+        targetValue = panOffset,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "docx_zoom_pan"
+    )
+
     var parsedDoc by remember { mutableStateOf<DocxParsedDocument?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -779,14 +921,14 @@ fun ExternalDocxReaderScreen(
         val result = withContext(Dispatchers.IO) {
             val stream = ExternalDocumentUriHelper.openInputStream(context, note.externalUri)
             if (stream == null) {
-                null to "Arquivo .docx não encontrado ou permissão revogada. Toque em Re-vincular .docx."
+                null to "Arquivo Word (.docx) não encontrado ou permissão revogada. Toque em Selecionar Word novamente."
             } else {
                 try {
                     stream.use { input ->
                         DocxDocumentEngine.parseDocx(input) to null
                     }
                 } catch (e: Exception) {
-                    null to "Não foi possível ler este .docx: ${e.message ?: "arquivo corrompido ou incompatível"}."
+                    null to "Não foi possível ler este Word (.docx): ${e.message ?: "arquivo corrompido ou incompatível"}."
                 }
             }
         }
@@ -795,13 +937,163 @@ fun ExternalDocxReaderScreen(
         isLoading = false
     }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
+    fun applyDoubleTapZoomAt(tapOffset: Offset) {
+        val current = zoomScale
+        val nextScale = when {
+            current < 1.35f -> 1.55f
+            current < 1.95f -> 2.15f
+            else -> 1f
+        }
+        if (nextScale <= 1.01f || viewportSize.width <= 0 || viewportSize.height <= 0) {
+            zoomScale = 1f
+            panOffset = Offset.Zero
+        } else {
+            val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            val factor = nextScale / current
+            val rawPan = tapOffset - center - (tapOffset - center - panOffset) * factor
+            val maxX = (viewportSize.width * (nextScale - 1f)) / 2f
+            val maxY = (viewportSize.height * (nextScale - 1f)) / 2f
+            zoomScale = nextScale
+            panOffset = Offset(
+                x = rawPan.x.coerceIn(-maxX, maxX),
+                y = rawPan.y.coerceIn(-maxY, maxY)
+            )
+        }
+    }
+
+    val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "docx_top_pad")
+    val bottomSpacer by animateDpAsState(targetValue = if (showChrome) 56.dp else 16.dp, label = "docx_bottom_pad")
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .clipToBounds()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { viewportSize = it }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { showChrome = !showChrome },
+                        onDoubleTap = { tapOffset -> applyDoubleTapZoomAt(tapOffset) }
+                    )
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.changes.count { it.pressed } >= 2) {
+                                val zoomFactor = event.calculateZoom()
+                                if (kotlin.math.abs(zoomFactor - 1f) > 0.01f) {
+                                    val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                    zoomScale = updated
+                                    if (updated <= 1.02f) {
+                                        panOffset = Offset.Zero
+                                    } else if (viewportSize.width > 0 && viewportSize.height > 0) {
+                                        val maxX = (viewportSize.width * (updated - 1f)) / 2f
+                                        val maxY = (viewportSize.height * (updated - 1f)) / 2f
+                                        panOffset = Offset(
+                                            x = panOffset.x.coerceIn(-maxX, maxX),
+                                            y = panOffset.y.coerceIn(-maxY, maxY)
+                                        )
+                                    }
+                                    event.changes.forEach { it.consume() }
+                                }
+                            }
+                            if (event.changes.none { it.pressed }) break
+                        }
+                    }
+                }
+                .pointerInput(zoomScale > 1.02f, viewportSize) {
+                    if (zoomScale > 1.02f) {
+                        detectHorizontalDragGestures { change, dragAmount ->
+                            change.consume()
+                            val maxX = (viewportSize.width * (zoomScale - 1f)) / 2f
+                            panOffset = Offset(
+                                x = (panOffset.x + dragAmount).coerceIn(-maxX, maxX),
+                                y = panOffset.y
+                            )
+                        }
+                    }
+                }
+        ) {
+            when {
+                isLoading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = "Carregando Word (.docx)...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                loadError != null -> {
+                    ExternalDocumentMissingState(
+                        message = loadError!!,
+                        relinkLabel = "Selecionar Word novamente",
+                        onRelink = onRelinkClick,
+                        onRemoveLink = onRemoveLink,
+                        onClose = onClose,
+                        relinkTestTag = "docx_reader_relink_btn"
+                    )
+                }
+                parsedDoc != null -> {
+                    val blocks = parsedDoc!!.blocks
+                    if (blocks.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Documento Word (.docx) sem conteúdo visível.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .widthIn(max = 760.dp)
+                                .align(Alignment.TopCenter)
+                                .graphicsLayer(
+                                    scaleX = animatedScale,
+                                    scaleY = animatedScale,
+                                    translationX = animatedPan.x,
+                                    translationY = animatedPan.y
+                                ),
+                            contentPadding = PaddingValues(
+                                start = 20.dp,
+                                end = 20.dp,
+                                top = topSpacer,
+                                bottom = bottomSpacer
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            itemsIndexed(blocks) { _, block ->
+                                DocxReadOnlyBlockItem(block = block, fontScale = textScale)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Top Bar Overlay (Single-tap hides/restores)
+        AnimatedVisibility(
+            visible = showChrome || loadError != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
             ExternalDocumentReaderHeader(
                 title = note.title,
-                badgeLabel = ".docx · Somente leitura",
+                badgeLabel = "Word (.docx) · Somente leitura",
                 badgeColor = Color(0xFF2563EB),
                 category = note.category,
                 isConverting = isConverting,
@@ -845,15 +1137,24 @@ fun ExternalDocxReaderScreen(
                     }
                 }
             }
-        },
-        bottomBar = {
+        }
+
+        // Bottom Footer Overlay (Single-tap hides/restores cleanly)
+        AnimatedVisibility(
+            visible = showChrome,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+                tonalElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -872,67 +1173,6 @@ fun ExternalDocxReaderScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            when {
-                isLoading -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator()
-                            Text(
-                                text = "Carregando documento .docx...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                loadError != null -> {
-                    ExternalDocumentMissingState(
-                        message = loadError!!,
-                        relinkLabel = "Re-vincular .docx",
-                        onRelink = onRelinkClick,
-                        onRemoveLink = onRemoveLink,
-                        onClose = onClose,
-                        relinkTestTag = "docx_reader_relink_btn"
-                    )
-                }
-                parsedDoc != null -> {
-                    val blocks = parsedDoc!!.blocks
-                    if (blocks.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "Documento .docx sem conteúdo visível.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        SelectionContainer {
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .widthIn(max = 760.dp)
-                                    .align(Alignment.TopCenter),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                itemsIndexed(blocks) { _, block ->
-                                    DocxReadOnlyBlockItem(block = block, fontScale = textScale)
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -972,7 +1212,7 @@ private fun ExternalDocumentMissingState(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = Icons.Default.LinkOff,
+                    imageVector = Icons.Default.FolderOff,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.size(34.dp)
@@ -981,7 +1221,7 @@ private fun ExternalDocumentMissingState(
         }
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Arquivo externo indisponível",
+            text = "Arquivo indisponível",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
@@ -1006,7 +1246,7 @@ private fun ExternalDocumentMissingState(
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onRemoveLink, shape = RoundedCornerShape(14.dp)) {
-                Text("Remover Vínculo")
+                Text("Remover da Lista")
             }
             TextButton(onClick = onClose) {
                 Text("Voltar")

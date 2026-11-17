@@ -18,6 +18,30 @@ object ExternalDocumentUriHelper {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+    val PDF_PICKER_MIME_TYPES = arrayOf("application/pdf")
+
+    val DOCX_PICKER_MIME_TYPES = arrayOf(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+    val MARKDOWN_IMPORT_MIME_TYPES = arrayOf(
+        "text/markdown",
+        "text/plain",
+        "*/*"
+    )
+
+    val OTHER_IMPORT_MIME_TYPES = arrayOf(
+        "text/plain",
+        "text/html",
+        "text/csv",
+        "application/json",
+        "application/xml",
+        "text/xml",
+        "*/*"
+    )
+
+    const val OTHER_SUPPORTED_EXTENSIONS_LABEL = ".txt · .html · .csv · .json · .tex · .xml · .citradoc"
+
     val ALL_IMPORT_AND_LINK_MIME_TYPES = arrayOf(
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -82,24 +106,33 @@ object ExternalDocumentUriHelper {
         return rawLast?.substringAfterLast('/')?.substringAfterLast(':')?.takeIf { it.isNotBlank() }
     }
 
-    fun detectExternalDocumentType(
-        context: Context,
-        uri: Uri,
-        displayName: String? = null
+    fun detectExternalDocumentTypeFromMeta(
+        displayName: String?,
+        mimeType: String?
     ): NoteDocumentType? {
-        val name = (displayName ?: resolveDisplayName(context, uri) ?: "").lowercase().trim()
-        val mime = try {
-            context.contentResolver.getType(uri)?.lowercase().orEmpty()
-        } catch (_: Exception) {
-            ""
-        }
-
+        val name = (displayName ?: "").lowercase().trim()
+        val mime = (mimeType ?: "").lowercase().trim()
         return when {
             mime == "application/pdf" || name.endsWith(".pdf") -> NoteDocumentType.PDF
             mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
                 name.endsWith(".docx") -> NoteDocumentType.DOCX
             else -> null
         }
+    }
+
+    fun detectExternalDocumentType(
+        context: Context,
+        uri: Uri,
+        displayName: String? = null,
+        mimeTypeHint: String? = null
+    ): NoteDocumentType? {
+        val resolvedName = displayName ?: resolveDisplayName(context, uri)
+        val mime = try {
+            context.contentResolver.getType(uri)?.takeIf { it.isNotBlank() } ?: mimeTypeHint
+        } catch (_: Exception) {
+            mimeTypeHint
+        }
+        return detectExternalDocumentTypeFromMeta(resolvedName, mime)
     }
 
     fun openInputStream(context: Context, pathOrUri: String?): InputStream? {

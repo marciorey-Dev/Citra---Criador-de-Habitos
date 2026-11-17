@@ -370,4 +370,77 @@ class ExternalDocumentEngineTest {
         assertEquals("content://docs/projeto.docx", restored[1].externalUri)
         assertEquals("", restored[1].content)
     }
+
+    @Test
+    fun `external intent detector resolves PDF and Word mime types and octet-stream filename fallbacks`() {
+        assertEquals(
+            NoteDocumentType.PDF,
+            com.example.util.ExternalDocumentUriHelper.detectExternalDocumentTypeFromMeta(
+                displayName = "documento_sem_extensao",
+                mimeType = "application/pdf"
+            )
+        )
+        assertEquals(
+            NoteDocumentType.DOCX,
+            com.example.util.ExternalDocumentUriHelper.detectExternalDocumentTypeFromMeta(
+                displayName = "relatorio",
+                mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+        )
+        assertEquals(
+            NoteDocumentType.PDF,
+            com.example.util.ExternalDocumentUriHelper.detectExternalDocumentTypeFromMeta(
+                displayName = "Guia_Leitura.PDF",
+                mimeType = "application/octet-stream"
+            )
+        )
+        assertEquals(
+            NoteDocumentType.DOCX,
+            com.example.util.ExternalDocumentUriHelper.detectExternalDocumentTypeFromMeta(
+                displayName = "Contrato_Final.docx",
+                mimeType = "application/octet-stream"
+            )
+        )
+        assertEquals(
+            null,
+            com.example.util.ExternalDocumentUriHelper.detectExternalDocumentTypeFromMeta(
+                displayName = "foto.png",
+                mimeType = "image/png"
+            )
+        )
+    }
+
+    @Test
+    fun `other supported extensions label explicitly exposes non-markdown non-pdf non-docx formats`() {
+        val label = com.example.util.ExternalDocumentUriHelper.OTHER_SUPPORTED_EXTENSIONS_LABEL
+        listOf(".txt", ".html", ".csv", ".json", ".tex", ".xml", ".citradoc").forEach { ext ->
+            assertTrue("Expected $ext in $label", label.contains(ext))
+        }
+    }
+
+    @Test
+    fun `backup manager preserves isArchived state so archived notes stay separate from active notes`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val activeNote = Note(
+            id = 1L,
+            uuid = "active-1",
+            title = "Ativa",
+            content = "Visível",
+            isArchived = false
+        )
+        val archivedNote = Note(
+            id = 2L,
+            uuid = "arch-2",
+            title = "Arquivada",
+            content = "Guardada",
+            isArchived = true
+        )
+
+        val json = BackupManager.exportNotesJson(listOf(activeNote, archivedNote), context)
+        val restored = BackupManager.parseNotesJson(json, context)
+
+        assertEquals(2, restored.size)
+        assertFalse(restored.first { it.uuid == "active-1" }.isArchived)
+        assertTrue(restored.first { it.uuid == "arch-2" }.isArchived)
+    }
 }
