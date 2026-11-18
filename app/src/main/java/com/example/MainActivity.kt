@@ -263,11 +263,15 @@ class MainActivity : ComponentActivity() {
                     return@CitraTheme
                 }
 
-                // First-launch Citra Mascot intro animation & local profile setup
+                // First-launch Citra Mascot intro animation & adaptive personalization quiz
                 if (!hasCompletedOnboarding) {
+                    val savedProfileAnswers by viewModel.onboardingProfileAnswers.collectAsState()
                     com.example.ui.screens.welcome.WelcomeIntroScreen(
-                        onFinishOnboarding = { displayName, photoPath ->
-                            viewModel.completeOnboarding(displayName, photoPath)
+                        initialAnswers = savedProfileAnswers,
+                        onPreviewThemeMode = { viewModel.setThemeMode(it) },
+                        onPreviewThemeAccent = { viewModel.setThemeAccent(it) },
+                        onFinishOnboarding = { displayName, photoPath, profileAnswers ->
+                            viewModel.completeOnboarding(displayName, photoPath, profileAnswers)
                         }
                     )
                     return@CitraTheme

@@ -91,8 +91,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.local.OnboardingProfileAnswers
+import com.example.data.local.ThemeBrightnessChoice
+import com.example.data.local.VisualMoodChoice
 import com.example.ui.components.CitraMascote
 import com.example.ui.components.MascotHumor
+import com.example.ui.theme.ThemeAccent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -105,7 +109,10 @@ private val CitraHeroBottom = Color(0xFFE65A00)
 
 @Composable
 fun WelcomeIntroScreen(
-    onFinishOnboarding: (displayName: String, photoPath: String?) -> Unit
+    initialAnswers: OnboardingProfileAnswers = OnboardingProfileAnswers(),
+    onPreviewThemeMode: (Boolean?) -> Unit = {},
+    onPreviewThemeAccent: (ThemeAccent) -> Unit = {},
+    onFinishOnboarding: (displayName: String, photoPath: String?, profileAnswers: OnboardingProfileAnswers?) -> Unit
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -115,6 +122,11 @@ fun WelcomeIntroScreen(
     var selectedPhotoPath by remember { mutableStateOf<String?>(null) }
     var photoVersion by remember { mutableIntStateOf(0) }
     var isNameFocused by remember { mutableStateOf(false) }
+
+    // Onboarding wizard step: 0 = Name & Photo, 1..6 = Questions, 7 = Summary
+    var wizardStep by remember { mutableIntStateOf(0) }
+    var quizAnswers by remember(initialAnswers) { mutableStateOf(initialAnswers) }
+    var quizMascotBubble by remember { mutableStateOf<String?>(null) }
 
     // Citra Mascot choreography states
     var humor by remember { mutableStateOf(MascotHumor.SURPRESO) }
@@ -317,16 +329,21 @@ fun WelcomeIntroScreen(
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
                     ) {
                         Text(
-                            text = mascotBubbles[bubbleIndex],
+                            text = if (wizardStep == 0) {
+                                mascotBubbles[bubbleIndex]
+                            } else {
+                                quizMascotBubble ?: "Personalizando o Citra para você 🍊"
+                            },
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(if (wizardStep == 0) 14.dp else 8.dp))
 
                 // Interactive Animated Citra Mascot
                 Box(
@@ -353,7 +370,7 @@ fun WelcomeIntroScreen(
                         humor = humor,
                         olharX = olharX,
                         olharY = olharY,
-                        tamanho = 128.dp,
+                        tamanho = if (wizardStep == 0) 128.dp else 86.dp,
                         folha = true,
                         piscar = true,
                         nodTrigger = nodTrigger,
@@ -361,11 +378,11 @@ fun WelcomeIntroScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(if (wizardStep == 0) 12.dp else 8.dp))
 
-                // Title & subtitle
+                // Title & subtitle (compact when inside questionnaire steps)
                 AnimatedVisibility(
-                    visible = showHeaderText,
+                    visible = showHeaderText && wizardStep == 0,
                     enter = fadeIn(tween(280)) + slideInVertically(tween(280)) { 24 }
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -387,262 +404,309 @@ fun WelcomeIntroScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
+                Spacer(modifier = Modifier.height(if (wizardStep == 0) 22.dp else 10.dp))
 
-                // Local Profile Setup Card (replaces old online/account buttons)
+                // Step 0 (Name + Photo) OR Steps 1..7 (Adaptive Questionnaire + Summary)
                 AnimatedVisibility(
                     visible = showProfileCard,
                     enter = fadeIn(tween(300)) + slideInVertically(tween(320)) { 48 }
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(28.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        shadowElevation = 10.dp,
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 22.dp, vertical = 22.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                    if (wizardStep == 0) {
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            shadowElevation = 10.dp,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            // Profile Photo Preview
-                            Box(contentAlignment = Alignment.BottomEnd) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shadowElevation = 3.dp,
-                                    modifier = Modifier
-                                        .size(92.dp)
-                                        .clip(CircleShape)
-                                        .border(
-                                            2.5.dp,
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
-                                            CircleShape
-                                        )
-                                        .clickable {
-                                            photoPickerLauncher.launch(
-                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 22.dp, vertical = 22.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                // Profile Photo Preview
+                                Box(contentAlignment = Alignment.BottomEnd) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shadowElevation = 3.dp,
+                                        modifier = Modifier
+                                            .size(92.dp)
+                                            .clip(CircleShape)
+                                            .border(
+                                                2.5.dp,
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                                                CircleShape
                                             )
-                                        }
-                                        .testTag("welcome_avatar_button")
-                                ) {
-                                    if (!selectedPhotoPath.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = File(selectedPhotoPath!!),
-                                            contentDescription = "Foto de perfil selecionada",
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    } else {
-                                        val initial = nameInput.trim().take(1).uppercase()
-                                        Box(contentAlignment = Alignment.Center) {
-                                            if (initial.isNotEmpty()) {
-                                                Text(
-                                                    text = initial,
-                                                    fontSize = 36.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    color = MaterialTheme.colorScheme.primary
+                                            .clickable {
+                                                photoPickerLauncher.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                                 )
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.Default.Person,
-                                                    contentDescription = "Escolher foto de perfil",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(40.dp)
-                                                )
+                                            }
+                                            .testTag("welcome_avatar_button")
+                                    ) {
+                                        if (!selectedPhotoPath.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = File(selectedPhotoPath!!),
+                                                contentDescription = "Foto de perfil selecionada",
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            val initial = nameInput.trim().take(1).uppercase()
+                                            Box(contentAlignment = Alignment.Center) {
+                                                if (initial.isNotEmpty()) {
+                                                    Text(
+                                                        text = initial,
+                                                        fontSize = 36.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Person,
+                                                        contentDescription = "Escolher foto de perfil",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(40.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    shadowElevation = 3.dp,
-                                    modifier = Modifier.size(30.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CameraAlt,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.padding(6.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Photo source buttons (Gallery / Camera / Clear)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        photoPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .minimumInteractiveComponentSize()
-                                        .testTag("welcome_gallery_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PhotoLibrary,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Galeria", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                OutlinedButton(
-                                    onClick = { cameraLauncher.launch(null) },
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .minimumInteractiveComponentSize()
-                                        .testTag("welcome_camera_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CameraAlt,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Câmera", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                if (!selectedPhotoPath.isNullOrBlank()) {
-                                    IconButton(
-                                        onClick = {
-                                            selectedPhotoPath = null
-                                            nodTrigger++
-                                        },
-                                        modifier = Modifier
-                                            .minimumInteractiveComponentSize()
-                                            .testTag("welcome_remove_photo_button")
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shadowElevation = 3.dp,
+                                        modifier = Modifier.size(30.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Remover foto selecionada",
-                                            tint = MaterialTheme.colorScheme.error
+                                            imageVector = Icons.Default.CameraAlt,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.padding(6.dp)
                                         )
                                     }
                                 }
-                            }
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
 
-                            // Display Name Field
-                            OutlinedTextField(
-                                value = nameInput,
-                                onValueChange = { if (it.length <= 40) nameInput = it },
-                                label = { Text("Como gostaria de ser chamado?") },
-                                placeholder = { Text("Viajante Citra") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                },
-                                trailingIcon = {
-                                    if (nameInput.isNotEmpty()) {
-                                        IconButton(onClick = { nameInput = "" }) {
+                                // Photo source buttons (Gallery / Camera / Clear)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            photoPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("welcome_gallery_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PhotoLibrary,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Galeria", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { cameraLauncher.launch(null) },
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("welcome_camera_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CameraAlt,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Câmera", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+
+                                    if (!selectedPhotoPath.isNullOrBlank()) {
+                                        IconButton(
+                                            onClick = {
+                                                selectedPhotoPath = null
+                                                nodTrigger++
+                                            },
+                                            modifier = Modifier
+                                                .minimumInteractiveComponentSize()
+                                                .testTag("welcome_remove_photo_button")
+                                        ) {
                                             Icon(
                                                 imageVector = Icons.Default.Close,
-                                                contentDescription = "Limpar nome"
+                                                contentDescription = "Remover foto selecionada",
+                                                tint = MaterialTheme.colorScheme.error
                                             )
                                         }
                                     }
-                                },
-                                singleLine = true,
-                                shape = RoundedCornerShape(16.dp),
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Words,
-                                    imeAction = ImeAction.Done
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Display Name Field
+                                OutlinedTextField(
+                                    value = nameInput,
+                                    onValueChange = { if (it.length <= 40) nameInput = it },
+                                    label = { Text("Como gostaria de ser chamado?") },
+                                    placeholder = { Text("Viajante Citra") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (nameInput.isNotEmpty()) {
+                                            IconButton(onClick = { nameInput = "" }) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Limpar nome"
+                                                )
+                                            }
+                                        }
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    keyboardOptions = KeyboardOptions(
+                                        capitalization = KeyboardCapitalization.Words,
+                                        imeAction = ImeAction.Done
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = {
+                                            focusManager.clearFocus()
+                                            wizardStep = 1
+                                        }
+                                    ),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { isNameFocused = it.isFocused }
+                                        .testTag("welcome_name_input")
+                                )
+
+                                Spacer(modifier = Modifier.height(18.dp))
+
+                                // Primary CTA advances into the short 6-step personalization flow
+                                Button(
+                                    onClick = {
                                         focusManager.clearFocus()
-                                        onFinishOnboarding(nameInput.trim(), selectedPhotoPath)
-                                    }
-                                ),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onFocusChanged { isNameFocused = it.isFocused }
-                                    .testTag("welcome_name_input")
-                            )
+                                        wizardStep = 1
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 52.dp)
+                                        .testTag("welcome_continue_button")
+                                ) {
+                                    Text(
+                                        text = "Continuar",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
 
-                            Spacer(modifier = Modifier.height(18.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
 
-                            // Primary CTA
-                            Button(
-                                onClick = {
-                                    focusManager.clearFocus()
-                                    onFinishOnboarding(nameInput.trim(), selectedPhotoPath)
-                                },
-                                shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary,
-                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = 52.dp)
-                                    .testTag("welcome_continue_button")
-                            ) {
+                                TextButton(
+                                    onClick = {
+                                        focusManager.clearFocus()
+                                        onFinishOnboarding(nameInput.trim(), selectedPhotoPath, null)
+                                    },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("welcome_skip_button")
+                                ) {
+                                    Text(
+                                        text = "Usar padrão agora",
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
                                 Text(
-                                    text = "Começar no Citra",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                    text = "Seu nome e foto ficam salvos apenas neste aparelho.",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                    textAlign = TextAlign.Center
                                 )
                             }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            TextButton(
-                                onClick = {
-                                    focusManager.clearFocus()
-                                    onFinishOnboarding("", null)
-                                },
-                                modifier = Modifier
-                                    .minimumInteractiveComponentSize()
-                                    .testTag("welcome_skip_button")
-                            ) {
-                                Text(
-                                    text = "Usar padrão agora",
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Text(
-                                text = "Seu nome e foto ficam salvos apenas neste aparelho.",
-                                fontSize = 11.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                textAlign = TextAlign.Center
-                            )
                         }
+                    } else {
+                        ProfileQuestionnaireCard(
+                            displayName = nameInput.trim(),
+                            answers = quizAnswers,
+                            currentStep = wizardStep,
+                            onAnswersChange = { updated ->
+                                quizAnswers = updated
+                                // Live preview theme brightness & accent when adjusting Step 6
+                                val nextThemeMode: Boolean? = when (updated.themeBrightness) {
+                                    ThemeBrightnessChoice.LIGHT -> false
+                                    ThemeBrightnessChoice.DARK -> true
+                                    ThemeBrightnessChoice.SYSTEM -> null
+                                }
+                                onPreviewThemeMode(nextThemeMode)
+                                val previewAccent = when (updated.visualMood) {
+                                    VisualMoodChoice.TANGERINA -> ThemeAccent.TANGERINA
+                                    VisualMoodChoice.CALMA -> ThemeAccent.VERDE_MENTA
+                                    VisualMoodChoice.FOCO -> ThemeAccent.AZUL_OCEANO
+                                    VisualMoodChoice.CRIATIVO -> ThemeAccent.ROXO_COSMICO
+                                    VisualMoodChoice.SURPRISE_DAILY -> ThemeAccent.TANGERINA
+                                }
+                                onPreviewThemeAccent(previewAccent)
+                            },
+                            onStepChange = { nextStep -> wizardStep = nextStep },
+                            onBackFromFirstStep = {
+                                quizMascotBubble = null
+                                humor = MascotHumor.FELIZ
+                                wizardStep = 0
+                            },
+                            onSkipToDefault = {
+                                onPreviewThemeMode(null)
+                                onPreviewThemeAccent(ThemeAccent.TANGERINA)
+                                onFinishOnboarding(nameInput.trim(), selectedPhotoPath, null)
+                            },
+                            onFinishQuiz = { finalAnswers ->
+                                onFinishOnboarding(nameInput.trim(), selectedPhotoPath, finalAnswers)
+                            },
+                            onMascotReaction = { feedback ->
+                                quizMascotBubble = feedback.bubbleText
+                                humor = feedback.humor
+                                if (feedback.jump) jumpTrigger++ else nodTrigger++
+                            },
+                            finishButtonLabel = "Entrar no meu Citra",
+                            showSkipButton = true
+                        )
                     }
                 }
             }

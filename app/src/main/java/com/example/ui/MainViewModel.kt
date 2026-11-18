@@ -14,8 +14,10 @@ import java.io.File
 import com.example.audio.LocalMusicPlayer
 import com.example.data.backup.BackupManager
 import com.example.data.local.AppDatabase
-import com.example.data.local.PreferencesManager
 import com.example.data.local.NotificationSettings
+import com.example.data.local.OnboardingProfileAnswers
+import com.example.data.local.PreferencesManager
+import com.example.data.local.ProfileDefaultsResolver
 import com.example.data.local.SavedTimerSnapshot
 import com.example.data.model.*
 import com.example.data.repository.CitraRepository
@@ -83,6 +85,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val hasCompletedOnboarding: StateFlow<Boolean> = preferencesManager.hasCompletedOnboarding
     val localDisplayName: StateFlow<String> = preferencesManager.userDisplayName
     val localPhotoPath: StateFlow<String?> = preferencesManager.userPhotoPath
+    val defaultTaskAlertMode: StateFlow<String> = preferencesManager.defaultTaskAlertMode
+    val onboardingProfileAnswers: StateFlow<OnboardingProfileAnswers> = preferencesManager.onboardingProfileAnswers
 
     fun setLocalDisplayName(name: String) {
         preferencesManager.setUserDisplayName(name)
@@ -92,12 +96,96 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.setUserPhotoPath(path)
     }
 
-    fun completeOnboarding(displayName: String, photoPath: String?) {
+    fun setDefaultTaskAlertMode(mode: String) {
+        preferencesManager.setDefaultTaskAlertMode(mode)
+    }
+
+    fun applyOnboardingProfile(
+        answers: OnboardingProfileAnswers,
+        emitSnackbar: Boolean = true
+    ) {
+        val resolved = ProfileDefaultsResolver.resolve(answers)
+
+        preferencesManager.saveOnboardingProfileAnswers(answers)
+        preferencesManager.setDefaultStartTab(resolved.defaultStartTab)
+        preferencesManager.setDefaultTaskAlertMode(resolved.defaultTaskAlertMode)
+
+        val currentNotif = preferencesManager.settings.value
+        preferencesManager.updateSettings(
+            currentNotif.copy(
+                vibrate = resolved.vibrate,
+                headsUpBanner = resolved.headsUpBanner,
+                overrideSilentMode = resolved.overrideSilentMode,
+                pomodoroDisruptiveAlarm = resolved.pomodoroDisruptiveAlarm,
+                ambientBreakMusicInApp = resolved.ambientBreakMusicInApp
+            )
+        )
+
+        preferencesManager.saveLastUsedFocusMinutes(resolved.focusMinutes)
+        preferencesManager.setTimerContinuousMode(resolved.timerContinuousMode)
+        preferencesManager.setTimerAllowSwipe(resolved.timerAllowSwipe)
+        preferencesManager.setKeepScreenOn(resolved.keepScreenOn)
+        preferencesManager.setFocusDistractionFreeEnabled(resolved.focusDistractionFreeEnabled)
+
+        if (!_pomodoroState.value.isRunning && !_pomodoroState.value.isPaused) {
+            _pomodoroState.update { state ->
+                val secs = resolved.focusMinutes * 60
+                state.copy(
+                    focusMinutes = resolved.focusMinutes,
+                    remainingSeconds = secs,
+                    totalPhaseSeconds = secs
+                )
+            }
+        }
+
+        if (resolved.financesEnabled) {
+            preferencesManager.setFinanceDefaultCurrency(resolved.financeCurrencyCode)
+            preferencesManager.setFinanceHideValues(resolved.financeHideValues)
+            preferencesManager.setFinancesSetupCompleted(true)
+            setFinancesEnabled(true)
+        } else {
+            setFinancesEnabled(false)
+        }
+
+        preferencesManager.setDefaultNoteOpenMode(resolved.defaultNoteOpenMode)
+        preferencesManager.setNotesLayoutMode(resolved.notesLayoutMode)
+
+        preferencesManager.setThemeMode(resolved.themeMode)
+        preferencesManager.setDailyRandomColor(resolved.dailyRandomColor)
+        if (!resolved.dailyRandomColor) {
+            preferencesManager.setThemeAccent(resolved.themeAccent)
+        }
+
+        preferencesManager.setWelcomePhrasesEnabled(resolved.welcomePhrasesEnabled)
+        if (resolved.allTutorialsSkipped) {
+            preferencesManager.skipAllTutorials()
+            _activeTutorial.value = null
+        } else {
+            preferencesManager.resetAllTutorials()
+        }
+
+        NextAlarmScheduler.scheduleNextAlarm(getApplication())
+
+        if (emitSnackbar) {
+            viewModelScope.launch {
+                _userMessage.emit("Personalização do Citra aplicada!")
+            }
+        }
+    }
+
+    fun completeOnboarding(
+        displayName: String,
+        photoPath: String?,
+        profileAnswers: OnboardingProfileAnswers? = null
+    ) {
         if (displayName.isNotBlank()) {
             preferencesManager.setUserDisplayName(displayName)
         }
         if (!photoPath.isNullOrBlank()) {
             preferencesManager.setUserPhotoPath(photoPath)
+        }
+        if (profileAnswers != null) {
+            applyOnboardingProfile(profileAnswers, emitSnackbar = false)
         }
         preferencesManager.setOnboardingCompleted(true)
     }
@@ -1218,9 +1306,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         dueTimestamp: Long?,
         reminderMinutesBefore: Int,
         customSoundUri: String = "",
-        loopAlarm: Boolean = false,
-        isDisruptive: Boolean = false
+        loopAlarm: Boolean? = null,
+        isDisruptive: Boolean? = null
     ) {
+        val defaultMode = preferencesManager.defaultTaskAlertMode.value
+        val resolvedDisruptive = isDisruptive ?: (loopAlarm == null && defaultMode == ProfileDefaultsResolver.TASK_ALERT_DISRUPTIVE)
+        val resolvedLoop = if (resolvedDisruptive) {
+            false
+        } else {
+            loopAlarm ?: (defaultMode == ProfileDefaultsResolver.TASK_ALERT_ALARM)
+        }
         viewModelScope.launch {
             repository.insertTask(
                 Task(
@@ -1231,8 +1326,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     dueDateTimestamp = dueTimestamp,
                     reminderMinutesBefore = reminderMinutesBefore,
                     customSoundUri = customSoundUri,
-                    loopAlarm = loopAlarm,
-                    isDisruptive = isDisruptive
+                    loopAlarm = resolvedLoop,
+                    isDisruptive = resolvedDisruptive
                 )
             )
             _userMessage.emit("Tarefa criada com sucesso!")

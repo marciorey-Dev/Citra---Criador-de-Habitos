@@ -50,6 +50,9 @@ fun SettingsDialog(
     val welcomePhrasesEnabled by viewModel.welcomePhrasesEnabled.collectAsState()
     val disabledWelcomeCategories by viewModel.disabledWelcomeCategories.collectAsState()
     val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
+    val defaultTaskAlertMode by viewModel.defaultTaskAlertMode.collectAsState()
+    val onboardingProfileAnswers by viewModel.onboardingProfileAnswers.collectAsState()
+    val localDisplayName by viewModel.localDisplayName.collectAsState()
 
     // Finance Module States
     val financesEnabled by viewModel.financesEnabled.collectAsState()
@@ -63,6 +66,7 @@ fun SettingsDialog(
     var showFinanceLockDialog by remember { mutableStateOf(false) }
     var showEraseFinanceDialog by remember { mutableStateOf(false) }
     var financeCurrencyExpanded by remember { mutableStateOf(false) }
+    var showProfileQuizDialog by remember { mutableStateOf(false) }
 
     var tempNotificationSettings by remember(notificationSettings) {
         mutableStateOf(notificationSettings)
@@ -680,6 +684,60 @@ fun SettingsDialog(
                                         }
                                     )
                                 }
+
+                                Divider(modifier = Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Alerta padrão ao criar tarefas",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "Define se novas tarefas nascem como aviso discreto, alarme normal ou tarefa perturbadora.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        val alertModes = listOf(
+                                            com.example.data.local.ProfileDefaultsResolver.TASK_ALERT_NOTIFICATION to "Notificação",
+                                            com.example.data.local.ProfileDefaultsResolver.TASK_ALERT_ALARM to "Alarme",
+                                            com.example.data.local.ProfileDefaultsResolver.TASK_ALERT_DISRUPTIVE to "Perturbadora"
+                                        )
+                                        alertModes.forEach { (modeKey, modeLabel) ->
+                                            val isSel = defaultTaskAlertMode == modeKey
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .clickable { viewModel.setDefaultTaskAlertMode(modeKey) }
+                                                    .testTag("settings_task_alert_$modeKey")
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = modeLabel,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -830,6 +888,28 @@ fun SettingsDialog(
                                     Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Reativar e Rever Tutoriais")
+                                }
+
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                )
+
+                                Text("Questionário de Personalização", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(
+                                    "Reabra as perguntas iniciais para ajustar o comportamento padrão do Citra ao seu estilo atual sem apagar seus dados.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                OutlinedButton(
+                                    onClick = { showProfileQuizDialog = true },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("retake_profile_quiz_btn")
+                                ) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Refazer Questionário de Perfil")
                                 }
                             }
                         }
@@ -1093,6 +1173,17 @@ fun SettingsDialog(
         com.example.ui.screens.finances.EraseFinanceDataDoubleConfirmDialog(
             onDismiss = { showEraseFinanceDialog = false },
             onConfirmErase = { viewModel.eraseAllFinanceData() }
+        )
+    }
+
+    if (showProfileQuizDialog) {
+        com.example.ui.screens.welcome.ProfileQuestionnaireDialog(
+            displayName = localDisplayName,
+            initialAnswers = onboardingProfileAnswers,
+            onDismiss = { showProfileQuizDialog = false },
+            onComplete = { updatedAnswers ->
+                viewModel.applyOnboardingProfile(updatedAnswers)
+            }
         )
     }
 

@@ -899,10 +899,17 @@ fun QuickAddTaskDialog(
     var dueDateText by remember(cal) {
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(cal.time))
     }
+    val defaultAlertMode = remember(context) {
+        com.example.data.local.PreferencesManager(context).defaultTaskAlertMode.value
+    }
     var reminderMinutesBefore by remember { mutableStateOf(15) }
     var customSoundUri by remember { mutableStateOf("") }
-    var loopAlarm by remember { mutableStateOf(false) }
-    var isDisruptive by remember { mutableStateOf(false) }
+    var loopAlarm by remember(defaultAlertMode) {
+        mutableStateOf(defaultAlertMode == com.example.data.local.ProfileDefaultsResolver.TASK_ALERT_ALARM)
+    }
+    var isDisruptive by remember(defaultAlertMode) {
+        mutableStateOf(defaultAlertMode == com.example.data.local.ProfileDefaultsResolver.TASK_ALERT_DISRUPTIVE)
+    }
     var showMoreOptions by remember { mutableStateOf(false) }
 
     fun openDateTimePicker() {

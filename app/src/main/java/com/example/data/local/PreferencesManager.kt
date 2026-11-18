@@ -76,6 +76,19 @@ class PreferencesManager(private val context: Context) {
     private val _userPhotoPath = MutableStateFlow<String?>(prefs.getString("user_photo_path", null))
     val userPhotoPath: StateFlow<String?> = _userPhotoPath.asStateFlow()
 
+    // Default Task Alert Mode: "NOTIFICATION", "ALARM", "DISRUPTIVE"
+    private val _defaultTaskAlertMode = MutableStateFlow(
+        prefs.getString("default_task_alert_mode", ProfileDefaultsResolver.TASK_ALERT_NOTIFICATION)
+            ?: ProfileDefaultsResolver.TASK_ALERT_NOTIFICATION
+    )
+    val defaultTaskAlertMode: StateFlow<String> = _defaultTaskAlertMode.asStateFlow()
+
+    // Persisted adaptive onboarding answers for editing/re-running the quiz from Settings
+    private val _onboardingProfileAnswers = MutableStateFlow(
+        OnboardingProfileAnswers.fromJsonString(prefs.getString("onboarding_profile_answers_json", null))
+    )
+    val onboardingProfileAnswers: StateFlow<OnboardingProfileAnswers> = _onboardingProfileAnswers.asStateFlow()
+
     // App Global Background Settings (Wallpaper, Blur, Darkness)
     private val _appBgUri = MutableStateFlow<String?>(prefs.getString("app_bg_uri", null))
     val appBgUri: StateFlow<String?> = _appBgUri.asStateFlow()
@@ -344,6 +357,21 @@ class PreferencesManager(private val context: Context) {
         _userPhotoPath.value = path?.takeIf { it.isNotBlank() }
     }
 
+    fun setDefaultTaskAlertMode(mode: String) {
+        val valid = when (mode) {
+            ProfileDefaultsResolver.TASK_ALERT_ALARM,
+            ProfileDefaultsResolver.TASK_ALERT_DISRUPTIVE -> mode
+            else -> ProfileDefaultsResolver.TASK_ALERT_NOTIFICATION
+        }
+        prefs.edit().putString("default_task_alert_mode", valid).apply()
+        _defaultTaskAlertMode.value = valid
+    }
+
+    fun saveOnboardingProfileAnswers(answers: OnboardingProfileAnswers) {
+        prefs.edit().putString("onboarding_profile_answers_json", answers.toJsonString()).apply()
+        _onboardingProfileAnswers.value = answers
+    }
+
     private fun loadThemeMode(): Boolean? {
         return when (prefs.getString("theme_mode", "SYSTEM")) {
             "DARK" -> true
@@ -483,7 +511,9 @@ class PreferencesManager(private val context: Context) {
             "finance_base_balance_minor" to _financeBaseBalanceMinor.value,
             "finance_hide_values" to _financeHideValues.value,
             "finance_pin_code" to (_financePinCode.value ?: ""),
-            "finance_biometric_enabled" to _financeBiometricEnabled.value
+            "finance_biometric_enabled" to _financeBiometricEnabled.value,
+            "default_task_alert_mode" to _defaultTaskAlertMode.value,
+            "onboarding_profile_answers_json" to _onboardingProfileAnswers.value.toJsonString()
         )
         return result
     }
@@ -651,6 +681,20 @@ class PreferencesManager(private val context: Context) {
         (map["finance_biometric_enabled"] as? Boolean)?.let {
             editor.putBoolean("finance_biometric_enabled", it)
             _financeBiometricEnabled.value = it
+        }
+        (map["default_task_alert_mode"] as? String)?.let { rawMode ->
+            val valid = when (rawMode) {
+                ProfileDefaultsResolver.TASK_ALERT_ALARM,
+                ProfileDefaultsResolver.TASK_ALERT_DISRUPTIVE -> rawMode
+                else -> ProfileDefaultsResolver.TASK_ALERT_NOTIFICATION
+            }
+            editor.putString("default_task_alert_mode", valid)
+            _defaultTaskAlertMode.value = valid
+        }
+        (map["onboarding_profile_answers_json"] as? String)?.takeIf { it.isNotBlank() }?.let { rawJson ->
+            val parsed = OnboardingProfileAnswers.fromJsonString(rawJson)
+            editor.putString("onboarding_profile_answers_json", parsed.toJsonString())
+            _onboardingProfileAnswers.value = parsed
         }
 
         // Standard notification and sound effects settings
