@@ -98,6 +98,23 @@ object DocumentCardPreviewCache {
             docxPreviewCache.put(uri, entry)
         }
     }
+
+    fun invalidatePdfThumbnail(uri: String) {
+        synchronized(pdfThumbCache) {
+            pdfThumbCache.remove(uri)
+        }
+    }
+
+    fun invalidateDocxPreview(uri: String) {
+        synchronized(docxPreviewCache) {
+            docxPreviewCache.remove(uri)
+        }
+    }
+
+    fun invalidate(uri: String) {
+        invalidatePdfThumbnail(uri)
+        invalidateDocxPreview(uri)
+    }
 }
 
 private fun buildPreviewAnnotated(runs: List<DocxRun>): AnnotatedString {

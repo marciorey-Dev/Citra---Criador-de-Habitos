@@ -247,6 +247,29 @@ fun FullScreenNoteEditor(
         }
     }
 
+    // Automatically download & cache external http/https Markdown image links into Citra Pic (reusing cached copies)
+    LaunchedEffect(editorValue.text) {
+        val snapshotText = editorValue.text
+        val hasPotentialRemoteImage = snapshotText.contains("![") &&
+            (snapshotText.contains("http://", ignoreCase = true) || snapshotText.contains("https://", ignoreCase = true))
+        if (hasPotentialRemoteImage) {
+            kotlinx.coroutines.delay(450L)
+            val resolvedText = withContext(Dispatchers.IO) {
+                MediaStorageHelper.resolveAndDownloadRemoteImages(context, snapshotText)
+            }
+            if (resolvedText != snapshotText && editorValue.text == snapshotText) {
+                val sel = editorValue.selection
+                editorValue = editorValue.copy(
+                    text = resolvedText,
+                    selection = TextRange(
+                        sel.start.coerceIn(0, resolvedText.length),
+                        sel.end.coerceIn(0, resolvedText.length)
+                    )
+                )
+            }
+        }
+    }
+
     // Undo / Redo history
     val undoStack = remember { mutableStateListOf<TextFieldValue>() }
     val redoStack = remember { mutableStateListOf<TextFieldValue>() }
@@ -380,6 +403,7 @@ fun FullScreenNoteEditor(
             is TextBlock -> targetBlock.text.trim().take(40)
             is ChecklistBlock -> targetBlock.text.trim().take(40)
             is BulletBlock -> targetBlock.text.trim().take(40)
+            is NumberedBlock -> targetBlock.text.trim().take(40)
             is QuoteBlock -> targetBlock.text.trim().take(40)
             is CodeBlock -> targetBlock.code.trim().take(30)
             is MathBlock -> targetBlock.formula.trim().take(30)
@@ -747,6 +771,7 @@ fun FullScreenNoteEditor(
     // Dialog & Menu visibility states
     var showMenu by remember { mutableStateOf(false) }
     var showTitlesMenu by remember { mutableStateOf(false) }
+    var showListStyleMenu by remember { mutableStateOf(false) }
     var showCalloutMenu by remember { mutableStateOf(false) }
     var showLinkDialog by remember { mutableStateOf(false) }
     var showFindReplaceDialog by remember { mutableStateOf(false) }
@@ -1426,16 +1451,17 @@ fun FullScreenNoteEditor(
                         // OBSIDIAN LIVE PREVIEW: Unified Continuous Text with active line syntax reveal & rich styling
                         BasicTextField(
                             value = editorValue,
-                            onValueChange = { newVal ->
+                            onValueChange = { rawNewVal ->
                                 if (isHistoryApplying) {
                                     isHistoryApplying = false
-                                    editorValue = newVal
+                                    editorValue = rawNewVal
                                     return@BasicTextField
                                 }
+                                val newVal = ObsidianMarkdownEngine.handleNewlineAutoContinue(editorValue, rawNewVal)
                                 if (newVal.text != editorValue.text) {
                                     val now = System.currentTimeMillis()
                                     val textDiff = kotlin.math.abs(newVal.text.length - editorValue.text.length)
-                                    val isWordBoundary = newVal.text.endsWith(" ") || newVal.text.endsWith("\n") || 
+                                    val isWordBoundary = newVal.text.endsWith(" ") || newVal.text.endsWith("\n") ||
                                                            newVal.text.endsWith(".") || newVal.text.endsWith(",") ||
                                                            newVal.text.endsWith(";") || newVal.text.endsWith(":")
                                     val isTimeElapsed = (now - lastTypingTime) > 600L
@@ -1636,7 +1662,7 @@ fun FullScreenNoteEditor(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(vertical = 2.dp),
+                                                .padding(start = 16.dp, top = 2.dp, bottom = 2.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Checkbox(
@@ -1668,12 +1694,36 @@ fun FullScreenNoteEditor(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(vertical = 2.dp),
+                                                .padding(start = 16.dp, top = 2.dp, bottom = 2.dp),
                                             verticalAlignment = Alignment.Top
                                         ) {
                                             Text(
                                                 text = "•",
                                                 fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(end = 8.dp, start = 4.dp)
+                                            )
+                                            Text(
+                                                text = InlineMarkdownHelper.parseInlineFormatting(block.text, isDark = isDarkBg),
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    color = if (isDarkBg) Color.White else MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+
+                                    is NumberedBlock -> {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 16.dp, top = 2.dp, bottom = 2.dp),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            Text(
+                                                text = block.marker,
+                                                fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.padding(end = 8.dp, start = 4.dp)
@@ -1982,9 +2032,48 @@ fun FullScreenNoteEditor(
                         }
                         checklistItemToConvert = extracted
                     }
-                    "list" -> ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
-                        pushHistory()
-                        editorValue = ObsidianMarkdownEngine.toggleLinePrefix(editorValue, "- ")
+                    "list" -> Box {
+                        ToolbarToolButton(label = "Lista", icon = Icons.AutoMirrored.Filled.FormatListBulleted) {
+                            showListStyleMenu = true
+                        }
+                        DropdownMenu(
+                            expanded = showListStyleMenu,
+                            onDismissRequest = { showListStyleMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("• Lista com pontos") },
+                                onClick = {
+                                    showListStyleMenu = false
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleListStyle(editorValue, ListStyleType.BULLET)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("1, 2, 3 — Lista numérica") },
+                                onClick = {
+                                    showListStyleMenu = false
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleListStyle(editorValue, ListStyleType.ARABIC)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("I, II, III — Lista romana") },
+                                onClick = {
+                                    showListStyleMenu = false
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleListStyle(editorValue, ListStyleType.ROMAN)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("a), b), c) — Lista alfabética") },
+                                onClick = {
+                                    showListStyleMenu = false
+                                    pushHistory()
+                                    editorValue = ObsidianMarkdownEngine.toggleListStyle(editorValue, ListStyleType.ALPHA)
+                                }
+                            )
+                        }
                     }
                     "quote" -> ToolbarToolButton(label = "Citação", icon = Icons.Default.FormatQuote) {
                         pushHistory()

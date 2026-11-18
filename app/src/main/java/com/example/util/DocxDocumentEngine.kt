@@ -3,8 +3,12 @@ package com.example.util
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.io.OutputStream
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 data class DocxRun(
     val text: String,
@@ -19,17 +23,18 @@ data class DocxRun(
 )
 
 sealed interface DocxBlock {
-    data class Heading(val level: Int, val runs: List<DocxRun>) : DocxBlock
-    data class Paragraph(val runs: List<DocxRun>, val alignment: String = "left") : DocxBlock
+    data class Heading(val level: Int, val runs: List<DocxRun>, val sourceParagraphIndex: Int = -1) : DocxBlock
+    data class Paragraph(val runs: List<DocxRun>, val alignment: String = "left", val sourceParagraphIndex: Int = -1) : DocxBlock
     data class ListItem(
         val ordered: Boolean,
         val indexNumber: Int,
         val indentLevel: Int,
-        val runs: List<DocxRun>
+        val runs: List<DocxRun>,
+        val sourceParagraphIndex: Int = -1
     ) : DocxBlock
-    data class ChecklistItem(val checked: Boolean, val runs: List<DocxRun>) : DocxBlock
-    data class Quote(val runs: List<DocxRun>) : DocxBlock
-    data class Callout(val type: String, val runs: List<DocxRun>) : DocxBlock
+    data class ChecklistItem(val checked: Boolean, val runs: List<DocxRun>, val sourceParagraphIndex: Int = -1) : DocxBlock
+    data class Quote(val runs: List<DocxRun>, val sourceParagraphIndex: Int = -1) : DocxBlock
+    data class Callout(val type: String, val runs: List<DocxRun>, val sourceParagraphIndex: Int = -1) : DocxBlock
     data class Code(val code: String, val language: String = "") : DocxBlock
     data class Math(val formula: String) : DocxBlock
     data class Table(
@@ -723,6 +728,7 @@ object DocxDocumentEngine {
         val parser = newParser(xmlBytes)
         val result = mutableListOf<DocxBlock>()
         val numberingCounters = mutableMapOf<Pair<String, Int>, Int>()
+        var topLevelParagraphIdx = 0
 
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
@@ -732,9 +738,20 @@ object DocxDocumentEngine {
                     if (event == XmlPullParser.END_TAG && localTag(parser.name) == "body") break
                     if (event == XmlPullParser.START_TAG) {
                         when (localTag(parser.name)) {
-                            "p" -> result.addAll(
-                                parseParagraphElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
-                            )
+                            "p" -> {
+                                val currentIdx = topLevelParagraphIdx++
+                                result.addAll(
+                                    parseParagraphElement(
+                                        parser = parser,
+                                        rels = rels,
+                                        styles = styles,
+                                        numbering = numbering,
+                                        numberingCounters = numberingCounters,
+                                        mediaMap = mediaMap,
+                                        sourceParagraphIndex = currentIdx
+                                    )
+                                )
+                            }
                             "tbl" -> parseTableElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
                                 ?.let { result.add(it) }
                         }
@@ -894,7 +911,8 @@ object DocxDocumentEngine {
         styles: Map<String, DocxStyleDef>,
         numbering: DocxNumberingCatalog,
         numberingCounters: MutableMap<Pair<String, Int>, Int>,
-        mediaMap: Map<String, ByteArray>
+        mediaMap: Map<String, ByteArray>,
+        sourceParagraphIndex: Int = -1
     ): List<DocxBlock> {
         var pStyleId: String? = null
         var alignment = "left"
@@ -1202,6 +1220,14 @@ object DocxDocumentEngine {
         if (runs.isEmpty() && extractedImages.isEmpty() && mathTokens.isBlank()) {
             if (hasBottomBorder) {
                 blocks.add(DocxBlock.Divider)
+            } else if (sourceParagraphIndex >= 0 && !hasPageBreakBefore && !emitAfterBreak) {
+                blocks.add(
+                    DocxBlock.Paragraph(
+                        runs = emptyList(),
+                        alignment = alignment,
+                        sourceParagraphIndex = sourceParagraphIndex
+                    )
+                )
             }
             if (emitAfterBreak && !hasPageBreakBefore) {
                 blocks.add(DocxBlock.PageBreak)
@@ -1256,7 +1282,7 @@ object DocxDocumentEngine {
 
         when {
             isTocHeadingStyle(pStyleId, pStyleDef?.name) && plainText.isNotEmpty() -> {
-                blocks.add(DocxBlock.Heading(level = 2, runs = trimRunEdges(runs)))
+                blocks.add(DocxBlock.Heading(level = 2, runs = trimRunEdges(runs), sourceParagraphIndex = sourceParagraphIndex))
             }
 
             tocLevel != null && plainText.isNotEmpty() -> {
@@ -1265,13 +1291,14 @@ object DocxDocumentEngine {
                         ordered = false,
                         indexNumber = 0,
                         indentLevel = (tocLevel - 1).coerceIn(0, 4),
-                        runs = trimRunEdges(runs)
+                        runs = trimRunEdges(runs),
+                        sourceParagraphIndex = sourceParagraphIndex
                     )
                 )
             }
 
             headingLevel != null && plainText.isNotEmpty() -> {
-                blocks.add(DocxBlock.Heading(level = headingLevel, runs = trimRunEdges(runs)))
+                blocks.add(DocxBlock.Heading(level = headingLevel, runs = trimRunEdges(runs), sourceParagraphIndex = sourceParagraphIndex))
             }
 
             // Callout detection (shaded left-border box, semantic callout tint shading, or explicit TIP:/INFO:/WARNING:/IMPORTANT: prefix)
@@ -1279,7 +1306,7 @@ object DocxDocumentEngine {
                 shadingFill in setOf("ECFDF5", "FFFBEB", "FEF2F2", "F0F9FF") ||
                 matchesCalloutPrefix(plainText) -> {
                 val (calloutType, cleanedRuns) = extractCallout(plainText, runs, shadingFill, leftBorderColor)
-                blocks.add(DocxBlock.Callout(type = calloutType, runs = cleanedRuns))
+                blocks.add(DocxBlock.Callout(type = calloutType, runs = cleanedRuns, sourceParagraphIndex = sourceParagraphIndex))
             }
 
             // Quote detection (left border or Quote style)
@@ -1287,7 +1314,7 @@ object DocxDocumentEngine {
                 pStyleDef?.name?.contains("quote", ignoreCase = true) == true ||
                 pStyleDef?.name?.contains("citação", ignoreCase = true) == true -> {
                 if (plainText.isNotEmpty()) {
-                    blocks.add(DocxBlock.Quote(runs = trimRunEdges(runs)))
+                    blocks.add(DocxBlock.Quote(runs = trimRunEdges(runs), sourceParagraphIndex = sourceParagraphIndex))
                 }
             }
 
@@ -1297,7 +1324,7 @@ object DocxDocumentEngine {
                 val checked = plainText.startsWith("☑") || plainText.startsWith("[x]", ignoreCase = true)
                 val prefixRegex = Regex("^\\s*(?:☐|☑|\\[[xX ]\\])\\s*")
                 val cleaned = stripLeadingPrefixFromRuns(runs, prefixRegex)
-                blocks.add(DocxBlock.ChecklistItem(checked = checked, runs = cleaned))
+                blocks.add(DocxBlock.ChecklistItem(checked = checked, runs = cleaned, sourceParagraphIndex = sourceParagraphIndex))
             }
 
             // Explicit Word numbering or bullet symbol
@@ -1333,7 +1360,8 @@ object DocxDocumentEngine {
                         ordered = isOrdered,
                         indexNumber = numIndex,
                         indentLevel = ilvl,
-                        runs = cleaned
+                        runs = cleaned,
+                        sourceParagraphIndex = sourceParagraphIndex
                     )
                 )
             }
@@ -1345,9 +1373,9 @@ object DocxDocumentEngine {
 
             else -> {
                 if (runs.isNotEmpty()) {
-                    blocks.add(DocxBlock.Paragraph(runs = runs, alignment = alignment))
+                    blocks.add(DocxBlock.Paragraph(runs = runs, alignment = alignment, sourceParagraphIndex = sourceParagraphIndex))
                 } else {
-                    blocks.add(DocxBlock.Paragraph(runs = emptyList(), alignment = alignment))
+                    blocks.add(DocxBlock.Paragraph(runs = emptyList(), alignment = alignment, sourceParagraphIndex = sourceParagraphIndex))
                 }
             }
         }
@@ -1532,5 +1560,192 @@ object DocxDocumentEngine {
             lower.contains("menlo") ||
             lower.contains("lucida console") ||
             lower.contains("source code")
+    }
+
+    /**
+     * Rewrites text inside existing top-level <w:body>/<w:p> paragraphs in a .docx archive
+     * without adding or removing structural blocks, preserving styles, formatting, and all other ZIP parts.
+     */
+    fun updateDocxTextInPlace(
+        inputStream: InputStream,
+        outputStream: OutputStream,
+        editsByParagraphIndex: Map<Int, String>
+    ): Boolean {
+        if (editsByParagraphIndex.isEmpty()) return false
+        return try {
+            val entries = linkedMapOf<String, ByteArray>()
+            ZipInputStream(inputStream).use { zis ->
+                var entry = zis.nextEntry
+                while (entry != null) {
+                    if (!entry.isDirectory) {
+                        val name = entry.name.replace('\\', '/').trimStart('/')
+                        entries[name] = zis.readBytes()
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+
+            val docKey = entries.keys.firstOrNull { it.equals("word/document.xml", ignoreCase = true) }
+                ?: return false
+            val originalDocXml = entries[docKey] ?: return false
+            val updatedDocXml = rewriteDocumentXmlParagraphText(originalDocXml, editsByParagraphIndex)
+            entries[docKey] = updatedDocXml
+
+            ZipOutputStream(outputStream).use { zos ->
+                for ((name, bytes) in entries) {
+                    val outEntry = ZipEntry(name)
+                    zos.putNextEntry(outEntry)
+                    zos.write(bytes)
+                    zos.closeEntry()
+                }
+                zos.finish()
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun escapeXmlText(text: String): String {
+        val sb = StringBuilder(text.length + 16)
+        for (ch in text) {
+            when (ch) {
+                '&' -> sb.append("&amp;")
+                '<' -> sb.append("&lt;")
+                '>' -> sb.append("&gt;")
+                '"' -> sb.append("&quot;")
+                '\'' -> sb.append("&apos;")
+                else -> sb.append(ch)
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun rewriteDocumentXmlParagraphText(
+        xmlBytes: ByteArray,
+        editsByParagraphIndex: Map<Int, String>
+    ): ByteArray {
+        val parser = newParser(xmlBytes)
+        val out = StringBuilder(xmlBytes.size + 512)
+        out.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n")
+
+        var inBody = false
+        var bodyChildDepth = 0
+        var topLevelParagraphIndex = -1
+        var activeTargetText: String? = null
+        var firstTReplacedInParagraph = false
+        var insideTElement = false
+        var insideDelText = false
+
+        var event = parser.eventType
+        while (event != XmlPullParser.END_DOCUMENT) {
+            when (event) {
+                XmlPullParser.START_TAG -> {
+                    val rawName = parser.name
+                    val local = localTag(rawName)
+
+                    val isEnteringBody = !inBody && local == "body"
+                    if (isEnteringBody) {
+                        inBody = true
+                        bodyChildDepth = 0
+                    } else if (inBody) {
+                        bodyChildDepth++
+                        if (bodyChildDepth == 1 && local == "p") {
+                            topLevelParagraphIndex++
+                            activeTargetText = editsByParagraphIndex[topLevelParagraphIndex]
+                            firstTReplacedInParagraph = false
+                        }
+                    }
+
+                    if (activeTargetText != null && local == "delText") {
+                        insideDelText = true
+                    }
+
+                    if (activeTargetText != null && local == "t" && !insideDelText) {
+                        insideTElement = true
+                        out.append('<').append(rawName)
+                        var hasSpaceAttr = false
+                        for (i in 0 until parser.attributeCount) {
+                            val aName = parser.getAttributeName(i)
+                            val aVal = parser.getAttributeValue(i)
+                            if (aName == "xml:space") hasSpaceAttr = true
+                            out.append(' ').append(aName).append("=\"")
+                                .append(escapeXmlText(if (aName == "xml:space") "preserve" else aVal))
+                                .append('"')
+                        }
+                        if (!hasSpaceAttr) {
+                            out.append(" xml:space=\"preserve\"")
+                        }
+                        out.append('>')
+                        if (!firstTReplacedInParagraph) {
+                            firstTReplacedInParagraph = true
+                            val parts = activeTargetText.split("\n")
+                            out.append(escapeXmlText(parts.first()))
+                            for (pIdx in 1 until parts.size) {
+                                out.append("</").append(rawName).append("><w:br/><").append(rawName)
+                                    .append(" xml:space=\"preserve\">")
+                                    .append(escapeXmlText(parts[pIdx]))
+                            }
+                        }
+                    } else {
+                        out.append('<').append(rawName)
+                        for (i in 0 until parser.attributeCount) {
+                            out.append(' ').append(parser.getAttributeName(i)).append("=\"")
+                                .append(escapeXmlText(parser.getAttributeValue(i))).append('"')
+                        }
+                        out.append('>')
+                    }
+                }
+
+                XmlPullParser.TEXT, XmlPullParser.CDSECT -> {
+                    if (activeTargetText != null && insideTElement && !insideDelText) {
+                        // Text of <w:t> inside edited paragraph was already written at START_TAG
+                    } else {
+                        out.append(escapeXmlText(parser.text.orEmpty()))
+                    }
+                }
+
+                XmlPullParser.END_TAG -> {
+                    val rawName = parser.name
+                    val local = localTag(rawName)
+
+                    if (activeTargetText != null && local == "t" && !insideDelText) {
+                        insideTElement = false
+                        out.append("</").append(rawName).append('>')
+                    } else if (activeTargetText != null && bodyChildDepth == 1 && local == "p") {
+                        if (!firstTReplacedInParagraph && activeTargetText.isNotEmpty()) {
+                            val parts = activeTargetText.split("\n")
+                            out.append("<w:r><w:t xml:space=\"preserve\">")
+                                .append(escapeXmlText(parts.first()))
+                                .append("</w:t>")
+                            for (pIdx in 1 until parts.size) {
+                                out.append("<w:br/><w:t xml:space=\"preserve\">")
+                                    .append(escapeXmlText(parts[pIdx]))
+                                    .append("</w:t>")
+                            }
+                            out.append("</w:r>")
+                        }
+                        out.append("</").append(rawName).append('>')
+                        activeTargetText = null
+                        firstTReplacedInParagraph = false
+                    } else {
+                        if (local == "delText") insideDelText = false
+                        out.append("</").append(rawName).append('>')
+                    }
+
+                    if (inBody) {
+                        if (bodyChildDepth == 0 && local == "body") {
+                            inBody = false
+                        } else if (bodyChildDepth > 0) {
+                            bodyChildDepth--
+                        }
+                    }
+                }
+            }
+            event = parser.next()
+        }
+
+        return out.toString().toByteArray(Charsets.UTF_8)
     }
 }

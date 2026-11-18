@@ -661,6 +661,25 @@ fun SettingsDialog(
                                         }
                                     )
                                 }
+
+                                Divider(modifier = Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Toque de sessão perturbador (Arancia)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                        Text("Ao finalizar uma sessão ou pausa, dispara alarme em tela cheia com toque contínuo mesmo com o app aberto.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Switch(
+                                        checked = tempNotificationSettings.pomodoroDisruptiveAlarm,
+                                        onCheckedChange = {
+                                            tempNotificationSettings = tempNotificationSettings.copy(pomodoroDisruptiveAlarm = it)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

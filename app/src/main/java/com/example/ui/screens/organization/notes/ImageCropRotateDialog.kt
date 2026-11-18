@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -21,12 +23,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -98,6 +102,17 @@ fun ImageFullScreenCropRotateDialog(
     var cropRight by remember { mutableFloatStateOf(0.95f) }
     var cropBottom by remember { mutableFloatStateOf(0.95f) }
     var activeHandle by remember { mutableStateOf<CropDragHandle?>(null) }
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+
+    LaunchedEffect(isCropMode, rotationDegrees) {
+        if (isCropMode) {
+            zoomScale = 1f
+            panOffset = Offset.Zero
+        } else {
+            panOffset = Offset.Zero
+        }
+    }
 
     // Raw loaded bitmap and its rotated display version
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -367,22 +382,78 @@ fun ImageFullScreenCropRotateDialog(
 
                     // Box matched 1:1 to the displayed rotated image bounds so crop coordinates never drift
                     Box(
-                        modifier = Modifier.size(width = fittedWidthDp, height = fittedHeightDp),
+                        modifier = Modifier
+                            .size(width = fittedWidthDp, height = fittedHeightDp)
+                            .clipToBounds()
+                            .then(
+                                if (!isCropMode) {
+                                    Modifier
+                                        .pointerInput(fittedWidthPx, fittedHeightPx) {
+                                            detectTapGestures(
+                                                onDoubleTap = { tapOffset ->
+                                                    if (zoomScale > 1.15f) {
+                                                        zoomScale = 1f
+                                                        panOffset = Offset.Zero
+                                                    } else {
+                                                        val target = 2.5f
+                                                        val center = Offset(fittedWidthPx / 2f, fittedHeightPx / 2f)
+                                                        val maxX = (fittedWidthPx * (target - 1f)) / 2f
+                                                        val maxY = (fittedHeightPx * (target - 1f)) / 2f
+                                                        val rawPan = (center - tapOffset) * (target - 1f)
+                                                        zoomScale = target
+                                                        panOffset = Offset(
+                                                            x = rawPan.x.coerceIn(-maxX, maxX),
+                                                            y = rawPan.y.coerceIn(-maxY, maxY)
+                                                        )
+                                                    }
+                                                }
+                                            )
+                                        }
+                                        .pointerInput(fittedWidthPx, fittedHeightPx) {
+                                            detectTransformGestures { _, pan, zoom, _ ->
+                                                val updated = (zoomScale * zoom).coerceIn(1f, 4f)
+                                                zoomScale = updated
+                                                if (updated <= 1.02f) {
+                                                    panOffset = Offset.Zero
+                                                } else {
+                                                    val maxX = (fittedWidthPx * (updated - 1f)) / 2f
+                                                    val maxY = (fittedHeightPx * (updated - 1f)) / 2f
+                                                    panOffset = Offset(
+                                                        x = (panOffset.x + pan.x).coerceIn(-maxX, maxX),
+                                                        y = (panOffset.y + pan.y).coerceIn(-maxY, maxY)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                } else Modifier
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         val previewBmp = rotatedBitmap
+                        val imageTransformModifier = Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (!isCropMode) {
+                                    Modifier.graphicsLayer(
+                                        scaleX = zoomScale,
+                                        scaleY = zoomScale,
+                                        translationX = panOffset.x,
+                                        translationY = panOffset.y
+                                    )
+                                } else Modifier
+                            )
                         if (previewBmp != null) {
                             Image(
                                 bitmap = previewBmp.asImageBitmap(),
                                 contentDescription = "Visualização da Imagem",
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = imageTransformModifier,
                                 contentScale = ContentScale.FillBounds
                             )
                         } else {
                             AsyncImage(
                                 model = imageUrl,
                                 contentDescription = "Visualização da Imagem",
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = imageTransformModifier,
                                 contentScale = ContentScale.Fit
                             )
                         }

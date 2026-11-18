@@ -78,6 +78,7 @@ import com.example.ui.screens.organization.notes.ExternalPdfReaderScreen
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteCategoryPickerDialog
 import com.example.ui.screens.organization.notes.NoteColorPickerDialog
+import com.example.ui.screens.organization.notes.RenameExternalDocumentDialog
 import com.example.ui.screens.organization.notes.NoteDocumentFilter
 import com.example.ui.screens.organization.notes.NoteEditorMode
 import com.example.ui.screens.organization.notes.NoteLayoutMode
@@ -395,6 +396,11 @@ fun NotesSubTab(
                 }
             },
             onCreateCategory = { name, emoji -> viewModel.addCustomCategory(name, emoji) },
+            onRenameDocument = { newTitle ->
+                viewModel.renameExternalDocument(pdfNote, newTitle, context) { updated ->
+                    activePdfToRead = updated
+                }
+            },
             onRelinkClick = {
                 noteAwaitingRelink = pdfNote
                 relinkExternalDocLauncher.launch(arrayOf("application/pdf"))
@@ -425,7 +431,7 @@ fun NotesSubTab(
         return
     }
 
-    // Full-screen Read-Only .docx Reader
+    // Full-screen Word (.docx) Reader & Inline Text Editor
     activeDocxToRead?.let { docxNote ->
         ExternalDocxReaderScreen(
             note = docxNote,
@@ -441,6 +447,20 @@ fun NotesSubTab(
                 }
             },
             onCreateCategory = { name, emoji -> viewModel.addCustomCategory(name, emoji) },
+            onRenameDocument = { newTitle ->
+                viewModel.renameExternalDocument(docxNote, newTitle, context) { updated ->
+                    activeDocxToRead = updated
+                }
+            },
+            onSaveDocxEdits = { editsByParagraphIndex, onDone, onErr ->
+                viewModel.saveEditedDocxDocument(
+                    note = docxNote,
+                    editsByParagraphIndex = editsByParagraphIndex,
+                    context = context,
+                    onSuccess = onDone,
+                    onError = onErr
+                )
+            },
             onRelinkClick = {
                 noteAwaitingRelink = docxNote
                 relinkExternalDocLauncher.launch(
@@ -1773,6 +1793,19 @@ fun NotesSubTab(
         )
     }
 
+    var noteToRenameExternal by remember { mutableStateOf<Note?>(null) }
+    noteToRenameExternal?.let { target ->
+        RenameExternalDocumentDialog(
+            currentTitle = target.title,
+            docTypeLabel = if (target.isPdfDocument) "PDF" else "Word (.docx)",
+            onDismiss = { noteToRenameExternal = null },
+            onConfirm = { newTitle ->
+                viewModel.renameExternalDocument(target, newTitle, context)
+                noteToRenameExternal = null
+            }
+        )
+    }
+
     // Mini Submenu on Note Long-Press or 3-dots click
     noteForSubmenu?.let { note ->
         NoteSubmenuDialog(
@@ -1796,6 +1829,9 @@ fun NotesSubTab(
                         }
                     )
                 }
+            } else null,
+            onRenameExternal = if (note.isExternalDocument) {
+                { noteToRenameExternal = note }
             } else null,
             onRelinkExternal = if (note.isExternalDocument) {
                 {
@@ -2955,7 +2991,11 @@ fun NotesTrashDialog(
                         AlertDialog(
                             onDismissRequest = { showEmptyTrashConfirm = false },
                             title = { Text("Esvaziar lixeira?", fontWeight = FontWeight.Bold) },
-                            text = { Text("Todas as ${trashNotes.size} anotações na lixeira serão excluídas permanentemente. Esta ação não pode ser desfeita.") },
+                            text = {
+                                Text(
+                                    "Todas as ${trashNotes.size} anotações na lixeira, seus ficheiros .md e mídias exclusivas (imagens/áudios) serão excluídos definitivamente do armazenamento do aparelho. Esta ação não pode ser desfeita."
+                                )
+                            },
                             confirmButton = {
                                 Button(
                                     onClick = {
@@ -3054,7 +3094,7 @@ fun NotesTrashDialog(
     if (noteToPermanentlyDelete != null) {
         ConfirmDeleteDialog(
             title = "Excluir Definitivamente",
-            message = "Tem certeza de que deseja apagar '${noteToPermanentlyDelete!!.title}' para sempre? Esta ação não pode ser desfeita.",
+            message = "Tem certeza de que deseja apagar '${noteToPermanentlyDelete!!.title}'? O ficheiro .md da nota e suas mídias exclusivas também serão removidos definitivamente do armazenamento do aparelho.",
             confirmButtonText = "Excluir Para Sempre",
             onConfirm = {
                 onPermanentDelete(noteToPermanentlyDelete!!)
@@ -3079,6 +3119,7 @@ fun NoteSubmenuDialog(
     onChangeCategory: (() -> Unit)? = null,
     onOpenReadOnly: (() -> Unit)? = null,
     onConvertToNote: (() -> Unit)? = null,
+    onRenameExternal: (() -> Unit)? = null,
     onRelinkExternal: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -3227,6 +3268,32 @@ fun NoteSubmenuDialog(
                     }
                 }
 
+                if (isExternal && onRenameExternal != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onRenameExternal()
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp)
+                            .testTag("submenu_rename_external")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.DriveFileRenameOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Renomear arquivo", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+
                 if (isExternal && onRelinkExternal != null) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -3247,7 +3314,7 @@ fun NoteSubmenuDialog(
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Atualizar Caminho do Arquivo", style = MaterialTheme.typography.bodyMedium)
+                            Text("Carregar outro arquivo", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }

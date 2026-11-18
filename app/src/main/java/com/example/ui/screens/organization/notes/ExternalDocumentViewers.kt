@@ -21,11 +21,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import android.widget.Toast
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,11 +36,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +66,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.Category
 import com.example.data.model.Note
+import com.example.data.model.NoteDocumentType
 import com.example.ui.theme.isAppDarkTheme
 import com.example.util.DocxBlock
 import com.example.util.DocxDocumentEngine
@@ -264,8 +270,70 @@ fun NoteCategoryPickerDialog(
     }
 }
 
+@Composable
+fun RenameExternalDocumentDialog(
+    currentTitle: String,
+    docTypeLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var nameInput by remember(currentTitle) { mutableStateOf(currentTitle) }
+    val cleanName = nameInput.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DriveFileRenameOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Renomear $docTypeLabel", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "O novo nome será aplicado no Citra e, quando o armazenamento permitir, também no arquivo do aparelho.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Nome do arquivo") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("rename_external_doc_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = cleanName.isNotEmpty(),
+                onClick = { onConfirm(cleanName) },
+                modifier = Modifier.testTag("rename_external_doc_confirm")
+            ) {
+                Text("Renomear")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
+}
+
 /**
- * Shared compact read-only document top bar for PDF and .docx viewers.
+ * Shared compact document top bar for PDF and .docx viewers with 3-dots actions menu
+ * and optional Edit/Read-Only eye toggle button (for .docx).
  */
 @Composable
 private fun ExternalDocumentReaderHeader(
@@ -274,15 +342,25 @@ private fun ExternalDocumentReaderHeader(
     badgeColor: Color,
     category: String,
     isConverting: Boolean,
+    showEditToggle: Boolean = false,
+    isEditingDocx: Boolean = false,
+    onToggleEditMode: () -> Unit = {},
     onClose: () -> Unit,
     onCategoryClick: () -> Unit,
     onConvertToNote: () -> Unit,
+    onRenameClick: () -> Unit,
+    onShareClick: () -> Unit,
+    onPrintClick: () -> Unit,
+    onRelinkClick: () -> Unit,
     closeTestTag: String,
-    convertTestTag: String,
+    moreMenuTestTag: String,
+    editToggleTestTag: String = "docx_toggle_edit_btn",
     categoryTestTag: String,
     badgeTestTag: String,
     secondaryControls: @Composable RowScope.() -> Unit
 ) {
+    var showMoreMenu by remember { mutableStateOf(false) }
+
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
         tonalElevation = 3.dp,
@@ -299,7 +377,7 @@ private fun ExternalDocumentReaderHeader(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 IconButton(
                     onClick = onClose,
@@ -375,31 +453,118 @@ private fun ExternalDocumentReaderHeader(
                     }
                 }
 
-                Button(
-                    onClick = onConvertToNote,
-                    enabled = !isConverting,
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier
-                        .defaultMinSize(minHeight = 40.dp)
-                        .testTag(convertTestTag)
-                ) {
-                    if (isConverting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Convertendo...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    } else {
+                if (showEditToggle) {
+                    FilledTonalIconButton(
+                        onClick = onToggleEditMode,
+                        enabled = !isConverting,
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = if (isEditingDocx) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+                            },
+                            contentColor = if (isEditingDocx) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        ),
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag(editToggleTestTag)
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.EditNote,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            imageVector = if (isEditingDocx) Icons.Default.Visibility else Icons.Default.Edit,
+                            contentDescription = if (isEditingDocx) "Modo leitura" else "Editar texto",
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text("Converter para Nota", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Box {
+                    IconButton(
+                        onClick = { showMoreMenu = true },
+                        enabled = !isConverting,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag(moreMenuTestTag)
+                    ) {
+                        if (isConverting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Mais opções"
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Converter para nota") },
+                            leadingIcon = { Icon(Icons.Default.EditNote, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onConvertToNote()
+                            }
+                        )
+                        if (showEditToggle) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(if (isEditingDocx) "Modo leitura (só leitura)" else "Editar texto (.docx)")
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (isEditingDocx) Icons.Default.Visibility else Icons.Default.Edit,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onToggleEditMode()
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Renomear arquivo") },
+                            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onRenameClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Enviar para...") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onShareClick()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Imprimir") },
+                            leadingIcon = { Icon(Icons.Default.Print, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onPrintClick()
+                            }
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                        DropdownMenuItem(
+                            text = { Text("Carregar outro arquivo") },
+                            leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                            onClick = {
+                                showMoreMenu = false
+                                onRelinkClick()
+                            }
+                        )
                     }
                 }
             }
@@ -427,6 +592,7 @@ fun ExternalPdfReaderScreen(
     onClose: () -> Unit,
     onChangeCategory: (String) -> Unit,
     onCreateCategory: (String, String) -> Unit,
+    onRenameDocument: (String) -> Unit,
     onRelinkClick: () -> Unit,
     onRemoveLink: () -> Unit,
     onConvertToNote: () -> Unit,
@@ -435,7 +601,9 @@ fun ExternalPdfReaderScreen(
     BackHandler(enabled = !isConverting) { onClose() }
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var showCategoryPicker by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
     var showChrome by remember { mutableStateOf(true) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
@@ -470,7 +638,7 @@ fun ExternalPdfReaderScreen(
     DisposableEffect(note.externalUri) {
         val pfd = ExternalDocumentUriHelper.openParcelFileDescriptor(context, note.externalUri)
         if (pfd == null) {
-            loadError = "Arquivo PDF inacessível neste caminho. Se o arquivo foi movido ou a permissão expirou, toque em Selecionar PDF novamente."
+            loadError = "Arquivo PDF inacessível neste caminho. Se o arquivo foi movido ou a permissão expirou, toque em Carregar outro PDF."
             activePfd = null
             activeRenderer = null
             pageCount = 0
@@ -522,8 +690,9 @@ fun ExternalPdfReaderScreen(
     fun applyDoubleTapZoomAt(tapOffset: Offset) {
         val current = zoomScale
         val nextScale = when {
-            current < 1.35f -> 1.55f
-            current < 1.95f -> 2.15f
+            current < 1.45f -> 1.75f
+            current < 2.35f -> 2.55f
+            current < 3.25f -> 3.5f
             else -> 1f
         }
         if (nextScale <= 1.01f || viewportSize.width <= 0 || viewportSize.height <= 0) {
@@ -544,7 +713,7 @@ fun ExternalPdfReaderScreen(
     }
 
     val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "pdf_top_pad")
-    val bottomSpacer = 24.dp
+    val bottomSpacer = 280.dp
 
     Box(
         modifier = Modifier
@@ -552,7 +721,7 @@ fun ExternalPdfReaderScreen(
             .background(MaterialTheme.colorScheme.background)
             .clipToBounds()
     ) {
-        // Main PDF Reader Surface (supports single-tap chrome toggle + area double-tap zoom + 2-finger pinch)
+        // Main PDF Reader Surface (supports single-tap chrome toggle + area double-tap zoom + 2-finger pinch + 2D pan)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -570,7 +739,7 @@ fun ExternalPdfReaderScreen(
                             if (event.changes.count { it.pressed } >= 2) {
                                 val zoomFactor = event.calculateZoom()
                                 val panDelta = event.calculatePan()
-                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 3.5f)
                                 if (kotlin.math.abs(zoomFactor - 1f) > 0.005f || panDelta != Offset.Zero) {
                                     zoomScale = updated
                                     if (updated <= 1.02f) {
@@ -592,13 +761,20 @@ fun ExternalPdfReaderScreen(
                 }
                 .pointerInput(zoomScale > 1.02f, viewportSize) {
                     if (zoomScale > 1.02f) {
-                        detectHorizontalDragGestures { change, dragAmount ->
+                        detectDragGestures { change, dragAmount ->
                             change.consume()
                             val maxX = (viewportSize.width * (zoomScale - 1f)) / 2f
-                            panOffset = Offset(
-                                x = (panOffset.x + dragAmount).coerceIn(-maxX, maxX),
-                                y = panOffset.y
-                            )
+                            val maxY = (viewportSize.height * (zoomScale - 1f)) / 2f
+                            val nextX = (panOffset.x + dragAmount.x).coerceIn(-maxX, maxX)
+                            val desiredY = panOffset.y + dragAmount.y
+                            val nextY = desiredY.coerceIn(-maxY, maxY)
+                            panOffset = Offset(x = nextX, y = nextY)
+                            val overflowY = desiredY - nextY
+                            if (kotlin.math.abs(overflowY) > 0.5f) {
+                                coroutineScope.launch {
+                                    listState.scrollBy(-overflowY)
+                                }
+                            }
                         }
                     }
                 }
@@ -607,7 +783,7 @@ fun ExternalPdfReaderScreen(
                 loadError != null -> {
                     ExternalDocumentMissingState(
                         message = loadError!!,
-                        relinkLabel = "Selecionar PDF novamente",
+                        relinkLabel = "Carregar outro PDF",
                         onRelink = onRelinkClick,
                         onRemoveLink = onRemoveLink,
                         onClose = onClose,
@@ -620,13 +796,14 @@ fun ExternalPdfReaderScreen(
                     val zoomPercent = (zoomScale * 100).toInt()
                     val renderBucket = when {
                         zoomPercent <= 115 -> 100
-                        zoomPercent <= 170 -> 150
-                        else -> 225
+                        zoomPercent <= 185 -> 150
+                        zoomPercent <= 275 -> 225
+                        else -> 300
                     }
 
                     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val baseWidthPx = with(density) { (maxWidth - 24.dp).toPx().toInt().coerceAtLeast(480) }
-                        val targetWidthPx = (baseWidthPx * (renderBucket / 100f)).toInt().coerceAtMost(2200)
+                        val targetWidthPx = (baseWidthPx * (renderBucket / 100f)).toInt().coerceAtMost(2600)
                         val displayWidthDp = (maxWidth - 24.dp)
 
                         LazyColumn(
@@ -645,7 +822,7 @@ fun ExternalPdfReaderScreen(
                                 top = topSpacer,
                                 bottom = bottomSpacer
                             ),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             items(count = pageCount, key = { it }) { pageIdx ->
@@ -684,11 +861,36 @@ fun ExternalPdfReaderScreen(
                 badgeColor = Color(0xFFDC2626),
                 category = note.category,
                 isConverting = isConverting,
+                showEditToggle = false,
                 onClose = onClose,
                 onCategoryClick = { showCategoryPicker = true },
                 onConvertToNote = onConvertToNote,
+                onRenameClick = { showRenameDialog = true },
+                onShareClick = {
+                    val ok = ExternalDocumentUriHelper.shareExternalDocument(
+                        context = context,
+                        title = note.title,
+                        pathOrUri = note.externalUri,
+                        docType = NoteDocumentType.PDF
+                    )
+                    if (!ok) {
+                        Toast.makeText(context, "Não foi possível compartilhar este PDF.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onPrintClick = {
+                    val ok = ExternalDocumentUriHelper.printExternalDocument(
+                        context = context,
+                        title = note.title,
+                        pathOrUri = note.externalUri,
+                        docType = NoteDocumentType.PDF
+                    )
+                    if (!ok) {
+                        Toast.makeText(context, "Impressão indisponível para este PDF.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRelinkClick = onRelinkClick,
                 closeTestTag = "pdf_reader_close_btn",
-                convertTestTag = "pdf_reader_convert_btn",
+                moreMenuTestTag = "pdf_reader_more_menu_btn",
                 categoryTestTag = "pdf_reader_category_chip",
                 badgeTestTag = "pdf_reader_badge"
             ) {
@@ -726,8 +928,8 @@ fun ExternalPdfReaderScreen(
                         fontWeight = FontWeight.Bold
                     )
                     IconButton(
-                        onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(2.5f) },
-                        enabled = zoomScale < 2.49f,
+                        onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(3.5f) },
+                        enabled = zoomScale < 3.49f,
                         modifier = Modifier.size(36.dp)
                     ) {
                         Icon(Icons.Default.ZoomIn, contentDescription = "Aumentar zoom", modifier = Modifier.size(18.dp))
@@ -744,6 +946,18 @@ fun ExternalPdfReaderScreen(
             onSelectCategory = onChangeCategory,
             onCreateCategory = onCreateCategory,
             onDismiss = { showCategoryPicker = false }
+        )
+    }
+
+    if (showRenameDialog) {
+        RenameExternalDocumentDialog(
+            currentTitle = note.title,
+            docTypeLabel = "PDF",
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newTitle ->
+                showRenameDialog = false
+                onRenameDocument(newTitle)
+            }
         )
     }
 }
@@ -839,8 +1053,8 @@ private fun PdfPageCard(
 }
 
 /**
- * In-app read-only Word (.docx) reader backed by DocxDocumentEngine.
- * Images and content are read dynamically from the external file without saving in Citra until converted.
+ * In-app Word (.docx) reader and inline text-only editor backed by DocxDocumentEngine.
+ * Allows reading, 350% zooming + free 2D panning, printing, sharing, renaming, and editing existing paragraph text.
  */
 @Composable
 fun ExternalDocxReaderScreen(
@@ -849,20 +1063,37 @@ fun ExternalDocxReaderScreen(
     onClose: () -> Unit,
     onChangeCategory: (String) -> Unit,
     onCreateCategory: (String, String) -> Unit,
+    onRenameDocument: (String) -> Unit,
+    onSaveDocxEdits: (Map<Int, String>, () -> Unit, (String) -> Unit) -> Unit,
     onRelinkClick: () -> Unit,
     onRemoveLink: () -> Unit,
     onConvertToNote: () -> Unit,
     isConverting: Boolean = false
 ) {
-    BackHandler(enabled = !isConverting) { onClose() }
-
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     var showCategoryPicker by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
     var showChrome by remember { mutableStateOf(true) }
     var textScale by remember { mutableFloatStateOf(1.0f) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
     var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+
+    var isEditingDocx by remember { mutableStateOf(false) }
+    var isSavingDocx by remember { mutableStateOf(false) }
+    var reloadTrigger by remember { mutableIntStateOf(0) }
+    val editedTexts = remember(note.externalUri, reloadTrigger) { mutableStateMapOf<Int, String>() }
+
+    BackHandler(enabled = !isConverting && !isSavingDocx) {
+        if (isEditingDocx) {
+            editedTexts.clear()
+            isEditingDocx = false
+        } else {
+            onClose()
+        }
+    }
 
     val animatedScale by animateFloatAsState(
         targetValue = zoomScale,
@@ -879,14 +1110,14 @@ fun ExternalDocxReaderScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
-    LaunchedEffect(note.externalUri) {
+    LaunchedEffect(note.externalUri, reloadTrigger) {
         isLoading = true
         loadError = null
         parsedDoc = null
         val result = withContext(Dispatchers.IO) {
             val stream = ExternalDocumentUriHelper.openInputStream(context, note.externalUri)
             if (stream == null) {
-                null to "Arquivo Word (.docx) não encontrado ou permissão revogada. Toque em Selecionar Word novamente."
+                null to "Arquivo Word (.docx) não encontrado ou permissão revogada. Toque em Carregar outro Word."
             } else {
                 try {
                     stream.use { input ->
@@ -905,8 +1136,9 @@ fun ExternalDocxReaderScreen(
     fun applyDoubleTapZoomAt(tapOffset: Offset) {
         val current = zoomScale
         val nextScale = when {
-            current < 1.35f -> 1.55f
-            current < 1.95f -> 2.15f
+            current < 1.45f -> 1.75f
+            current < 2.35f -> 2.55f
+            current < 3.25f -> 3.5f
             else -> 1f
         }
         if (nextScale <= 1.01f || viewportSize.width <= 0 || viewportSize.height <= 0) {
@@ -926,8 +1158,8 @@ fun ExternalDocxReaderScreen(
         }
     }
 
-    val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "docx_top_pad")
-    val bottomSpacer = 24.dp
+    val topSpacer by animateDpAsState(targetValue = if (showChrome || isEditingDocx) 118.dp else 16.dp, label = "docx_top_pad")
+    val bottomSpacer = 280.dp
 
     Box(
         modifier = Modifier
@@ -939,11 +1171,13 @@ fun ExternalDocxReaderScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { viewportSize = it }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { showChrome = !showChrome },
-                        onDoubleTap = { tapOffset -> applyDoubleTapZoomAt(tapOffset) }
-                    )
+                .pointerInput(isEditingDocx) {
+                    if (!isEditingDocx) {
+                        detectTapGestures(
+                            onTap = { showChrome = !showChrome },
+                            onDoubleTap = { tapOffset -> applyDoubleTapZoomAt(tapOffset) }
+                        )
+                    }
                 }
                 .pointerInput(Unit) {
                     awaitEachGesture {
@@ -952,7 +1186,7 @@ fun ExternalDocxReaderScreen(
                             if (event.changes.count { it.pressed } >= 2) {
                                 val zoomFactor = event.calculateZoom()
                                 val panDelta = event.calculatePan()
-                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 2.5f)
+                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 3.5f)
                                 if (kotlin.math.abs(zoomFactor - 1f) > 0.005f || panDelta != Offset.Zero) {
                                     zoomScale = updated
                                     if (updated <= 1.02f) {
@@ -972,15 +1206,22 @@ fun ExternalDocxReaderScreen(
                         }
                     }
                 }
-                .pointerInput(zoomScale > 1.02f, viewportSize) {
-                    if (zoomScale > 1.02f) {
-                        detectHorizontalDragGestures { change, dragAmount ->
+                .pointerInput(zoomScale > 1.02f, viewportSize, isEditingDocx) {
+                    if (zoomScale > 1.02f && !isEditingDocx) {
+                        detectDragGestures { change, dragAmount ->
                             change.consume()
                             val maxX = (viewportSize.width * (zoomScale - 1f)) / 2f
-                            panOffset = Offset(
-                                x = (panOffset.x + dragAmount).coerceIn(-maxX, maxX),
-                                y = panOffset.y
-                            )
+                            val maxY = (viewportSize.height * (zoomScale - 1f)) / 2f
+                            val nextX = (panOffset.x + dragAmount.x).coerceIn(-maxX, maxX)
+                            val desiredY = panOffset.y + dragAmount.y
+                            val nextY = desiredY.coerceIn(-maxY, maxY)
+                            panOffset = Offset(x = nextX, y = nextY)
+                            val overflowY = desiredY - nextY
+                            if (kotlin.math.abs(overflowY) > 0.5f) {
+                                coroutineScope.launch {
+                                    listState.scrollBy(-overflowY)
+                                }
+                            }
                         }
                     }
                 }
@@ -1004,7 +1245,7 @@ fun ExternalDocxReaderScreen(
                 loadError != null -> {
                     ExternalDocumentMissingState(
                         message = loadError!!,
-                        relinkLabel = "Selecionar Word novamente",
+                        relinkLabel = "Carregar outro Word",
                         onRelink = onRelinkClick,
                         onRemoveLink = onRemoveLink,
                         onClose = onClose,
@@ -1023,6 +1264,7 @@ fun ExternalDocxReaderScreen(
                         }
                     } else {
                         LazyColumn(
+                            state = listState,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .widthIn(max = 760.dp)
@@ -1042,7 +1284,15 @@ fun ExternalDocxReaderScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             itemsIndexed(blocks) { _, block ->
-                                DocxReadOnlyBlockItem(block = block, fontScale = textScale)
+                                if (isEditingDocx) {
+                                    DocxEditableBlockItem(
+                                        block = block,
+                                        fontScale = textScale,
+                                        editedTexts = editedTexts
+                                    )
+                                } else {
+                                    DocxReadOnlyBlockItem(block = block, fontScale = textScale)
+                                }
                             }
                         }
                     }
@@ -1050,29 +1300,71 @@ fun ExternalDocxReaderScreen(
             }
         }
 
-        // Top Bar Overlay (Single-tap hides/restores)
+        // Top Bar Overlay (Single-tap hides/restores; stays visible in edit mode so Eye icon is reachable)
         AnimatedVisibility(
-            visible = showChrome || loadError != null,
+            visible = showChrome || loadError != null || isEditingDocx,
             enter = fadeIn() + slideInVertically { -it },
             exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
             ExternalDocumentReaderHeader(
                 title = note.title,
-                badgeLabel = "Word (.docx) · Somente leitura",
-                badgeColor = Color(0xFF2563EB),
+                badgeLabel = if (isEditingDocx) "Word (.docx) · Edição de texto" else "Word (.docx) · Somente leitura",
+                badgeColor = if (isEditingDocx) MaterialTheme.colorScheme.primary else Color(0xFF2563EB),
                 category = note.category,
-                isConverting = isConverting,
-                onClose = onClose,
+                isConverting = isConverting || isSavingDocx,
+                showEditToggle = true,
+                isEditingDocx = isEditingDocx,
+                onToggleEditMode = {
+                    if (isEditingDocx) {
+                        editedTexts.clear()
+                        isEditingDocx = false
+                    } else {
+                        isEditingDocx = true
+                        showChrome = true
+                    }
+                },
+                onClose = {
+                    if (isEditingDocx) {
+                        editedTexts.clear()
+                        isEditingDocx = false
+                    } else {
+                        onClose()
+                    }
+                },
                 onCategoryClick = { showCategoryPicker = true },
                 onConvertToNote = onConvertToNote,
+                onRenameClick = { showRenameDialog = true },
+                onShareClick = {
+                    val ok = ExternalDocumentUriHelper.shareExternalDocument(
+                        context = context,
+                        title = note.title,
+                        pathOrUri = note.externalUri,
+                        docType = NoteDocumentType.DOCX
+                    )
+                    if (!ok) {
+                        Toast.makeText(context, "Não foi possível compartilhar este arquivo .docx.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onPrintClick = {
+                    val ok = ExternalDocumentUriHelper.printExternalDocument(
+                        context = context,
+                        title = note.title,
+                        pathOrUri = note.externalUri,
+                        docType = NoteDocumentType.DOCX,
+                        docxParsed = parsedDoc
+                    )
+                    if (!ok) {
+                        Toast.makeText(context, "Impressão indisponível para este arquivo .docx.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRelinkClick = onRelinkClick,
                 closeTestTag = "docx_reader_close_btn",
-                convertTestTag = "docx_reader_convert_btn",
+                moreMenuTestTag = "docx_reader_more_menu_btn",
+                editToggleTestTag = "docx_toggle_edit_btn",
                 categoryTestTag = "docx_reader_category_chip",
                 badgeTestTag = "docx_reader_badge"
             ) {
-                Spacer(modifier = Modifier.weight(1f))
-
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -1095,6 +1387,118 @@ fun ExternalDocxReaderScreen(
                         Text("A+", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            val next = (zoomScale - 0.25f).coerceAtLeast(0.75f)
+                            zoomScale = next
+                            if (next <= 1.02f) panOffset = Offset.Zero
+                        },
+                        enabled = zoomScale > 0.76f,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "Diminuir zoom", modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        text = "${(zoomScale * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(3.5f) },
+                        enabled = zoomScale < 3.49f,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Aumentar zoom", modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+
+        // Bottom floating save bar when editing .docx text
+        AnimatedVisibility(
+            visible = isEditingDocx,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 8.dp,
+                shadowElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = if (editedTexts.isEmpty()) {
+                            "Toque em qualquer parágrafo para editar ou apagar texto"
+                        } else {
+                            "${editedTexts.size} parágrafo(s) alterado(s)"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    TextButton(
+                        enabled = !isSavingDocx,
+                        onClick = {
+                            editedTexts.clear()
+                            isEditingDocx = false
+                        }
+                    ) {
+                        Text("Cancelar")
+                    }
+
+                    Button(
+                        enabled = editedTexts.isNotEmpty() && !isSavingDocx,
+                        onClick = {
+                            isSavingDocx = true
+                            onSaveDocxEdits(
+                                editedTexts.toMap(),
+                                {
+                                    isSavingDocx = false
+                                    editedTexts.clear()
+                                    isEditingDocx = false
+                                    reloadTrigger++
+                                },
+                                {
+                                    isSavingDocx = false
+                                }
+                            )
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.testTag("docx_save_edits_btn")
+                    ) {
+                        if (isSavingDocx) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Text("Salvar", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
     }
@@ -1106,6 +1510,127 @@ fun ExternalDocxReaderScreen(
             onSelectCategory = onChangeCategory,
             onCreateCategory = onCreateCategory,
             onDismiss = { showCategoryPicker = false }
+        )
+    }
+
+    if (showRenameDialog) {
+        RenameExternalDocumentDialog(
+            currentTitle = note.title,
+            docTypeLabel = "Word (.docx)",
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newTitle ->
+                showRenameDialog = false
+                onRenameDocument(newTitle)
+            }
+        )
+    }
+}
+
+private fun extractDocxBlockPlainText(block: DocxBlock): Pair<Int, String>? {
+    return when (block) {
+        is DocxBlock.Heading -> if (block.sourceParagraphIndex >= 0) block.sourceParagraphIndex to block.runs.joinToString("") { it.text } else null
+        is DocxBlock.Paragraph -> if (block.sourceParagraphIndex >= 0) block.sourceParagraphIndex to block.runs.joinToString("") { it.text } else null
+        is DocxBlock.ListItem -> if (block.sourceParagraphIndex >= 0) block.sourceParagraphIndex to block.runs.joinToString("") { it.text } else null
+        is DocxBlock.ChecklistItem -> if (block.sourceParagraphIndex >= 0) block.sourceParagraphIndex to block.runs.joinToString("") { it.text } else null
+        is DocxBlock.Quote -> if (block.sourceParagraphIndex >= 0) block.sourceParagraphIndex to block.runs.joinToString("") { it.text } else null
+        is DocxBlock.Callout -> if (block.sourceParagraphIndex >= 0) block.sourceParagraphIndex to block.runs.joinToString("") { it.text } else null
+        else -> null
+    }
+}
+
+@Composable
+private fun DocxEditableBlockItem(
+    block: DocxBlock,
+    fontScale: Float,
+    editedTexts: MutableMap<Int, String>
+) {
+    val extracted = extractDocxBlockPlainText(block)
+    if (extracted == null) {
+        DocxReadOnlyBlockItem(block = block, fontScale = fontScale)
+        return
+    }
+    val (pIndex, originalText) = extracted
+    val currentText = editedTexts[pIndex] ?: originalText
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val borderColor = if (editedTexts.containsKey(pIndex)) {
+        primaryColor
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+    }
+
+    val (fontSizeSp, fontWeight, prefixLabel) = when (block) {
+        is DocxBlock.Heading -> Triple(
+            when (block.level) {
+                1 -> 22f
+                2 -> 19f
+                3 -> 17f
+                else -> 15.5f
+            } * fontScale,
+            FontWeight.Bold,
+            "H${block.level}"
+        )
+        is DocxBlock.ListItem -> Triple(
+            15f * fontScale,
+            FontWeight.Normal,
+            if (block.ordered) "${block.indexNumber}." else "•"
+        )
+        is DocxBlock.ChecklistItem -> Triple(
+            15f * fontScale,
+            FontWeight.Normal,
+            if (block.checked) "☑" else "☐"
+        )
+        is DocxBlock.Quote -> Triple(14.5f * fontScale, FontWeight.Normal, "❝")
+        is DocxBlock.Callout -> Triple(14.5f * fontScale, FontWeight.Normal, "ℹ")
+        else -> Triple(15f * fontScale, FontWeight.Normal, null)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.7f))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (prefixLabel != null) {
+            Text(
+                text = prefixLabel,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = primaryColor,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        BasicTextField(
+            value = currentText,
+            onValueChange = { newText ->
+                val sanitized = newText.replace("\n", " ")
+                if (sanitized == originalText) {
+                    editedTexts.remove(pIndex)
+                } else {
+                    editedTexts[pIndex] = sanitized
+                }
+            },
+            textStyle = TextStyle(
+                color = textColor,
+                fontSize = fontSizeSp.sp,
+                lineHeight = (fontSizeSp * 1.4f).sp,
+                fontWeight = fontWeight
+            ),
+            modifier = Modifier.weight(1f),
+            decorationBox = { innerTextField ->
+                if (currentText.isEmpty()) {
+                    Text(
+                        text = "(Parágrafo vazio — texto removido)",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                    )
+                }
+                innerTextField()
+            }
         )
     }
 }
@@ -1221,7 +1746,7 @@ private fun DocxReadOnlyBlockItem(
                 else -> TextAlign.Start
             }
             if (annotated.text.isEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(18.dp))
             } else {
                 Text(
                     text = annotated,

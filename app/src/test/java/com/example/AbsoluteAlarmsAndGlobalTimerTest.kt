@@ -66,7 +66,7 @@ class AbsoluteAlarmsAndGlobalTimerTest {
         }
 
         prefs = PreferencesManager(app)
-        prefs.saveTimerCitraBallsJson("[]")
+        prefs.clearCitraTimerBalls()
         prefs.clearPendingTimerCelebration()
         prefs.reloadReactiveTimerState()
     }
@@ -75,7 +75,7 @@ class AbsoluteAlarmsAndGlobalTimerTest {
     fun tearDown() {
         app.getSharedPreferences("citra_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         DirectBootAlarmStore.clearAll(app)
-        prefs.saveTimerCitraBallsJson("[]")
+        prefs.clearCitraTimerBalls()
         prefs.clearPendingTimerCelebration()
         prefs.reloadReactiveTimerState()
     }
@@ -86,7 +86,6 @@ class AbsoluteAlarmsAndGlobalTimerTest {
             Task(
                 title = "Estudar Arquitetura",
                 category = "Estudos",
-                focusMinutesTarget = 60,
                 focusMinutesCompleted = 10
             )
         )
@@ -268,7 +267,7 @@ class AbsoluteAlarmsAndGlobalTimerTest {
             Task(
                 title = "Renovação Anual",
                 category = "Geral",
-                dueTimestamp = calFutureTask.timeInMillis,
+                dueDateTimestamp = calFutureTask.timeInMillis,
                 loopAlarm = true
             )
         )
@@ -308,8 +307,23 @@ class AbsoluteAlarmsAndGlobalTimerTest {
         assertNotNull("DirectBoot Task slot must be saved", savedTaskSlot)
         assertNotNull("DirectBoot Habit slot must be saved", savedHabitSlot)
         assertEquals(taskId, savedTaskSlot?.entityId)
+        assertEquals(NextAlarmScheduler.TYPE_TASK_71H, savedTaskSlot?.type)
         assertEquals(habitId, savedHabitSlot?.entityId)
-        assertEquals(true, savedTaskSlot?.loopAlarm)
+
+        // Now add an urgent task 1 hour ahead (<71h window) and verify TYPE_TASK_EXACT keeps loopAlarm = true
+        val urgentTaskId = db.taskDao().insertTask(
+            Task(
+                title = "Reunião Urgente",
+                category = "Trabalho",
+                dueDateTimestamp = now + 60L * 60L * 1000L,
+                loopAlarm = true
+            )
+        )
+        NextAlarmScheduler.scheduleNextAlarmSync(app, nowMs = now)
+        val urgentSlot = DirectBootAlarmStore.loadTaskSlot(app)
+        assertEquals(urgentTaskId, urgentSlot?.entityId)
+        assertEquals(NextAlarmScheduler.TYPE_TASK_EXACT, urgentSlot?.type)
+        assertEquals(true, urgentSlot?.loopAlarm)
 
         // Verify DirectBoot slot recovery works cleanly even if AlarmManager was wiped
         shadowAlarmManager.scheduledAlarms.clear()
@@ -341,10 +355,13 @@ class AbsoluteAlarmsAndGlobalTimerTest {
         NotificationHelper.cancelTimerNotification(app)
 
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val activeIds = Shadows.shadowOf(nm).allNotifications.map { it.id }
-        // In Robolectric, id check via activeNotifications or shadow notifications ensures alert ID wasn't canceled
+        val activeIds = nm.activeNotifications.map { it.id }
+        assertTrue(
+            "Alert notification (99999) should stay intact",
+            NotificationHelper.TIMER_ALERT_NOTIFICATION_ID in activeIds
+        )
         assertFalse(
-            "Ongoing chronometer ID should not match alert ID",
+            "Ongoing chronometer ID (99998) should not match or remain active",
             NotificationHelper.TIMER_ONGOING_NOTIFICATION_ID in activeIds
         )
         assertNotNull(AlarmHealthChecker.inspect(app))

@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -814,6 +815,15 @@ fun AddHabitDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    // Category Selector
+                    HabitCategorySection(
+                        selectedCategory = category,
+                        categories = categories,
+                        onSelectCategory = { category = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     // Horário Fixo
                     Text(
                         text = "Horário Fixo:",
@@ -1154,6 +1164,14 @@ fun EditHabitDialog(
                     HabitEmojiSection(
                         selectedEmoji = selectedEmoji,
                         onSelectEmoji = { selectedEmoji = it }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    HabitCategorySection(
+                        selectedCategory = category,
+                        categories = categories,
+                        onSelectCategory = { category = it }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1591,6 +1609,88 @@ private fun HabitEmojiSection(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(text = emoji, fontSize = 17.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HabitCategorySection(
+    selectedCategory: String,
+    categories: List<com.example.data.model.Category>,
+    onSelectCategory: (String) -> Unit
+) {
+    val isDark = isAppDarkTheme()
+    val cardBg = if (isDark) Color(0xFF26231E) else Color(0xFFFAF5EE)
+    val cardBorder = if (isDark) Color(0xFF38322B) else Color(0xFFEDE3D7)
+    val textColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1A1715)
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF5D544C)
+    val orangeCta = Color(0xFFFF6A00)
+
+    val allOptions = remember(categories, selectedCategory) {
+        val list = categories.map { it.name to it.emoji.ifBlank { "📁" } }.toMutableList()
+        val defaultPairs = listOf(
+            "Saúde" to "💚",
+            "Estudos" to "📚",
+            "Trabalho" to "💼",
+            "Mente" to "🧘",
+            "Casa" to "🏠",
+            "Geral" to "📁"
+        )
+        defaultPairs.forEach { (name, emoji) ->
+            if (list.none { it.first.equals(name, ignoreCase = true) }) {
+                list.add(name to emoji)
+            }
+        }
+        if (selectedCategory.isNotBlank() && list.none { it.first.equals(selectedCategory, ignoreCase = true) }) {
+            list.add(0, selectedCategory to "🏷️")
+        }
+        list
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Categoria do Hábito:",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = labelColor
+        )
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(allOptions, key = { it.first }) { (catName, catEmoji) ->
+                val isSelected = selectedCategory.equals(catName, ignoreCase = true)
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isSelected) {
+                        if (isDark) Color(0xFF3D2314) else Color(0xFFFFF1E6)
+                    } else {
+                        cardBg
+                    },
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) orangeCta else cardBorder
+                    ),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onSelectCategory(catName) }
+                        .testTag("habit_category_option_$catName")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(text = catEmoji, fontSize = 14.sp)
+                        Text(
+                            text = catName,
+                            fontSize = 12.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) orangeCta else textColor
+                        )
                     }
                 }
             }

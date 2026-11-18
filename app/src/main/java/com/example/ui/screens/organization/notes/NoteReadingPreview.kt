@@ -53,7 +53,7 @@ object NotePreviewParser {
     private val HEADING_REGEX = Regex("^(#{1,6})\\s+(.+)$")
     private val CHECKLIST_REGEX = Regex("^[-*+]\\s+\\[([xX ])]\\s*(.*)$")
     private val BULLET_REGEX = Regex("^[-*+]\\s+(.+)$")
-    private val NUMBERED_REGEX = Regex("^(\\d+\\.)\\s+(.+)$")
+    private val NUMBERED_REGEX = Regex("^(\\d+\\.|[IVXLCDM]+\\.|[a-z]\\))\\s+(.+)$")
     private val QUOTE_REGEX = Regex("^>+\\s?(.*)$")
     private val CALLOUT_TAG_REGEX = Regex("^\\[![A-Za-z0-9_-]+]\\s*(.*)$")
     private val TABLE_SEP_REGEX = Regex("^\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)+\\|?$")
@@ -332,7 +332,9 @@ fun NoteReadingPreview(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = if (compact) 10.dp else 14.dp)
                     ) {
                         Icon(
                             imageVector = if (isChecked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
@@ -366,7 +368,9 @@ fun NoteReadingPreview(
                     Row(
                         verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = if (compact) 10.dp else 14.dp)
                     ) {
                         Text(
                             text = el.prefix,

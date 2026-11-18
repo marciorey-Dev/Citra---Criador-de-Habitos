@@ -2,6 +2,7 @@ package com.example.ui.screens.organization.notes
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
@@ -9,8 +10,16 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.sp
 import com.example.util.InlineMarkdownHelper
+
+enum class ListStyleType {
+    BULLET,
+    ARABIC,
+    ROMAN,
+    ALPHA
+}
 
 data class CursorLineInfo(
     val lineIndex: Int,
@@ -164,9 +173,16 @@ object ObsidianMarkdownEngine {
                             applyHeaderStyle(builder, lineStart, contentEnd, indentLen + 2, 24, isActive, primaryColor, textLen, spanCounter)
                         }
 
-                        // Checklists
-                        trimmedPreview.startsWith("- [ ] ") -> {
+                        // Checklists (with paragraph indentation)
+                        trimmedPreview.startsWith("- [ ] ") || trimmedPreview.startsWith("* [ ] ") -> {
                             val prefixEnd = (lineStart + indentLen + 6).coerceAtMost(contentEnd)
+                            if (lineStart < contentEnd) {
+                                builder.addStyle(
+                                    ParagraphStyle(textIndent = TextIndent(firstLine = 16.sp, restLine = 36.sp)),
+                                    lineStart,
+                                    contentEnd
+                                )
+                            }
                             safeAddStyle(
                                 builder,
                                 SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
@@ -176,8 +192,15 @@ object ObsidianMarkdownEngine {
                                 spanCounter
                             )
                         }
-                        trimmedPreview.startsWith("- [x] ", ignoreCase = true) -> {
+                        trimmedPreview.startsWith("- [x] ", ignoreCase = true) || trimmedPreview.startsWith("* [x] ", ignoreCase = true) -> {
                             val prefixEnd = (lineStart + indentLen + 6).coerceAtMost(contentEnd)
+                            if (lineStart < contentEnd) {
+                                builder.addStyle(
+                                    ParagraphStyle(textIndent = TextIndent(firstLine = 16.sp, restLine = 36.sp)),
+                                    lineStart,
+                                    contentEnd
+                                )
+                            }
                             safeAddStyle(
                                 builder,
                                 SpanStyle(color = Color(0xFF10B981), fontWeight = FontWeight.Bold),
@@ -198,9 +221,37 @@ object ObsidianMarkdownEngine {
                             }
                         }
 
-                        // Bullet Lists
-                        trimmedPreview.startsWith("- ") || trimmedPreview.startsWith("* ") -> {
+                        // Bullet Lists (with paragraph indentation)
+                        trimmedPreview.startsWith("- ") || trimmedPreview.startsWith("* ") || trimmedPreview.startsWith("• ") -> {
                             val prefixEnd = (lineStart + indentLen + 2).coerceAtMost(contentEnd)
+                            if (lineStart < contentEnd) {
+                                builder.addStyle(
+                                    ParagraphStyle(textIndent = TextIndent(firstLine = 16.sp, restLine = 32.sp)),
+                                    lineStart,
+                                    contentEnd
+                                )
+                            }
+                            safeAddStyle(
+                                builder,
+                                SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
+                                lineStart + indentLen,
+                                prefixEnd,
+                                textLen,
+                                spanCounter
+                            )
+                        }
+
+                        // Ordered Lists: Arabic (1. ), Roman (I. ), Alpha (a) ) with paragraph indentation
+                        ORDERED_LIST_PREVIEW_REGEX.find(trimmedPreview) != null -> {
+                            val match = ORDERED_LIST_PREVIEW_REGEX.find(trimmedPreview)!!
+                            val prefixEnd = (lineStart + indentLen + match.value.length).coerceAtMost(contentEnd)
+                            if (lineStart < contentEnd) {
+                                builder.addStyle(
+                                    ParagraphStyle(textIndent = TextIndent(firstLine = 16.sp, restLine = 34.sp)),
+                                    lineStart,
+                                    contentEnd
+                                )
+                            }
                             safeAddStyle(
                                 builder,
                                 SpanStyle(color = primaryColor, fontWeight = FontWeight.Bold),
@@ -552,9 +603,70 @@ object ObsidianMarkdownEngine {
         }
     }
 
+    private val ORDERED_LIST_PREVIEW_REGEX = Regex("^(?:\\d+\\.|[IVXLCDM]+\\.|[a-z]\\))\\s+")
+    private val ARABIC_LIST_REGEX = Regex("^(\\d+)\\.\\s+(.*)$")
+    private val ROMAN_LIST_REGEX = Regex("^([IVXLCDM]+)\\.\\s+(.*)$")
+    private val ALPHA_LIST_REGEX = Regex("^([a-z])\\)\\s+(.*)$")
+
+    private fun extractKnownLinePrefix(trimmedLine: String): String? {
+        val staticPrefixes = listOf(
+            "##### ", "#### ", "### ", "## ", "# ",
+            "- [ ] ", "- [x] ", "- [X] ", "* [ ] ", "* [x] ", "* [X] ",
+            "- ", "* ", "• ", "> "
+        )
+        staticPrefixes.firstOrNull { trimmedLine.startsWith(it) }?.let { return it }
+        ORDERED_LIST_PREVIEW_REGEX.find(trimmedLine)?.let { return it.value }
+        return null
+    }
+
+    private fun isWrappedWithStyle(body: String, prefix: String, suffix: String): Boolean {
+        if (body.isEmpty()) return false
+        return when (prefix) {
+            "*" -> {
+                val leadStars = body.takeWhile { it == '*' }.length
+                val trailStars = body.takeLastWhile { it == '*' }.length
+                body.length > leadStars + trailStars && (leadStars % 2 == 1) && (trailStars % 2 == 1)
+            }
+            "**" -> {
+                val leadStars = body.takeWhile { it == '*' }.length
+                val trailStars = body.takeLastWhile { it == '*' }.length
+                body.length > leadStars + trailStars && leadStars >= 2 && trailStars >= 2
+            }
+            else -> body.startsWith(prefix) && body.endsWith(suffix) && body.length >= prefix.length + suffix.length
+        }
+    }
+
+    private fun toRoman(number: Int): String {
+        val n = number.coerceIn(1, 3999)
+        val values = intArrayOf(1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1)
+        val symbols = arrayOf("M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I")
+        val sb = StringBuilder()
+        var rem = n
+        for (i in values.indices) {
+            while (rem >= values[i]) {
+                rem -= values[i]
+                sb.append(symbols[i])
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun fromRoman(roman: String): Int? {
+        if (roman.isEmpty()) return null
+        val map = mapOf('I' to 1, 'V' to 5, 'X' to 10, 'L' to 50, 'C' to 100, 'D' to 500, 'M' to 1000)
+        var total = 0
+        var prev = 0
+        for (ch in roman.reversed()) {
+            val valNum = map[ch] ?: return null
+            if (valNum < prev) total -= valNum else total += valNum
+            prev = valNum
+        }
+        return if (total > 0) total else null
+    }
+
     /**
      * Encloses the current selection with prefix and suffix, or toggles it off if the selection
-     * is already wrapped by that exact style (supporting combined ** + * + ~~ + <u> + ==).
+     * is already wrapped by that exact style (supporting multi-paragraph selections cleanly).
      */
     fun wrapSelection(value: TextFieldValue, prefix: String, suffix: String): TextFieldValue {
         val text = value.text
@@ -566,6 +678,53 @@ object ObsidianMarkdownEngine {
             val selected = text.substring(min, max)
             val before = text.substring(0, min)
             val after = text.substring(max)
+
+            // Multi-paragraph / multi-line selection support
+            if (selected.contains('\n')) {
+                val lines = selected.split('\n')
+                val nonBlankInfos = lines.mapIndexedNotNull { idx, line ->
+                    if (line.isBlank()) null
+                    else {
+                        val leadWsLen = line.indexOfFirst { !it.isWhitespace() }.let { if (it == -1) line.length else it }
+                        val leadWs = line.substring(0, leadWsLen)
+                        val trimmed = line.substring(leadWsLen)
+                        val isAtStartOfLine = idx > 0 || min == 0 || text[min - 1] == '\n'
+                        val blockPrefix = if (isAtStartOfLine) extractKnownLinePrefix(trimmed) ?: "" else ""
+                        val body = trimmed.removePrefix(blockPrefix)
+                        Triple(idx, leadWs + blockPrefix, body)
+                    }
+                }
+
+                if (nonBlankInfos.isEmpty()) return value
+
+                val allAlreadyWrapped = nonBlankInfos.all { (_, _, body) ->
+                    body.isBlank() || isWrappedWithStyle(body, prefix, suffix)
+                }
+
+                val infoMap = nonBlankInfos.associateBy { it.first }
+                val transformedLines = lines.mapIndexed { idx, rawLine ->
+                    val info = infoMap[idx]
+                    if (info == null || info.third.isBlank()) {
+                        rawLine
+                    } else {
+                        val head = info.second
+                        val body = info.third
+                        if (allAlreadyWrapped) {
+                            head + body.removePrefix(prefix).removeSuffix(suffix)
+                        } else if (isWrappedWithStyle(body, prefix, suffix)) {
+                            head + body
+                        } else {
+                            head + prefix + body + suffix
+                        }
+                    }
+                }
+                val newSelected = transformedLines.joinToString("\n")
+                val newText = before + newSelected + after
+                return value.copy(
+                    text = newText,
+                    selection = TextRange(min, min + newSelected.length)
+                )
+            }
 
             val shouldUnwrapSurrounding = when (prefix) {
                 "*" -> {
@@ -588,19 +747,7 @@ object ObsidianMarkdownEngine {
                 val newSelection = TextRange(newBefore.length, newBefore.length + selected.length)
                 value.copy(text = newText, selection = newSelection)
             } else {
-                val canUnwrapInner = when (prefix) {
-                    "*" -> {
-                        val leadStars = selected.takeWhile { it == '*' }.length
-                        val trailStars = selected.takeLastWhile { it == '*' }.length
-                        selected.length > leadStars + trailStars && (leadStars % 2 == 1) && (trailStars % 2 == 1)
-                    }
-                    "**" -> {
-                        val leadStars = selected.takeWhile { it == '*' }.length
-                        val trailStars = selected.takeLastWhile { it == '*' }.length
-                        selected.length > leadStars + trailStars && leadStars >= 2 && trailStars >= 2
-                    }
-                    else -> selected.startsWith(prefix) && selected.endsWith(suffix) && selected.length >= prefix.length + suffix.length
-                }
+                val canUnwrapInner = isWrappedWithStyle(selected, prefix, suffix)
 
                 if (canUnwrapInner) {
                     val unwrapped = selected.removePrefix(prefix).removeSuffix(suffix)
@@ -631,12 +778,6 @@ object ObsidianMarkdownEngine {
         val selStart = minOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
         val selEnd = maxOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
 
-        val knownPrefixes = listOf(
-            "##### ", "#### ", "### ", "## ", "# ",
-            "- [ ] ", "- [x] ", "- [X] ",
-            "- ", "* ", "> "
-        )
-
         if (selStart != selEnd) {
             val firstLineStart = if (selStart == 0) 0 else {
                 val prevNl = text.lastIndexOf('\n', selStart - 1)
@@ -656,7 +797,7 @@ object ObsidianMarkdownEngine {
                 } else {
                     val trimmed = line.trimStart()
                     val indent = line.substring(0, line.length - trimmed.length)
-                    val existingPrefix = knownPrefixes.firstOrNull { trimmed.startsWith(it) }
+                    val existingPrefix = extractKnownLinePrefix(trimmed)
                     when {
                         allHaveTarget && existingPrefix == targetPrefix -> indent + trimmed.removePrefix(targetPrefix)
                         existingPrefix != null -> indent + targetPrefix + trimmed.removePrefix(existingPrefix)
@@ -678,21 +819,12 @@ object ObsidianMarkdownEngine {
         val trimmed = line.trimStart()
         val indent = line.substring(0, line.length - trimmed.length)
 
-        val existingPrefix = knownPrefixes.firstOrNull { trimmed.startsWith(it) }
+        val existingPrefix = extractKnownLinePrefix(trimmed)
 
         val newLine = when {
-            existingPrefix == targetPrefix -> {
-                // Remove prefix (toggle off)
-                indent + trimmed.removePrefix(targetPrefix)
-            }
-            existingPrefix != null -> {
-                // Replace prefix with new target
-                indent + targetPrefix + trimmed.removePrefix(existingPrefix)
-            }
-            else -> {
-                // Add prefix to line
-                indent + targetPrefix + trimmed
-            }
+            existingPrefix == targetPrefix -> indent + trimmed.removePrefix(targetPrefix)
+            existingPrefix != null -> indent + targetPrefix + trimmed.removePrefix(existingPrefix)
+            else -> indent + targetPrefix + trimmed
         }
 
         val newText = text.substring(0, info.lineStart) + newLine + text.substring(info.lineEnd)
@@ -700,6 +832,169 @@ object ObsidianMarkdownEngine {
         val newCursor = (cursor + diff).coerceIn(0, newText.length)
 
         return value.copy(text = newText, selection = TextRange(newCursor, newCursor))
+    }
+
+    /**
+     * Toggles or applies one of the 4 list styles (BULLET, ARABIC 1., ROMAN I., ALPHA a))
+     * to the cursor line or across all selected paragraphs, numbering sequentially.
+     */
+    fun toggleListStyle(value: TextFieldValue, style: ListStyleType): TextFieldValue {
+        if (style == ListStyleType.BULLET) {
+            return toggleLinePrefix(value, "- ")
+        }
+        val text = value.text
+        val selStart = minOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+        val selEnd = maxOf(value.selection.start, value.selection.end).coerceIn(0, text.length)
+
+        fun matchesStyle(trimmed: String): Boolean = when (style) {
+            ListStyleType.BULLET -> trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")
+            ListStyleType.ARABIC -> ARABIC_LIST_REGEX.containsMatchIn(trimmed)
+            ListStyleType.ROMAN -> ROMAN_LIST_REGEX.containsMatchIn(trimmed)
+            ListStyleType.ALPHA -> ALPHA_LIST_REGEX.containsMatchIn(trimmed)
+        }
+
+        fun formatMarker(ordinal: Int): String = when (style) {
+            ListStyleType.BULLET -> "- "
+            ListStyleType.ARABIC -> "$ordinal. "
+            ListStyleType.ROMAN -> "${toRoman(ordinal)}. "
+            ListStyleType.ALPHA -> "${'a' + ((ordinal - 1) % 26)}) "
+        }
+
+        if (selStart != selEnd) {
+            val firstLineStart = if (selStart == 0) 0 else {
+                val prevNl = text.lastIndexOf('\n', selStart - 1)
+                if (prevNl == -1) 0 else prevNl + 1
+            }
+            val lastLineEnd = text.indexOf('\n', selEnd).let { if (it == -1) text.length else it }
+            val selectedBlock = text.substring(firstLineStart, lastLineEnd)
+            val lines = selectedBlock.split('\n')
+            val nonBlank = lines.filter { it.isNotBlank() }
+            val allAlreadyStyle = nonBlank.isNotEmpty() && nonBlank.all { matchesStyle(it.trimStart()) }
+
+            var seq = 1
+            val transformed = lines.joinToString("\n") { line ->
+                if (line.isBlank()) {
+                    line
+                } else {
+                    val trimmed = line.trimStart()
+                    val indent = line.substring(0, line.length - trimmed.length)
+                    val existing = extractKnownLinePrefix(trimmed) ?: ""
+                    val body = trimmed.removePrefix(existing)
+                    if (allAlreadyStyle) {
+                        indent + body
+                    } else {
+                        val marker = formatMarker(seq++)
+                        indent + marker + body
+                    }
+                }
+            }
+            val newText = text.substring(0, firstLineStart) + transformed + text.substring(lastLineEnd)
+            return value.copy(
+                text = newText,
+                selection = TextRange(firstLineStart, firstLineStart + transformed.length)
+            )
+        }
+
+        val info = findCursorLine(text, selStart)
+        val line = info.lineContent
+        val trimmed = line.trimStart()
+        val indent = line.substring(0, line.length - trimmed.length)
+        val existing = extractKnownLinePrefix(trimmed) ?: ""
+        val body = trimmed.removePrefix(existing)
+
+        val newLine = if (matchesStyle(trimmed)) {
+            indent + body
+        } else {
+            val prevOrdinal = if (info.lineStart > 1) {
+                val prevLineEnd = info.lineStart - 1
+                val prevNl = text.lastIndexOf('\n', prevLineEnd - 1)
+                val prevLineStart = if (prevNl == -1) 0 else prevNl + 1
+                val prevTrimmed = text.substring(prevLineStart, prevLineEnd).trimStart()
+                when (style) {
+                    ListStyleType.ARABIC -> ARABIC_LIST_REGEX.find(prevTrimmed)?.groupValues?.get(1)?.toIntOrNull()?.plus(1)
+                    ListStyleType.ROMAN -> ROMAN_LIST_REGEX.find(prevTrimmed)?.groupValues?.get(1)?.let { fromRoman(it) }?.plus(1)
+                    ListStyleType.ALPHA -> ALPHA_LIST_REGEX.find(prevTrimmed)?.groupValues?.get(1)?.firstOrNull()?.let { (it - 'a') + 2 }
+                    ListStyleType.BULLET -> 1
+                }
+            } else null
+
+            indent + formatMarker(prevOrdinal ?: 1) + body
+        }
+
+        val newText = text.substring(0, info.lineStart) + newLine + text.substring(info.lineEnd)
+        val diff = newLine.length - line.length
+        val newCursor = (selStart + diff).coerceIn(0, newText.length)
+        return value.copy(text = newText, selection = TextRange(newCursor, newCursor))
+    }
+
+    /**
+     * Automatically continues lists/checklists on Enter, or removes the empty prefix on a second Enter.
+     */
+    fun handleNewlineAutoContinue(oldValue: TextFieldValue, newValue: TextFieldValue): TextFieldValue {
+        if (newValue.text.length != oldValue.text.length + 1) return newValue
+        if (!newValue.selection.collapsed) return newValue
+        val cursor = newValue.selection.start
+        if (cursor <= 0 || cursor > newValue.text.length) return newValue
+        if (newValue.text[cursor - 1] != '\n') return newValue
+
+        val newlinePos = cursor - 1
+        val prevNl = newValue.text.lastIndexOf('\n', newlinePos - 1)
+        val lineStart = if (prevNl == -1) 0 else prevNl + 1
+        val prevLine = newValue.text.substring(lineStart, newlinePos)
+        val trimmed = prevLine.trimStart()
+        val indent = prevLine.substring(0, prevLine.length - trimmed.length)
+
+        val nextPrefix: String
+        val bodyEmpty: Boolean
+
+        when {
+            trimmed.startsWith("- [ ] ") || trimmed.startsWith("- [x] ") || trimmed.startsWith("- [X] ") -> {
+                nextPrefix = "- [ ] "
+                bodyEmpty = trimmed.length == 6
+            }
+            trimmed.startsWith("* [ ] ") || trimmed.startsWith("* [x] ") || trimmed.startsWith("* [X] ") -> {
+                nextPrefix = "* [ ] "
+                bodyEmpty = trimmed.length == 6
+            }
+            trimmed.startsWith("- ") -> {
+                nextPrefix = "- "
+                bodyEmpty = trimmed.length == 2
+            }
+            trimmed.startsWith("* ") -> {
+                nextPrefix = "* "
+                bodyEmpty = trimmed.length == 2
+            }
+            ARABIC_LIST_REGEX.matches(trimmed) -> {
+                val m = ARABIC_LIST_REGEX.find(trimmed)!!
+                val num = m.groupValues[1].toIntOrNull() ?: 1
+                nextPrefix = "${num + 1}. "
+                bodyEmpty = m.groupValues[2].isEmpty()
+            }
+            ROMAN_LIST_REGEX.matches(trimmed) -> {
+                val m = ROMAN_LIST_REGEX.find(trimmed)!!
+                val num = fromRoman(m.groupValues[1]) ?: 1
+                nextPrefix = "${toRoman(num + 1)}. "
+                bodyEmpty = m.groupValues[2].isEmpty()
+            }
+            ALPHA_LIST_REGEX.matches(trimmed) -> {
+                val m = ALPHA_LIST_REGEX.find(trimmed)!!
+                val ch = m.groupValues[1].firstOrNull() ?: 'a'
+                val nextCh = if (ch < 'z') (ch + 1) else 'a'
+                nextPrefix = "$nextCh) "
+                bodyEmpty = m.groupValues[2].isEmpty()
+            }
+            else -> return newValue
+        }
+
+        return if (bodyEmpty) {
+            val updated = newValue.text.substring(0, lineStart) + newValue.text.substring(cursor)
+            newValue.copy(text = updated, selection = TextRange(lineStart, lineStart))
+        } else {
+            val insert = indent + nextPrefix
+            val updated = newValue.text.substring(0, cursor) + insert + newValue.text.substring(cursor)
+            val newCur = cursor + insert.length
+            newValue.copy(text = updated, selection = TextRange(newCur, newCur))
+        }
     }
 
     /**

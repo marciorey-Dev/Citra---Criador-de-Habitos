@@ -13,10 +13,14 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
 import android.util.Log
+import com.example.data.model.Note
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLDecoder
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -987,5 +991,325 @@ object MediaStorageHelper {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun sha256ShortHex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        return digest.take(10).joinToString("") { "%02x".format(it) }
+    }
+
+    private fun getCandidateExternalImageDirs(context: Context): List<File> {
+        val dirs = mutableListOf<File>()
+        try { dirs.add(getCitraPicFolder(context)) } catch (_: Exception) {}
+        try {
+            val pubPictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            dirs.add(File(pubPictures, "Citra Pic"))
+        } catch (_: Exception) {}
+        try {
+            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)?.let {
+                dirs.add(File(it, "Citra Pic"))
+            }
+        } catch (_: Exception) {}
+        try {
+            dirs.add(File(context.filesDir, "Citra Pic"))
+            dirs.add(File(context.filesDir, "images"))
+        } catch (_: Exception) {}
+        return dirs.distinctBy { it.absolutePath }
+    }
+
+    fun resolveCachedExternalImage(context: Context, rawUrl: String): File? {
+        val cleanUrl = rawUrl.trim().removePrefix("<").removeSuffix(">")
+        if (!cleanUrl.startsWith("http://", ignoreCase = true) &&
+            !cleanUrl.startsWith("https://", ignoreCase = true)
+        ) {
+            return null
+        }
+        val hashPrefix = "citra_url_${sha256ShortHex(cleanUrl)}."
+        val allowedExts = listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+        for (dir in getCandidateExternalImageDirs(context)) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            for (ext in allowedExts) {
+                val candidate = File(dir, "$hashPrefix$ext")
+                if (candidate.exists() && candidate.isFile && candidate.length() > 0L) {
+                    return candidate
+                }
+            }
+        }
+        return null
+    }
+
+    fun downloadAndCacheExternalImage(context: Context, rawUrl: String): String? {
+        val cleanUrl = rawUrl.trim().removePrefix("<").removeSuffix(">")
+        if (!cleanUrl.startsWith("http://", ignoreCase = true) &&
+            !cleanUrl.startsWith("https://", ignoreCase = true)
+        ) {
+            return null
+        }
+
+        // Reuse already downloaded file on disk without re-downloading
+        resolveCachedExternalImage(context, cleanUrl)?.let { cached ->
+            return cached.absolutePath
+        }
+
+        val urlHash = sha256ShortHex(cleanUrl)
+        var currentUrl = cleanUrl
+        var redirects = 0
+        while (redirects < 5) {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    instanceFollowRedirects = true
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                    setRequestProperty("User-Agent", "Citra-Android/1.2")
+                    setRequestProperty("Accept", "image/*,*/*;q=0.8")
+                }
+                val code = connection.responseCode
+                if (code in 300..399) {
+                    val location = connection.getHeaderField("Location")?.takeIf { it.isNotBlank() } ?: break
+                    currentUrl = URL(URL(currentUrl), location).toString()
+                    redirects++
+                    continue
+                }
+                if (code !in 200..299) {
+                    return null
+                }
+
+                val contentType = connection.contentType?.lowercase(Locale.ROOT).orEmpty()
+                if (contentType.contains("text/html")) {
+                    return null
+                }
+                val ext = when {
+                    contentType.contains("image/png") -> "png"
+                    contentType.contains("image/webp") -> "webp"
+                    contentType.contains("image/gif") -> "gif"
+                    contentType.contains("image/bmp") -> "bmp"
+                    contentType.contains("image/jpeg") || contentType.contains("image/jpg") -> "jpg"
+                    else -> {
+                        val pathExt = currentUrl.substringBefore('?').substringBefore('#')
+                            .substringAfterLast('.', "")
+                            .lowercase(Locale.ROOT)
+                        pathExt.takeIf { it in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp") } ?: "jpg"
+                    }
+                }
+
+                val destDir = getCitraPicFolder(context)
+                if (!destDir.exists()) destDir.mkdirs()
+                val destFile = File(destDir, "citra_url_${urlHash}.$ext")
+                val tmpFile = File(destDir, "citra_url_${urlHash}.$ext.tmp")
+
+                val maxBytes = 20L * 1024L * 1024L
+                var totalRead = 0L
+                connection.inputStream.use { input ->
+                    FileOutputStream(tmpFile).use { output ->
+                        val buffer = ByteArray(16 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read <= 0) break
+                            totalRead += read
+                            if (totalRead > maxBytes) {
+                                tmpFile.delete()
+                                return null
+                            }
+                            output.write(buffer, 0, read)
+                        }
+                        output.flush()
+                    }
+                }
+
+                if (totalRead <= 0L || !tmpFile.exists()) {
+                    tmpFile.delete()
+                    return null
+                }
+                if (destFile.exists()) destFile.delete()
+                if (!tmpFile.renameTo(destFile)) {
+                    tmpFile.copyTo(destFile, overwrite = true)
+                    tmpFile.delete()
+                }
+
+                try {
+                    MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(destFile.absolutePath),
+                        arrayOf("image/*"),
+                        null
+                    )
+                } catch (_: Exception) {}
+
+                return destFile.absolutePath
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to download external image: $cleanUrl", e)
+                return null
+            } finally {
+                try { connection?.disconnect() } catch (_: Exception) {}
+            }
+        }
+        return null
+    }
+
+    fun resolveAndDownloadRemoteImages(context: Context, markdownContent: String): String {
+        if (!markdownContent.contains("http://", ignoreCase = true) &&
+            !markdownContent.contains("https://", ignoreCase = true)
+        ) {
+            return markdownContent
+        }
+
+        val imgRegex = Regex("!\\[(.*?)\\]\\(\\s*([^\\s)]+|<[^>]+>)(?:\\s+\"[^\"]*\")?\\s*\\)")
+        val urlCache = mutableMapOf<String, String>()
+        return imgRegex.replace(markdownContent) { match ->
+            val altAndMeta = match.groupValues[1]
+            val rawTarget = match.groupValues[2].trim().removePrefix("<").removeSuffix(">")
+            if (rawTarget.startsWith("http://", ignoreCase = true) ||
+                rawTarget.startsWith("https://", ignoreCase = true)
+            ) {
+                val localPath = urlCache[rawTarget] ?: downloadAndCacheExternalImage(context, rawTarget)?.also {
+                    urlCache[rawTarget] = it
+                }
+                if (!localPath.isNullOrBlank()) {
+                    "![$altAndMeta]($localPath)"
+                } else {
+                    match.value
+                }
+            } else {
+                match.value
+            }
+        }
+    }
+
+    fun extractAllReferencedLocalMediaPaths(note: Note): Set<String> {
+        val paths = mutableSetOf<String>()
+        val imgRegex = Regex("!\\[(.*?)\\]\\((.*?)\\)")
+        val audioRegex = Regex("!?\\[audio:.*?\\]\\((.*?)\\)")
+
+        fun addCandidate(raw: String?) {
+            val clean = raw?.trim()?.removePrefix("<")?.removeSuffix(">")?.takeIf { it.isNotBlank() } ?: return
+            if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+                return
+            }
+            paths.add(clean)
+        }
+
+        imgRegex.findAll(note.content).forEach { addCandidate(it.groupValues[2]) }
+        audioRegex.findAll(note.content).forEach { addCandidate(it.groupValues[1]) }
+        addCandidate(note.backgroundImageUri)
+        return paths
+    }
+
+    private fun isAppManagedMediaFile(context: Context, file: File): Boolean {
+        val abs = file.absolutePath
+        if (isCitraFolderPath(abs)) return true
+        val managedRoots = listOfNotNull(
+            context.filesDir.absolutePath,
+            context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)?.absolutePath,
+            context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)?.absolutePath,
+            context.getExternalFilesDir("Citra Records")?.absolutePath
+        )
+        if (managedRoots.any { abs.startsWith(it) }) return true
+        val name = file.name.lowercase(Locale.ROOT)
+        return name.startsWith("citra_pic_") ||
+            name.startsWith("citra_url_") ||
+            name.startsWith("citra_docx_") ||
+            name.startsWith("citrarec_")
+    }
+
+    fun deleteUnreferencedMediaFiles(
+        context: Context,
+        candidatePaths: Set<String>,
+        survivingNotes: List<Note>,
+        protectedUris: Set<String> = emptySet()
+    ): Int {
+        if (candidatePaths.isEmpty()) return 0
+
+        val protectedNormalized = mutableSetOf<String>()
+        val protectedFilenames = mutableSetOf<String>()
+
+        fun markProtected(raw: String?) {
+            val clean = raw?.trim()?.takeIf { it.isNotBlank() } ?: return
+            protectedNormalized.add(clean)
+            val withoutPrefix = clean.removePrefix("file://")
+            protectedNormalized.add(withoutPrefix)
+            val fileName = withoutPrefix.substringAfterLast('/').substringAfterLast('\\')
+            if (fileName.isNotBlank()) protectedFilenames.add(fileName.lowercase(Locale.ROOT))
+        }
+
+        survivingNotes.forEach { note ->
+            extractAllReferencedLocalMediaPaths(note).forEach(::markProtected)
+        }
+        protectedUris.forEach(::markProtected)
+
+        var deletedCount = 0
+        val scannedPaths = mutableListOf<String>()
+
+        for (rawCandidate in candidatePaths) {
+            val clean = rawCandidate.trim()
+            if (clean.isBlank()) continue
+            val normalizedPath = clean.removePrefix("file://")
+            val candidateName = normalizedPath.substringAfterLast('/').substringAfterLast('\\').lowercase(Locale.ROOT)
+            if (protectedNormalized.contains(clean) ||
+                protectedNormalized.contains(normalizedPath) ||
+                (candidateName.isNotBlank() && protectedFilenames.contains(candidateName))
+            ) {
+                continue
+            }
+
+            if (clean.startsWith("content://")) {
+                val resolvedCitra = resolveExistingCitraFile(context, clean)
+                if (resolvedCitra != null && resolvedCitra.exists() && isAppManagedMediaFile(context, resolvedCitra)) {
+                    val path = resolvedCitra.absolutePath
+                    if (resolvedCitra.delete() || !resolvedCitra.exists()) {
+                        deletedCount++
+                        scannedPaths.add(path)
+                    }
+                    try {
+                        context.contentResolver.delete(Uri.parse(clean), null, null)
+                    } catch (_: Exception) {}
+                }
+                continue
+            }
+
+            val resolvedPath = resolveOrSelfHealMediaPath(context, normalizedPath) ?: normalizedPath
+            val file = File(resolvedPath)
+            if (!file.exists() || !file.isFile) continue
+            if (!isAppManagedMediaFile(context, file)) continue
+
+            val absPath = file.absolutePath
+            var deleted = false
+            try {
+                if (file.delete() || !file.exists()) {
+                    deleted = true
+                }
+            } catch (_: Exception) {}
+
+            // Clean corresponding MediaStore rows (images/audio/files) so gallery/system doesn't leave stale entries
+            val mediaUris = listOf(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                MediaStore.Files.getContentUri("external")
+            )
+            for (tableUri in mediaUris) {
+                try {
+                    val rows = context.contentResolver.delete(
+                        tableUri,
+                        "${MediaStore.MediaColumns.DATA} = ?",
+                        arrayOf(absPath)
+                    )
+                    if (rows > 0) deleted = true
+                } catch (_: Exception) {}
+            }
+
+            if (deleted) {
+                deletedCount++
+                scannedPaths.add(absPath)
+            }
+        }
+
+        if (scannedPaths.isNotEmpty()) {
+            try {
+                MediaScannerConnection.scanFile(context, scannedPaths.toTypedArray(), null, null)
+            } catch (_: Exception) {}
+        }
+
+        return deletedCount
     }
 }

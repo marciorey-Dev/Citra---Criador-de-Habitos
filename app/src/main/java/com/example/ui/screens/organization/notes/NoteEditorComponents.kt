@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,13 +32,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
@@ -399,6 +405,86 @@ fun VisualBlockItem(
                             }
                         },
                         placeholder = { Text("Tópico...", color = textColor.copy(alpha = 0.4f)) },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                            .onFocusChanged {
+                                if (!it.isFocused && block.text.isNotBlank()) isEditing = false
+                            }
+                    )
+                } else {
+                    Text(
+                        text = annotated,
+                        style = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+                        onTextLayout = { layoutResult = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 8.dp)
+                            .pointerInput(block.text) {
+                                detectTapGestures { pos ->
+                                    val offset = layoutResult?.getOffsetForPosition(pos) ?: -1
+                                    if (offset != -1) {
+                                        val links = annotated.getStringAnnotations("LINK", offset, offset)
+                                        if (links.isNotEmpty()) {
+                                            onLinkClick(links.first().item)
+                                            return@detectTapGestures
+                                        }
+                                    }
+                                    isEditing = true
+                                    onFocusGained()
+                                }
+                            }
+                    )
+                }
+
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Remover", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+
+        is NumberedBlock -> {
+            var isEditing by remember { mutableStateOf(block.text.isEmpty()) }
+            var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+            val annotated = remember(block.text, isDarkBg) {
+                InlineMarkdownHelper.parseInlineFormatting(block.text, isDark = isDarkBg)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, top = 2.dp, bottom = 2.dp)
+                    .onFocusChanged { if (it.isFocused) onFocusGained() },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = block.marker,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+
+                if (isEditing || block.text.isEmpty()) {
+                    OutlinedTextField(
+                        value = block.text,
+                        onValueChange = { input ->
+                            if (input.isEmpty() && block.text.isEmpty()) {
+                                onBackspaceOnEmpty()
+                            } else if (input.contains("\n")) {
+                                val parts = input.split("\n", limit = 2)
+                                onUpdate(block.copy(text = parts[0]))
+                                onEnterPressed()
+                            } else {
+                                onUpdate(block.copy(text = input))
+                            }
+                        },
+                        placeholder = { Text("Item...", color = textColor.copy(alpha = 0.4f)) },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(color = textColor),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color.Transparent,
@@ -968,23 +1054,74 @@ fun VisualBlockItem(
                 }
             }
 
-            // Fullscreen dialog for Image
+            // Fullscreen dialog for Image (pinch-to-zoom 1x..4x, double-tap zoom, 2D pan)
             if (isImageFullscreen) {
                 Dialog(
                     onDismissRequest = { isImageFullscreen = false },
                     properties = DialogProperties(usePlatformDefaultWidth = false)
                 ) {
+                    var fsScale by remember { mutableFloatStateOf(1f) }
+                    var fsPan by remember { mutableStateOf(Offset.Zero) }
+                    var fsBoxSize by remember { mutableStateOf(IntSize.Zero) }
+
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.95f)),
+                            .background(Color.Black.copy(alpha = 0.95f))
+                            .clipToBounds()
+                            .onSizeChanged { fsBoxSize = it }
+                            .pointerInput(fsBoxSize) {
+                                detectTapGestures(
+                                    onDoubleTap = { tapOffset ->
+                                        if (fsScale > 1.15f) {
+                                            fsScale = 1f
+                                            fsPan = Offset.Zero
+                                        } else {
+                                            val target = 2.5f
+                                            val center = Offset(fsBoxSize.width / 2f, fsBoxSize.height / 2f)
+                                            val maxX = (fsBoxSize.width * (target - 1f)) / 2f
+                                            val maxY = (fsBoxSize.height * (target - 1f)) / 2f
+                                            val rawPan = (center - tapOffset) * (target - 1f)
+                                            fsScale = target
+                                            fsPan = Offset(
+                                                x = rawPan.x.coerceIn(-maxX, maxX),
+                                                y = rawPan.y.coerceIn(-maxY, maxY)
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                            .pointerInput(fsBoxSize) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    val updated = (fsScale * zoom).coerceIn(1f, 4f)
+                                    fsScale = updated
+                                    if (updated <= 1.02f) {
+                                        fsPan = Offset.Zero
+                                    } else {
+                                        val maxX = (fsBoxSize.width * (updated - 1f)) / 2f
+                                        val maxY = (fsBoxSize.height * (updated - 1f)) / 2f
+                                        fsPan = Offset(
+                                            x = (fsPan.x + pan.x).coerceIn(-maxX, maxX),
+                                            y = (fsPan.y + pan.y).coerceIn(-maxY, maxY)
+                                        )
+                                    }
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
                             model = block.url,
                             contentDescription = "Imagem em tela cheia",
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().padding(16.dp)
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                                .graphicsLayer(
+                                    scaleX = fsScale,
+                                    scaleY = fsScale,
+                                    translationX = fsPan.x,
+                                    translationY = fsPan.y
+                                )
                         )
 
                         IconButton(

@@ -888,6 +888,14 @@ object NoteExportHelper {
                     docSb.append("</w:p>\n")
                 }
 
+                is NumberedBlock -> {
+                    docSb.append("<w:p><w:pPr><w:ind w:left=\"360\"/><w:spacing w:after=\"80\"/></w:pPr>")
+                    docSb.append("<w:r><w:rPr><w:b/><w:color w:val=\"$themeHex\"/></w:rPr>")
+                    docSb.append("<w:t xml:space=\"preserve\">${escapeXml(block.marker)} </w:t></w:r>")
+                    docSb.append(renderDocxRuns(block.text))
+                    docSb.append("</w:p>\n")
+                }
+
                 is QuoteBlock -> {
                     docSb.append("<w:p><w:pPr><w:pStyle w:val=\"Quote\"/><w:ind w:left=\"420\"/>")
                     docSb.append("<w:pBdr><w:left w:val=\"single\" w:sz=\"24\" w:space=\"12\" w:color=\"$themeHex\"/></w:pBdr>")
@@ -1335,8 +1343,9 @@ object NoteExportHelper {
                 }
 
                 is ChecklistBlock -> {
+                    val indentOffset = 10f
                     val formatted = formatSpannable(block.text.ifBlank { " " }, Color.parseColor("#334155"), themeColor)
-                    val textLayout = createStaticLayout(formatted, bodyPaint, contentWidth - 24)
+                    val textLayout = createStaticLayout(formatted, bodyPaint, contentWidth - 34)
                     checkNewPage(max(16f, textLayout.height.toFloat()) + 6f)
 
                     val boxPaint = Paint().apply {
@@ -1345,7 +1354,8 @@ object NoteExportHelper {
                         strokeWidth = 1.5f
                         isAntiAlias = true
                     }
-                    val boxRect = RectF(margin, y + 2f, margin + 12f, y + 14f)
+                    val boxLeft = margin + indentOffset
+                    val boxRect = RectF(boxLeft, y + 2f, boxLeft + 12f, y + 14f)
                     canvas.drawRoundRect(boxRect, 3f, 3f, boxPaint)
 
                     if (block.isChecked) {
@@ -1355,12 +1365,12 @@ object NoteExportHelper {
                             style = Paint.Style.STROKE
                             isAntiAlias = true
                         }
-                        canvas.drawLine(margin + 3f, y + 8f, margin + 6f, y + 11f, checkMarkPaint)
-                        canvas.drawLine(margin + 6f, y + 11f, margin + 10f, y + 5f, checkMarkPaint)
+                        canvas.drawLine(boxLeft + 3f, y + 8f, boxLeft + 6f, y + 11f, checkMarkPaint)
+                        canvas.drawLine(boxLeft + 6f, y + 11f, boxLeft + 10f, y + 5f, checkMarkPaint)
                     }
 
                     canvas.save()
-                    canvas.translate(margin + 20f, y)
+                    canvas.translate(boxLeft + 20f, y)
                     textLayout.draw(canvas)
                     canvas.restore()
                     y += textLayout.height + 6f
@@ -1380,6 +1390,24 @@ object NoteExportHelper {
 
                     canvas.save()
                     canvas.translate(margin + 24f, y)
+                    textLayout.draw(canvas)
+                    canvas.restore()
+                    y += textLayout.height + 6f
+                }
+
+                is NumberedBlock -> {
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, Color.parseColor("#334155"), themeColor)
+                    val textLayout = createStaticLayout(formatted, bodyPaint, contentWidth - 36)
+                    checkNewPage(max(14f, textLayout.height.toFloat()) + 6f)
+
+                    val markerPaint = TextPaint(bodyPaint).apply {
+                        color = themeColor
+                        isFakeBoldText = true
+                    }
+                    canvas.drawText(block.marker, margin + 8f, y + 11f, markerPaint)
+
+                    canvas.save()
+                    canvas.translate(margin + 30f, y)
                     textLayout.draw(canvas)
                     canvas.restore()
                     y += textLayout.height + 6f
@@ -1783,9 +1811,10 @@ object NoteExportHelper {
                 is ChecklistBlock -> {
                     val chk = if (block.isChecked) "checked" else ""
                     val cls = if (block.isChecked) "checked" else ""
-                    sb.append("<div class=\"checklist-item\"><input type=\"checkbox\" $chk disabled style=\"accent-color:var(--primary);\"><span class=\"$cls\">${renderInlineHtml(block.text, themeHex)}</span></div>\n")
+                    sb.append("<div class=\"checklist-item\" style=\"margin-left:18px;\"><input type=\"checkbox\" $chk disabled style=\"accent-color:var(--primary);\"><span class=\"$cls\">${renderInlineHtml(block.text, themeHex)}</span></div>\n")
                 }
-                is BulletBlock -> sb.append("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
+                is BulletBlock -> sb.append("<ul style=\"margin-left:18px;\"><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
+                is NumberedBlock -> sb.append("<div style=\"margin:6px 0 6px 18px;\"><strong style=\"color:var(--primary); margin-right:6px;\">${escapeHtml(block.marker)}</strong>${renderInlineHtml(block.text, themeHex)}</div>\n")
                 is QuoteBlock -> sb.append("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
                 is CodeBlock -> sb.append("<pre><code class=\"language-${escapeHtml(block.language)}\">${renderCodeHtml(block.code, block.language)}</code></pre>\n")
                 is MathBlock -> {
@@ -2031,6 +2060,10 @@ object NoteExportHelper {
                     val layout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 28)
                     measuredHeight += maxOf(26f, layout.height.toFloat()) + 10f
                 }
+                is NumberedBlock -> {
+                    val layout = createStaticLayout(block.text.ifBlank { " " }, bodyPaint, contentWidth - 36)
+                    measuredHeight += maxOf(26f, layout.height.toFloat()) + 10f
+                }
                 is QuoteBlock -> {
                     val layout = createStaticLayout(block.text.ifBlank { " " }, italicPaint, contentWidth - 24)
                     measuredHeight += maxOf(32f, layout.height.toFloat()) + 16f
@@ -2227,6 +2260,19 @@ object NoteExportHelper {
                     canvas.drawCircle(padding + 8f, y + 12f, 4.5f, bDot)
                     canvas.save()
                     canvas.translate(padding + 22f, y)
+                    layout.draw(canvas)
+                    canvas.restore()
+                    y += itemH + 10f
+                }
+                is NumberedBlock -> {
+                    val mPaint = TextPaint(bodyPaint).apply { color = themeColor; isFakeBoldText = true }
+                    val formatted = formatSpannable(block.text.ifBlank { " " }, bodyPaint.color, themeColor)
+                    val layout = createStaticLayout(formatted, bodyPaint, contentWidth - 40)
+                    val itemH = maxOf(26f, layout.height.toFloat())
+
+                    canvas.drawText(block.marker, padding + 4f, y + 18f, mPaint)
+                    canvas.save()
+                    canvas.translate(padding + 34f, y)
                     layout.draw(canvas)
                     canvas.restore()
                     y += itemH + 10f
@@ -2515,9 +2561,10 @@ object NoteExportHelper {
                 is TextBlock -> sb.append(block.text).append("\n\n")
                 is ChecklistBlock -> {
                     val mark = if (block.isChecked) "[X]" else "[ ]"
-                    sb.append(mark).append(" ").append(block.text).append("\n")
+                    sb.append("  ").append(mark).append(" ").append(block.text).append("\n")
                 }
                 is BulletBlock -> sb.append("  • ").append(block.text).append("\n")
+                is NumberedBlock -> sb.append("  ").append(block.marker).append(" ").append(block.text).append("\n")
                 is QuoteBlock -> sb.append("  > ").append(block.text).append("\n\n")
                 is CodeBlock -> sb.append("[CÓDIGO - ").append(block.language.uppercase()).append("]\n").append(block.code).append("\n\n")
                 is MathBlock -> sb.append("[MATH: ").append(block.formula).append("]\n\n")
@@ -2640,9 +2687,10 @@ object NoteExportHelper {
                     is ChecklistBlock -> {
                         val chk = if (block.isChecked) "checked" else ""
                         val cls = if (block.isChecked) "checked" else ""
-                        writer.write("<div class=\"checklist-item\"><input type=\"checkbox\" $chk disabled style=\"accent-color:var(--primary);\"><span class=\"$cls\">${renderInlineHtml(block.text, themeHex)}</span></div>\n")
+                        writer.write("<div class=\"checklist-item\" style=\"margin-left:18px;\"><input type=\"checkbox\" $chk disabled style=\"accent-color:var(--primary);\"><span class=\"$cls\">${renderInlineHtml(block.text, themeHex)}</span></div>\n")
                     }
-                    is BulletBlock -> writer.write("<ul><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
+                    is BulletBlock -> writer.write("<ul style=\"margin-left:18px;\"><li>${renderInlineHtml(block.text, themeHex)}</li></ul>\n")
+                    is NumberedBlock -> writer.write("<div style=\"margin:6px 0 6px 18px;\"><strong style=\"color:var(--primary); margin-right:6px;\">${escapeHtml(block.marker)}</strong>${renderInlineHtml(block.text, themeHex)}</div>\n")
                     is QuoteBlock -> writer.write("<blockquote>${renderInlineHtml(block.text, themeHex)}</blockquote>\n")
                     is CodeBlock -> writer.write("<pre><code class=\"language-${escapeHtml(block.language)}\">${renderCodeHtml(block.code, block.language)}</code></pre>\n")
                     is MathBlock -> writer.write("<div class=\"math\">${escapeHtml(LatexFormulaRenderer.renderFormulaToText(block.formula))}</div>\n")

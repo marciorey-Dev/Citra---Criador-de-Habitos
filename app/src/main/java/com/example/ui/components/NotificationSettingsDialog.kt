@@ -42,6 +42,7 @@ fun NotificationSettingsDialog(
     var notifyAchievements by remember { mutableStateOf(currentSettings.notifyAchievements) }
     var notifyMissedHabits by remember { mutableStateOf(currentSettings.notifyMissedHabits) }
     var overrideSilentMode by remember { mutableStateOf(currentSettings.overrideSilentMode) }
+    var pomodoroDisruptiveAlarm by remember { mutableStateOf(currentSettings.pomodoroDisruptiveAlarm) }
 
     Dialog(
         onDismissRequest = {
@@ -192,6 +193,18 @@ fun NotificationSettingsDialog(
                         }
                         Switch(checked = overrideSilentMode, onCheckedChange = { overrideSilentMode = it })
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Toque de sessão perturbador (Arancia)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("Dispara alarme contínuo em tela cheia ao terminar foco ou pausa mesmo com o app aberto.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = pomodoroDisruptiveAlarm, onCheckedChange = { pomodoroDisruptiveAlarm = it })
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -211,7 +224,8 @@ fun NotificationSettingsDialog(
                                 headsUpBanner = headsUp,
                                 notifyAchievements = notifyAchievements,
                                 notifyMissedHabits = notifyMissedHabits,
-                                overrideSilentMode = overrideSilentMode
+                                overrideSilentMode = overrideSilentMode,
+                                pomodoroDisruptiveAlarm = pomodoroDisruptiveAlarm
                             )
                         )
                     },

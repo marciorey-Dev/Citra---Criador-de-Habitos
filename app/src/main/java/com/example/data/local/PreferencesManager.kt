@@ -24,7 +24,8 @@ data class NotificationSettings(
     val notifyMissedHabits: Boolean = true,
     val ambientBreakMusicInApp: Boolean = false,
     val ambientMusicVolume: Float = 0.5f,
-    val overrideSilentMode: Boolean = false
+    val overrideSilentMode: Boolean = false,
+    val pomodoroDisruptiveAlarm: Boolean = false
 )
 
 class PreferencesManager(private val context: Context) {
@@ -407,7 +408,8 @@ class PreferencesManager(private val context: Context) {
             notifyMissedHabits = prefs.getBoolean("notify_missed_habits", true),
             ambientBreakMusicInApp = prefs.getBoolean("ambient_music_in_app", false),
             ambientMusicVolume = prefs.getFloat("ambient_music_volume", 0.5f),
-            overrideSilentMode = prefs.getBoolean("override_silent_mode", false)
+            overrideSilentMode = prefs.getBoolean("override_silent_mode", false),
+            pomodoroDisruptiveAlarm = prefs.getBoolean("pomodoro_disruptive_alarm", false)
         )
     }
 
@@ -448,6 +450,7 @@ class PreferencesManager(private val context: Context) {
             "ambient_music_in_app" to s.ambientBreakMusicInApp,
             "ambient_music_volume" to s.ambientMusicVolume,
             "override_silent_mode" to s.overrideSilentMode,
+            "pomodoro_disruptive_alarm" to s.pomodoroDisruptiveAlarm,
             "daily_random_color" to _dailyRandomColor.value,
             "timer_continuous_mode" to _timerContinuousMode.value,
             "timer_tap_to_toggle" to _timerTapToToggle.value,
@@ -667,7 +670,8 @@ class PreferencesManager(private val context: Context) {
             notifyMissedHabits = (map["notify_missed_habits"] as? Boolean) ?: curSettings.notifyMissedHabits,
             ambientBreakMusicInApp = (map["ambient_music_in_app"] as? Boolean) ?: curSettings.ambientBreakMusicInApp,
             ambientMusicVolume = ((map["ambient_music_volume"] as? Number)?.toFloat()) ?: curSettings.ambientMusicVolume,
-            overrideSilentMode = (map["override_silent_mode"] as? Boolean) ?: curSettings.overrideSilentMode
+            overrideSilentMode = (map["override_silent_mode"] as? Boolean) ?: curSettings.overrideSilentMode,
+            pomodoroDisruptiveAlarm = (map["pomodoro_disruptive_alarm"] as? Boolean) ?: curSettings.pomodoroDisruptiveAlarm
         )
         editor.apply()
         if (map.containsKey("recent_external_docs_json")) {
@@ -715,6 +719,7 @@ class PreferencesManager(private val context: Context) {
             putBoolean("ambient_music_in_app", newSettings.ambientBreakMusicInApp)
             putFloat("ambient_music_volume", newSettings.ambientMusicVolume)
             putBoolean("override_silent_mode", newSettings.overrideSilentMode)
+            putBoolean("pomodoro_disruptive_alarm", newSettings.pomodoroDisruptiveAlarm)
             apply()
         }
         sharedSettings.value = newSettings
@@ -1240,6 +1245,10 @@ class PreferencesManager(private val context: Context) {
             return DEFAULT_TOOLBAR_ORDER
         }
         val list = raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        if (list == LEGACY_DEFAULT_TOOLBAR_ORDER) {
+            saveToolbarOrder(DEFAULT_TOOLBAR_ORDER)
+            return DEFAULT_TOOLBAR_ORDER
+        }
         val combined = list + DEFAULT_TOOLBAR_ORDER.filterNot { it in list }
         return combined
     }
@@ -1351,14 +1360,22 @@ class PreferencesManager(private val context: Context) {
         private val sharedTimerSnapshotRevision = MutableStateFlow(0L)
         private val sharedSettings = MutableStateFlow(NotificationSettings())
 
+        private val LEGACY_DEFAULT_TOOLBAR_ORDER = listOf(
+            "bold", "italic", "inline_code", "titles", "checklist", "list",
+            "code_block", "math", "table", "divider", "image", "audio", "record",
+            "to_task", "quote", "callout", "details",
+            "strikethrough", "underline", "highlight", "pagebreak",
+            "find_replace", "link_entity", "pagination", "toc"
+        )
+
         val DEFAULT_TOOLBAR_ORDER = listOf(
             // Primeiro módulo (exatamente os 13 símbolos permitidos no topo por padrão):
             "bold", "italic", "inline_code", "titles", "checklist", "list",
             "code_block", "math", "table", "divider", "image", "audio", "record",
-            // Segundo módulo (demais elementos subsequentes):
+            // Segundo módulo (tachado, sublinhado e destaque em primeiro):
+            "strikethrough", "underline", "highlight",
             "to_task", "quote", "callout", "details",
-            "strikethrough", "underline", "highlight", "pagebreak",
-            "find_replace", "link_entity", "pagination", "toc"
+            "pagebreak", "find_replace", "link_entity", "pagination", "toc"
         )
     }
 }

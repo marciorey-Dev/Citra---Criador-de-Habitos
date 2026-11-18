@@ -1704,12 +1704,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val filename = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, uri)
                     ?: queryFileName(context, uri)
                     ?: "Documento_${System.currentTimeMillis()}"
+                val lowerName = filename.lowercase()
+                val lowerMime = (mimeType ?: context.contentResolver.getType(uri) ?: "").lowercase()
+                val isMarkdownOrTextIntent = lowerName.endsWith(".md") ||
+                    lowerName.endsWith(".markdown") ||
+                    lowerName.endsWith(".txt") ||
+                    lowerMime == "text/markdown" ||
+                    lowerMime == "text/x-markdown" ||
+                    lowerMime == "text/plain"
+
                 val docType = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(
                     context = context,
                     uri = uri,
                     displayName = filename,
                     mimeTypeHint = mimeType
                 )
+
+                if (docType == null && isMarkdownOrTextIntent) {
+                    val rawText = context.contentResolver.openInputStream(uri)?.use {
+                        it.bufferedReader(Charsets.UTF_8).readText()
+                    } ?: run {
+                        _userMessage.emit("Não foi possível ler o arquivo de texto.")
+                        return@launch
+                    }
+                    val title = filename.substringBeforeLast(".").ifBlank { "Nota Importada" }.trim()
+                    val cleanMd = com.example.util.CitraDocsFileManager.stripFrontmatter(
+                        com.example.util.CitraDocsFileManager.convertContentToMarkdown(filename, rawText)
+                    )
+                    val persistedMd = com.example.util.MediaStorageHelper.resolveAndDownloadRemoteImages(
+                        context,
+                        com.example.util.MediaStorageHelper.processAndPersistImportedNoteMedia(context, cleanMd)
+                    )
+                    val newUuid = java.util.UUID.randomUUID().toString()
+                    val newNote = Note(
+                        uuid = newUuid,
+                        title = title,
+                        content = persistedMd,
+                        category = "Geral",
+                        iconEmoji = "📝",
+                        documentType = NoteDocumentType.MARKDOWN.id,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    val insertedId = repository.insertNote(newNote)
+                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        context = context,
+                        title = title,
+                        content = persistedMd,
+                        uuid = newUuid
+                    )
+                    com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+                    _noteToOpen.value = newNote.copy(id = insertedId)
+                    _userMessage.emit("Arquivo '$filename' aberto no Citra!")
+                    return@launch
+                }
+
                 if (docType == null) {
                     _userMessage.emit("Formato de arquivo não suportado para leitura externa.")
                     return@launch
@@ -1897,7 +1945,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val resolvedUuid = uuid ?: existing?.uuid ?: java.util.UUID.randomUUID().toString()
             val previousTitle = oldTitle ?: existing?.title
             val finalTitle = title.ifBlank { "Sem título" }
-            val cleanContent = com.example.util.CitraDocsFileManager.stripFrontmatter(content)
+            val strippedContent = com.example.util.CitraDocsFileManager.stripFrontmatter(content)
+            val cleanContent = if (strippedContent.contains("http://", ignoreCase = true) ||
+                strippedContent.contains("https://", ignoreCase = true)
+            ) {
+                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    com.example.util.MediaStorageHelper.resolveAndDownloadRemoteImages(getApplication(), strippedContent)
+                }
+            } else {
+                strippedContent
+            }
 
             val note = Note(
                 id = id,
@@ -1952,6 +2009,120 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             onUpdated?.invoke(updated)
             _userMessage.emit("Categoria alterada para '$cleanCategory'.")
+        }
+    }
+
+    fun renameExternalDocument(
+        note: Note,
+        newName: String,
+        context: Context,
+        onUpdated: ((Note) -> Unit)? = null
+    ) {
+        val trimmedName = newName.trim()
+        if (trimmedName.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val docType = note.resolvedDocumentType
+            val oldUri = note.externalUri
+            val renameResult = com.example.util.ExternalDocumentUriHelper.renameExternalDocumentFile(
+                context = context,
+                pathOrUri = oldUri,
+                newTitle = trimmedName,
+                docType = docType
+            )
+            val finalUri = renameResult.newUri ?: oldUri
+            val updated = note.copy(
+                title = renameResult.sanitizedTitle,
+                externalUri = finalUri,
+                updatedAt = System.currentTimeMillis()
+            )
+            repository.updateNote(updated)
+            if (!oldUri.isNullOrBlank() && oldUri != finalUri) {
+                preferencesManager.removeRecentExternalDoc(oldUri)
+                com.example.ui.screens.organization.notes.DocumentCardPreviewCache.invalidate(oldUri)
+            }
+            if (!finalUri.isNullOrBlank()) {
+                com.example.ui.screens.organization.notes.DocumentCardPreviewCache.invalidate(finalUri)
+                preferencesManager.recordRecentExternalDocs(
+                    listOf(
+                        com.example.data.local.RecentExternalDocEntry(
+                            uri = finalUri,
+                            title = updated.title,
+                            docType = updated.documentType,
+                            addedAt = System.currentTimeMillis()
+                        )
+                    )
+                )
+            }
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                onUpdated?.invoke(updated)
+            }
+            val suffix = if (renameResult.fileRenamedOnStorage) {
+                " e no armazenamento."
+            } else {
+                " no Citra."
+            }
+            _userMessage.emit("Renomeado para '${updated.title}'$suffix")
+        }
+    }
+
+    fun saveEditedDocxDocument(
+        note: Note,
+        editsByParagraphIndex: Map<Int, String>,
+        context: Context,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val uriString = note.externalUri
+            if (uriString.isNullOrBlank()) {
+                val msg = "Arquivo .docx não encontrado."
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onError(msg) }
+                return@launch
+            }
+            if (editsByParagraphIndex.isEmpty()) {
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onSuccess() }
+                return@launch
+            }
+            try {
+                val updatedBytesStream = java.io.ByteArrayOutputStream()
+                val okReadAndRewrite = com.example.util.ExternalDocumentUriHelper.openInputStream(context, uriString)?.use { input ->
+                    com.example.util.DocxDocumentEngine.updateDocxTextInPlace(
+                        inputStream = input,
+                        outputStream = updatedBytesStream,
+                        editsByParagraphIndex = editsByParagraphIndex
+                    )
+                } ?: false
+
+                if (!okReadAndRewrite) {
+                    val msg = "Não foi possível processar as alterações deste arquivo .docx."
+                    _userMessage.emit(msg)
+                    kotlinx.coroutines.withContext(Dispatchers.Main) { onError(msg) }
+                    return@launch
+                }
+
+                val saved = com.example.util.ExternalDocumentUriHelper.writeBytesToExternalDocument(
+                    context = context,
+                    pathOrUri = uriString,
+                    bytes = updatedBytesStream.toByteArray()
+                )
+                if (!saved) {
+                    val msg = "Este local não permite gravação direta. Carregue o arquivo com permissão de escrita ou converta para nota editável."
+                    _userMessage.emit(msg)
+                    kotlinx.coroutines.withContext(Dispatchers.Main) { onError(msg) }
+                    return@launch
+                }
+
+                com.example.ui.screens.organization.notes.DocumentCardPreviewCache.invalidateDocxPreview(uriString)
+                repository.updateNote(note.copy(updatedAt = System.currentTimeMillis()))
+                com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+                _userMessage.emit("Alterações salvas no arquivo .docx!")
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onSuccess() }
+            } catch (e: Exception) {
+                val msg = e.message ?: "Erro ao salvar alterações no .docx."
+                _userMessage.emit(msg)
+                kotlinx.coroutines.withContext(Dispatchers.Main) { onError(msg) }
+            }
         }
     }
 
@@ -2138,21 +2309,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun permanentlyDeleteNote(note: Note, context: Context? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = context ?: getApplication()
+            val allNotesBefore = repository.getAllNotesSync()
+            val survivingNotes = allNotesBefore.filter { it.id != note.id }
+
             if (note.isExternalDocument) {
-                val remaining = repository.getAllNotesSync().filter { it.id != note.id }
                 com.example.util.ExternalDocumentUriHelper.releasePersistableReadPermissionIfUnused(
                     ctx,
                     note.externalUri,
-                    remaining
+                    survivingNotes
                 )
             } else {
                 com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
+                val candidateMedia = com.example.util.MediaStorageHelper.extractAllReferencedLocalMediaPaths(note)
+                val protectedUris = listOfNotNull(
+                    preferencesManager.appBgUri.value,
+                    preferencesManager.userPhotoPath.value
+                ).toSet()
+                com.example.util.MediaStorageHelper.deleteUnreferencedMediaFiles(
+                    context = ctx,
+                    candidatePaths = candidateMedia,
+                    survivingNotes = survivingNotes,
+                    protectedUris = protectedUris
+                )
             }
             repository.permanentlyDeleteNote(note)
             val msg = when (note.resolvedDocumentType) {
                 NoteDocumentType.PDF -> "PDF removido do Citra (arquivo original preservado)."
                 NoteDocumentType.DOCX -> "Word (.docx) removido do Citra (arquivo original preservado)."
-                NoteDocumentType.MARKDOWN -> "Anotação excluída definitivamente do Citra e dos arquivos do dispositivo."
+                NoteDocumentType.MARKDOWN -> "Anotação e mídias exclusivas removidas definitivamente do aparelho."
             }
             _userMessage.emit(msg)
         }
@@ -2163,13 +2347,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val currentTrash = trashNotes.value
             if (currentTrash.isEmpty()) return@launch
             val ctx = context ?: getApplication()
+            val deletedIds = currentTrash.map { it.id }.toSet()
+            val survivingNotes = repository.getAllNotesSync().filter { it.id !in deletedIds }
+            val candidateMedia = mutableSetOf<String>()
+
             currentTrash.forEach { note ->
-                if (!note.isExternalDocument) {
+                if (note.isExternalDocument) {
+                    com.example.util.ExternalDocumentUriHelper.releasePersistableReadPermissionIfUnused(
+                        ctx,
+                        note.externalUri,
+                        survivingNotes
+                    )
+                } else {
                     com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
+                    candidateMedia.addAll(com.example.util.MediaStorageHelper.extractAllReferencedLocalMediaPaths(note))
                 }
                 repository.permanentlyDeleteNote(note)
             }
-            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} itens removidos).")
+
+            if (candidateMedia.isNotEmpty()) {
+                val protectedUris = listOfNotNull(
+                    preferencesManager.appBgUri.value,
+                    preferencesManager.userPhotoPath.value
+                ).toSet()
+                com.example.util.MediaStorageHelper.deleteUnreferencedMediaFiles(
+                    context = ctx,
+                    candidatePaths = candidateMedia,
+                    survivingNotes = survivingNotes,
+                    protectedUris = protectedUris
+                )
+            }
+            _userMessage.emit("Lixeira esvaziada (${currentTrash.size} itens e arquivos locais apagados definitivamente).")
         }
     }
 

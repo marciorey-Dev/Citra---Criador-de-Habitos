@@ -991,14 +991,14 @@ val ALL_TOOLBAR_ITEMS: List<ToolbarItemDef> = listOf(
     ToolbarItemDef("image", "Imagem", Icons.Default.Image),
     ToolbarItemDef("audio", "Áudio", Icons.Default.Audiotrack),
     ToolbarItemDef("record", "Gravação de Voz", Icons.Default.Mic),
-    // 2º Módulo - Itens subsequentes:
+    // 2º Módulo - Itens subsequentes (Tachado, Sublinhado e Destaque em primeiro):
+    ToolbarItemDef("strikethrough", "Tachado", Icons.Default.FormatStrikethrough),
+    ToolbarItemDef("underline", "Sublinhado", Icons.Default.FormatUnderlined),
+    ToolbarItemDef("highlight", "Destaque Marcador", Icons.Default.BorderColor),
     ToolbarItemDef("to_task", "Converter para Tarefa", Icons.Default.AddTask),
     ToolbarItemDef("quote", "Citação", Icons.Default.FormatQuote),
     ToolbarItemDef("callout", "Destaque / Aviso", Icons.Default.Announcement),
     ToolbarItemDef("details", "Bloco Recolhível", Icons.Default.UnfoldMore),
-    ToolbarItemDef("strikethrough", "Tachado", Icons.Default.FormatStrikethrough),
-    ToolbarItemDef("underline", "Sublinhado", Icons.Default.FormatUnderlined),
-    ToolbarItemDef("highlight", "Destaque Marcador", Icons.Default.BorderColor),
     ToolbarItemDef("pagebreak", "Quebra de Página", Icons.Default.HorizontalSplit),
     ToolbarItemDef("find_replace", "Buscar / Substituir", Icons.Default.FindReplace),
     ToolbarItemDef("link_entity", "Vincular", Icons.Default.Share),

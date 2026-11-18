@@ -70,6 +70,7 @@ fun TimerScreen(
     val timerContinuousMode by viewModel.timerContinuousMode.collectAsState()
     val timerTapToToggle by viewModel.timerTapToToggle.collectAsState()
     val timerAllowSwipe by viewModel.timerAllowSwipe.collectAsState()
+    val notificationSettings by viewModel.notificationSettings.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val citraTimerBallsJson by viewModel.citraTimerBallsJson.collectAsState()
     val pendingCelebration by viewModel.pendingTimerCelebration.collectAsState()
@@ -1214,6 +1215,31 @@ fun TimerScreen(
                     Switch(
                         checked = timerAllowSwipe,
                         onCheckedChange = { viewModel.setTimerAllowSwipe(it) }
+                    )
+                }
+
+                // Disruptive session completion alarm switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Toque de sessão perturbador", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Dispara alarme contínuo em tela cheia mesmo com o app aberto",
+                            fontSize = 11.5.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = notificationSettings.pomodoroDisruptiveAlarm,
+                        onCheckedChange = { enabled ->
+                            viewModel.updateNotificationSettings(
+                                notificationSettings.copy(pomodoroDisruptiveAlarm = enabled)
+                            )
+                        },
+                        modifier = Modifier.testTag("timer_disruptive_alarm_switch")
                     )
                 }
 

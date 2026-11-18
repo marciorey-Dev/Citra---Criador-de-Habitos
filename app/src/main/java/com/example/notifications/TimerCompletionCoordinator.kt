@@ -125,7 +125,7 @@ object TimerCompletionCoordinator {
                 )
 
                 val message = "Excelente dedicação de ${snapshot.focusMinutes}m! Pausa de ${snapshot.breakMinutes}m pronta."
-                if (AppForegroundTracker.isAppVisibleAndUnlocked(appContext)) {
+                if (AppForegroundTracker.isAppVisibleAndUnlocked(appContext) && !settings.pomodoroDisruptiveAlarm) {
                     // Immediate integrated celebration inside TimerScreen + respectful completion chime
                     try {
                         SoundEffectsManager.playAlarmAudio(
@@ -139,7 +139,7 @@ object TimerCompletionCoordinator {
                         NotificationHelper.triggerVibration(appContext, 350L)
                     }
                 } else {
-                    // Screen locked or app backgrounded: ring via dedicated AlarmRingService + FullScreenIntent (AlarmActivity)
+                    // Screen locked, app backgrounded, or disruptive session alarm enabled: ring via dedicated AlarmRingService + FullScreenIntent (AlarmActivity)
                     AlarmRingService.startAlarm(
                         context = appContext,
                         notificationId = NotificationHelper.TIMER_ALERT_NOTIFICATION_ID,
@@ -184,7 +184,7 @@ object TimerCompletionCoordinator {
                     "Todos os ${snapshot.totalCycles} ciclos de foco foram completados!"
                 }
 
-                if (AppForegroundTracker.isAppVisibleAndUnlocked(appContext)) {
+                if (AppForegroundTracker.isAppVisibleAndUnlocked(appContext) && !settings.pomodoroDisruptiveAlarm) {
                     try {
                         SoundEffectsManager.playAlarmAudio(
                             context = appContext,

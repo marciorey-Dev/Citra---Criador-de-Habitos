@@ -28,6 +28,12 @@ data class BulletBlock(
     val text: String = ""
 ) : VisualBlock
 
+data class NumberedBlock(
+    override val id: String = UUID.randomUUID().toString(),
+    val marker: String = "1.",
+    val text: String = ""
+) : VisualBlock
+
 data class TableBlock(
     override val id: String = UUID.randomUUID().toString(),
     val headers: List<String> = listOf("Item", "Status"),
@@ -92,6 +98,7 @@ object SmoothMarkdownConverter {
 
     private val AUDIO_LINE_REGEX = Regex("^!?\\[audio:([^\\]\\n]*)\\]\\(([^)\\n]*)\\)$")
     private val IMAGE_LINE_REGEX = Regex("^!\\[([^\\]\\n]*)\\]\\(([^)\\n]*)\\)$")
+    private val NUMBERED_LINE_REGEX = Regex("^(\\d+\\.|[IVXLCDM]+\\.|[a-z]\\))\\s+(.*)$")
     private val TABLE_DELIMITER_REGEX = Regex("^-+$")
 
     /**
@@ -315,6 +322,14 @@ object SmoothMarkdownConverter {
                     continue
                 }
 
+                // Numbered / Ordered List (1., I., a))
+                NUMBERED_LINE_REGEX.matches(trimmed) -> {
+                    val m = NUMBERED_LINE_REGEX.find(trimmed)!!
+                    blocks.add(NumberedBlock(marker = m.groupValues[1], text = m.groupValues[2]))
+                    i++
+                    continue
+                }
+
                 // Quote
                 trimmed.startsWith("> ") -> {
                     blocks.add(QuoteBlock(text = trimmed.removePrefix("> ")))
@@ -357,6 +372,9 @@ object SmoothMarkdownConverter {
                 }
                 is BulletBlock -> {
                     sb.append("- ${block.text}\n")
+                }
+                is NumberedBlock -> {
+                    sb.append("${block.marker} ${block.text}\n")
                 }
                 is TableBlock -> {
                     val safeHeaders = block.headers.map { it.replace("\n", "<br>").replace("|", "&#124;") }
