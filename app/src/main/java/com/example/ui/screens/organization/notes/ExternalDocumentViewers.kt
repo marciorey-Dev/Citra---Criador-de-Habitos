@@ -407,18 +407,20 @@ private fun ExternalDocumentReaderHeader(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = badgeColor.copy(alpha = 0.14f),
-                            modifier = Modifier.testTag(badgeTestTag)
-                        ) {
-                            Text(
-                                text = badgeLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = badgeColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
+                        if (badgeLabel.isNotBlank()) {
+                            Surface(
+                                shape = CircleShape,
+                                color = badgeColor.copy(alpha = 0.14f),
+                                modifier = Modifier.testTag(badgeTestTag)
+                            ) {
+                                Text(
+                                    text = badgeLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = badgeColor,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
                         }
 
                         Surface(
@@ -1309,8 +1311,8 @@ fun ExternalDocxReaderScreen(
         ) {
             ExternalDocumentReaderHeader(
                 title = note.title,
-                badgeLabel = if (isEditingDocx) "Word (.docx) · Edição de texto" else "Word (.docx) · Somente leitura",
-                badgeColor = if (isEditingDocx) MaterialTheme.colorScheme.primary else Color(0xFF2563EB),
+                badgeLabel = "",
+                badgeColor = Color.Transparent,
                 category = note.category,
                 isConverting = isConverting || isSavingDocx,
                 showEditToggle = true,

@@ -1330,7 +1330,7 @@ fun TimerScreen(
     if (showSelectCategoryBeforeStartDialog) {
         AlertDialog(
             onDismissRequest = { showSelectCategoryBeforeStartDialog = false },
-            icon = { Text("🎯", fontSize = 32.sp) },
+            icon = null,
             title = {
                 Text(
                     text = "Defina a Categoria",

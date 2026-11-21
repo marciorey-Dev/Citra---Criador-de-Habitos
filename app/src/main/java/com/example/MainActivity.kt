@@ -631,7 +631,7 @@ class MainActivity : ComponentActivity() {
                                                     horizontalArrangement = Arrangement.Center
                                                 ) {
                                                     Text(
-                                                        text = "🍊 Citra",
+                                                        text = "Citra",
                                                         fontWeight = FontWeight.ExtraBold,
                                                         fontSize = 20.sp,
                                                         color = MaterialTheme.colorScheme.primary,

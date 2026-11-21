@@ -178,7 +178,17 @@ class CitraRepository(
     suspend fun getNoteByTitle(title: String): Note? = noteDao.getNoteByTitle(title)
 
     suspend fun insertNote(note: Note): Long {
-        val id = noteDao.insertNote(note)
+        val noteUuid = note.uuid.ifBlank { UUID.randomUUID().toString() }
+        val finalNote = note.copy(uuid = noteUuid)
+        val id = noteDao.insertNote(finalNote)
+        if (!finalNote.isExternalDocument && !finalNote.isDeleted) {
+            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                context = context,
+                title = finalNote.title,
+                content = finalNote.content,
+                uuid = noteUuid
+            )
+        }
         checkNoteAchievements()
         return id
     }
@@ -187,7 +197,7 @@ class CitraRepository(
         val existing = if (note.uuid.isNotBlank()) noteDao.getNoteByUuid(note.uuid) else null
         return if (existing != null) {
             val updated = note.copy(id = existing.id)
-            noteDao.updateNote(updated)
+            updateNote(updated)
             existing.id
         } else {
             insertNote(note)
@@ -291,7 +301,21 @@ class CitraRepository(
         return upsertNotesLocally(notes)
     }
 
-    suspend fun updateNote(note: Note) = noteDao.updateNote(note)
+    suspend fun updateNote(note: Note) {
+        val oldNote = noteDao.getNoteById(note.id)
+        noteDao.updateNote(note)
+        if (!note.isExternalDocument && !note.isDeleted && !note.isArchived) {
+            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                context = context,
+                title = note.title,
+                content = note.content,
+                uuid = note.uuid.ifBlank { null },
+                oldTitle = oldNote?.title
+            )
+        } else if (note.isDeleted || note.isArchived) {
+            com.example.util.CitraDocsFileManager.deleteNoteMarkdown(context, note.title, note.uuid)
+        }
+    }
 
     suspend fun moveToTrash(note: Note) {
         noteDao.moveToTrash(note.id, System.currentTimeMillis())

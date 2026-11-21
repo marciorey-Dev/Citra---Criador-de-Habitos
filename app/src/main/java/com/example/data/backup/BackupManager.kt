@@ -2,49 +2,50 @@ package com.example.data.backup
 
 import com.example.data.local.AppDatabase
 import com.example.data.model.*
+import kotlinx.coroutines.flow.firstOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
 object BackupManager {
 
     /**
-     * Exports full app data as a JSON string WITHOUT notes, as requested.
+     * Exports full app data as a JSON string including notes and all app data.
      */
     suspend fun exportAppBackupJson(database: AppDatabase): String {
-        val root = JSONObject()
-        root.put("version", 1)
-        root.put("exportedAt", System.currentTimeMillis())
-
-        // Categories
-        val categoriesArray = JSONArray()
-        // We will collect categories from database
-        val catList = database.categoryDao().getAllCategories()
-        // (Wait: Flow needs firstOrNull)
-        // Let's retrieve from database
-        val tasksArray = JSONArray()
-        val habitsArray = JSONArray()
-        val sessionsArray = JSONArray()
-        val achievementsArray = JSONArray()
-
-        // Sync queries
+        val tasks = database.taskDao().getAllTasksSync()
+        val habits = database.habitDao().getAllHabitsSync()
         val sessions = database.focusSessionDao().getAllSessionsSync()
-        sessions.forEach { s ->
-            val obj = JSONObject().apply {
-                put("id", s.id)
-                put("category", s.category)
-                put("durationMinutes", s.durationMinutes)
-                put("breakMinutes", s.breakMinutes)
-                put("cycleCount", s.cycleCount)
-                put("timestamp", s.timestamp)
-                put("linkedTaskId", s.linkedTaskId ?: JSONObject.NULL)
-                put("linkedTaskTitle", s.linkedTaskTitle ?: JSONObject.NULL)
-                put("weekIdentifier", s.weekIdentifier)
-            }
-            sessionsArray.put(obj)
-        }
+        val categories = database.categoryDao().getAllCategories().firstOrNull() ?: emptyList()
+        val achievements = database.achievementDao().getAllAchievements().firstOrNull() ?: emptyList()
+        val notes = database.noteDao().getAllNotesIncludingDeletedSync()
+        val noteVersions = database.noteVersionDao().getAllVersionsSync()
+        val finDao = database.financeDao()
+        val finEntries = finDao.getAllEntriesIncludingDeleted()
+        val finCategories = finDao.getAllCategoriesSync()
+        val finWallets = finDao.getAllWalletsSync()
+        val finRules = finDao.getAllRecurringRulesSync()
+        val finBudgets = finDao.getAllBudgetsSync()
+        val finLinks = finDao.getAllLinksSync()
+        val finRates = finDao.getAllExchangeRatesSync()
+        val finExecutions = finDao.getAllExecutionsSync()
 
-        root.put("focusSessions", sessionsArray)
-        return root.toString(2)
+        return createBackupJson(
+            tasks = tasks,
+            habits = habits,
+            focusSessions = sessions,
+            categories = categories,
+            achievements = achievements,
+            notes = notes,
+            financeEntries = finEntries,
+            financeCategories = finCategories,
+            financeWallets = finWallets,
+            financeRecurringRules = finRules,
+            financeBudgets = finBudgets,
+            financeNoteLinks = finLinks,
+            noteVersions = noteVersions,
+            financeExchangeRates = finRates,
+            financeLinkExecutions = finExecutions
+        )
     }
 
     /**

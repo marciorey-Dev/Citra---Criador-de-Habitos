@@ -234,19 +234,6 @@ fun ProfileScreen(
                                 modifier = Modifier.weight(1f),
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-                                modifier = Modifier.padding(horizontal = 10.dp)
-                            ) {
-                                Text(
-                                    text = "🍊 Citra • Eu 🍊",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                                )
-                            }
                             HorizontalDivider(
                                 modifier = Modifier.weight(1f),
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
