@@ -216,6 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val notesSortOption: StateFlow<String> = preferencesManager.notesSortOption
     val notesSortAscending: StateFlow<Boolean> = preferencesManager.notesSortAscending
     val notesLayoutMode: StateFlow<String> = preferencesManager.notesLayoutMode
+    val authorizedDocTreeUris: StateFlow<Set<String>> = preferencesManager.authorizedDocTreeUris
 
     fun setTimerContinuousMode(enabled: Boolean) {
         preferencesManager.setTimerContinuousMode(enabled)
@@ -711,6 +712,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _noteToOpen.value = null
     }
 
+    private val _transientExternalDocToOpen = MutableStateFlow<Note?>(null)
+    val transientExternalDocToOpen: StateFlow<Note?> = _transientExternalDocToOpen.asStateFlow()
+
+    fun clearTransientExternalDocToOpen() {
+        _transientExternalDocToOpen.value = null
+    }
+
     init {
         preferencesManager.checkDailyRandomColor()
         NotificationHelper.initNotificationChannels(application)
@@ -733,7 +741,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerAutoBackup() {
-        viewModelScope.launch {
+        com.example.util.CitraPersistenceQueue.scheduleSnapshotSave {
             com.example.data.backup.AutoDeviceStorageManager.saveFullAppSnapshot(
                 context = getApplication(),
                 tasks = tasks.value,
@@ -1451,25 +1459,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val context = getApplication<Application>()
             var recordsError: String? = null
 
-            // Verificar pasta "Citra Records"
-            try {
-                val recFolder = com.example.util.MediaStorageHelper.getCitraRecordsFolder(context)
-                if (!recFolder.exists()) {
-                    val created = recFolder.mkdirs()
-                    if (!created && !recFolder.exists()) {
-                        recordsError = "Pasta 'Citra Records' não pôde ser criada. Verifique as permissões de armazenamento."
+            kotlinx.coroutines.coroutineScope {
+                val foldersJob = launch {
+                    // Verificar pasta "Citra Records"
+                    try {
+                        val recFolder = com.example.util.MediaStorageHelper.getCitraRecordsFolder(context)
+                        if (!recFolder.exists()) {
+                            val created = recFolder.mkdirs()
+                            if (!created && !recFolder.exists()) {
+                                recordsError = "Pasta 'Citra Records' não pôde ser criada. Verifique as permissões de armazenamento."
+                            }
+                        }
+                    } catch (e: Exception) {
+                        recordsError = "Erro na pasta Citra Records: ${e.message}"
                     }
+                    // Verificar pasta "Citra Docs"
+                    try {
+                        com.example.util.CitraDocsFileManager.getDocsFolder(context)
+                    } catch (_: Exception) {}
                 }
-            } catch (e: Exception) {
-                recordsError = "Erro na pasta Citra Records: ${e.message}"
+
+                val dbWarmupJob = launch {
+                    // Reconcile and deduplicate local notes seamlessly
+                    try {
+                        repository.deduplicateLocalNotes()
+                    } catch (_: Exception) {}
+                }
+
+                val previewWarmupJob = launch {
+                    // Pre-warm first 6 external PDF/DOCX previews under a 2.2s ceiling for fluid Notes tab entry
+                    try {
+                        kotlinx.coroutines.withTimeoutOrNull(2200L) {
+                            val allNotes = repository.getAllNotesSync()
+                            val externalDocs = allNotes
+                                .filter { !it.isDeleted && !it.isArchived && it.isExternalDocument && !it.externalUri.isNullOrBlank() }
+                                .sortedByDescending { it.updatedAt }
+                                .take(6)
+                            externalDocs.forEach { doc ->
+                                com.example.ui.screens.organization.notes.DocumentCardPreviewCache.prewarmDocumentPreview(
+                                    context = context,
+                                    uriStr = doc.externalUri!!,
+                                    isPdf = doc.resolvedDocumentType == NoteDocumentType.PDF
+                                )
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                foldersJob.join()
+                dbWarmupJob.join()
+                previewWarmupJob.join()
             }
 
-            // Reconcile and deduplicate local notes seamlessly
-            try {
-                repository.deduplicateLocalNotes()
-            } catch (_: Exception) {}
-
-            kotlinx.coroutines.delay(250)
             _isStartupScanDone.value = true
 
             if (recordsError != null) {
@@ -1788,6 +1829,222 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         preferencesManager.removeRecentExternalDoc(uri)
     }
 
+    fun addAuthorizedDocTreeUri(uri: Uri, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, uri)
+            preferencesManager.addAuthorizedDocTreeUri(uri.toString())
+            _userMessage.emit("Pasta vinculada! Documentos disponíveis na grade.")
+        }
+    }
+
+    /**
+     * Opens a discovered document in transient read-only mode WITHOUT creating a Room vault entry.
+     */
+    fun openTransientExternalDocument(doc: com.example.util.DiscoveredExternalDocument) {
+        val docIcon = if (doc.docType == NoteDocumentType.PDF) "📄" else "📘"
+        preferencesManager.recordRecentExternalDocs(
+            listOf(
+                com.example.data.local.RecentExternalDocEntry(
+                    uri = doc.uri,
+                    title = doc.title,
+                    docType = doc.docType.id,
+                    addedAt = System.currentTimeMillis()
+                )
+            )
+        )
+        _transientExternalDocToOpen.value = Note(
+            id = 0L,
+            uuid = "",
+            title = doc.title.ifBlank { "Documento" },
+            content = "",
+            category = "Geral",
+            iconEmoji = docIcon,
+            documentType = doc.docType.id,
+            externalUri = doc.uri,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    /**
+     * Handles picked PDF or DOCX URIs from the system multi-picker inside the 2-column Explorer:
+     * persists read permissions and records in recents; if 1 document was selected, opens it in
+     * transient read-only mode (no DB link created unless user taps 'Guardar').
+     */
+    fun openOrSelectPickedExternalDocuments(
+        uris: List<Uri>,
+        targetType: NoteDocumentType,
+        context: Context
+    ) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val recentEntries = mutableListOf<com.example.data.local.RecentExternalDocEntry>()
+            for (uri in uris) {
+                com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, uri)
+                val filename = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, uri)
+                    ?: queryFileName(context, uri)
+                    ?: "Documento_${System.currentTimeMillis()}"
+                val detected = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(
+                    context = context,
+                    uri = uri,
+                    displayName = filename
+                ) ?: targetType
+                val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+                recentEntries.add(
+                    com.example.data.local.RecentExternalDocEntry(
+                        uri = uri.toString(),
+                        title = rawTitle,
+                        docType = detected.id,
+                        addedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+            preferencesManager.recordRecentExternalDocs(recentEntries)
+            if (recentEntries.size == 1) {
+                val single = recentEntries.first()
+                val docType = NoteDocumentType.fromId(single.docType)
+                val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
+                _transientExternalDocToOpen.value = Note(
+                    id = 0L,
+                    uuid = "",
+                    title = single.title,
+                    content = "",
+                    category = "Geral",
+                    iconEmoji = docIcon,
+                    documentType = docType.id,
+                    externalUri = single.uri,
+                    updatedAt = System.currentTimeMillis()
+                )
+            } else {
+                _userMessage.emit("${recentEntries.size} documento(s) listado(s) no explorador.")
+            }
+        }
+    }
+
+    /**
+     * Imports discovered documents into the Citra vault explicitly upon user request.
+     */
+    fun saveDiscoveredDocsToVault(
+        docs: List<com.example.util.DiscoveredExternalDocument>,
+        preferredCategory: String? = null
+    ) {
+        val entries = docs.map {
+            com.example.data.local.RecentExternalDocEntry(
+                uri = it.uri,
+                title = it.title,
+                docType = it.docType.id,
+                addedAt = System.currentTimeMillis()
+            )
+        }
+        openOrAddRecentExternalDocs(
+            entries = entries,
+            preferredCategory = preferredCategory,
+            openIfSingle = false
+        )
+    }
+
+    /**
+     * Persists a transient external document into the Citra vault when user taps 'Guardar no Cofre'.
+     */
+    fun saveTransientDocumentToVault(
+        docNote: Note,
+        preferredCategory: String? = null,
+        onSaved: ((Note) -> Unit)? = null
+    ) {
+        val uriStr = docNote.externalUri?.trim()
+        if (uriStr.isNullOrBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val docType = docNote.resolvedDocumentType
+            val existing = repository.getAllNotesSync().firstOrNull {
+                it.externalUri?.trim() == uriStr && it.resolvedDocumentType == docType
+            }
+            val savedNote = if (existing != null) {
+                if (existing.isDeleted || existing.isArchived) {
+                    val restored = existing.copy(
+                        isDeleted = false,
+                        deletedAt = null,
+                        isArchived = false,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    repository.updateNote(restored)
+                    restored
+                } else {
+                    existing
+                }
+            } else {
+                val resolvedCategory = preferredCategory
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() && !it.equals("Todas", ignoreCase = true) }
+                    ?: docNote.category.ifBlank { "Geral" }
+                val newNote = docNote.copy(
+                    id = 0L,
+                    uuid = java.util.UUID.randomUUID().toString(),
+                    category = resolvedCategory,
+                    iconEmoji = if (docType == NoteDocumentType.PDF) "📄" else "📘",
+                    updatedAt = System.currentTimeMillis()
+                )
+                val id = repository.insertNote(newNote)
+                newNote.copy(id = id)
+            }
+            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+            _userMessage.emit("Documento guardado no cofre do Citra!")
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                onSaved?.invoke(savedNote)
+            }
+        }
+    }
+
+    /**
+     * Handles handoff from isolated ExternalReaderActivity when the user explicitly requests
+     * 'Guardar no Cofre' or 'Converter para nota'.
+     */
+    fun handleExternalReaderHandoff(
+        uri: Uri,
+        mimeType: String?,
+        action: String,
+        context: Context
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, uri)
+            val filename = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, uri)
+                ?: queryFileName(context, uri)
+                ?: "Documento_${System.currentTimeMillis()}"
+            val docType = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(
+                context = context,
+                uri = uri,
+                displayName = filename,
+                mimeTypeHint = mimeType
+            )
+            if (docType == null) {
+                _userMessage.emit("Não foi possível identificar o formato do documento.")
+                return@launch
+            }
+            val uriStr = uri.toString()
+            val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+            val docNote = Note(
+                id = 0L,
+                uuid = "",
+                title = rawTitle,
+                content = "",
+                category = "Geral",
+                iconEmoji = if (docType == NoteDocumentType.PDF) "📄" else "📘",
+                documentType = docType.id,
+                externalUri = uriStr,
+                updatedAt = System.currentTimeMillis()
+            )
+            if (action == HANDOFF_ACTION_CONVERT_TO_NOTE) {
+                convertExternalDocumentToEditableNote(
+                    docNote = docNote,
+                    context = context,
+                    onConverted = { converted ->
+                        _noteToOpen.value = converted
+                    }
+                )
+            } else {
+                openOrRegisterExternalDocumentFromIntent(uri, mimeType, context)
+            }
+        }
+    }
+
     fun openOrRegisterExternalDocumentFromIntent(
         uri: Uri,
         mimeType: String?,
@@ -1841,12 +2098,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         updatedAt = System.currentTimeMillis()
                     )
                     val insertedId = repository.insertNote(newNote)
-                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                        context = context,
-                        title = title,
-                        content = persistedMd,
-                        uuid = newUuid
-                    )
                     com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
                     _noteToOpen.value = newNote.copy(id = insertedId)
                     _userMessage.emit("Arquivo '$filename' aberto no Citra!")
@@ -1903,6 +2154,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _userMessage.emit("Não foi possível abrir o arquivo selecionado.")
             }
         }
+    }
+
+    companion object {
+        const val HANDOFF_ACTION_SAVE_TO_VAULT = "SAVE_TO_VAULT"
+        const val HANDOFF_ACTION_CONVERT_TO_NOTE = "CONVERT_TO_NOTE"
     }
 
     private fun queryFileName(context: Context, uri: Uri): String? {
@@ -2036,59 +2292,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onSaved: ((Long) -> Unit)? = null
     ) {
         viewModelScope.launch {
-            val existing = if (id != 0L) repository.getNoteById(id) else null
-            val resolvedUuid = uuid ?: existing?.uuid ?: java.util.UUID.randomUUID().toString()
-            val previousTitle = oldTitle ?: existing?.title
-            val finalTitle = title.ifBlank { "Sem título" }
-            val strippedContent = com.example.util.CitraDocsFileManager.stripFrontmatter(content)
-            val cleanContent = if (strippedContent.contains("http://", ignoreCase = true) ||
-                strippedContent.contains("https://", ignoreCase = true)
-            ) {
-                kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val resultId = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                val existing = if (id != 0L) repository.getNoteById(id) else null
+                val resolvedUuid = uuid ?: existing?.uuid ?: java.util.UUID.randomUUID().toString()
+                val previousTitle = oldTitle ?: existing?.title
+                val finalTitle = title.ifBlank { "Sem título" }
+                val strippedContent = com.example.util.CitraDocsFileManager.stripFrontmatter(content)
+                val cleanContent = if (strippedContent.contains("http://", ignoreCase = true) ||
+                    strippedContent.contains("https://", ignoreCase = true)
+                ) {
                     com.example.util.MediaStorageHelper.resolveAndDownloadRemoteImages(getApplication(), strippedContent)
+                } else {
+                    strippedContent
                 }
-            } else {
-                strippedContent
-            }
 
-            val note = Note(
-                id = id,
-                uuid = resolvedUuid,
-                title = finalTitle,
-                content = cleanContent,
-                category = category.ifBlank { "Geral" },
-                iconEmoji = iconEmoji.ifBlank { "📝" },
-                associatedDate = associatedDate,
-                isPinned = isPinned,
-                backgroundImageUri = backgroundImageUri,
-                backgroundBlur = backgroundBlur,
-                backgroundBrightness = backgroundBrightness,
-                isDeleted = false,
-                isArchived = isArchived || (existing?.isArchived == true),
-                noteColor = noteColor ?: existing?.noteColor,
-                documentType = existing?.documentType ?: NoteDocumentType.MARKDOWN.id,
-                externalUri = existing?.externalUri,
-                updatedAt = System.currentTimeMillis()
-            )
-            val resultId = if (id == 0L) {
-                repository.insertNote(note)
-            } else {
-                repository.updateNote(note)
-                id
-            }
-
-            if (!note.isExternalDocument) {
-                // Sync to Citra Docs, cleaning old file if title changed
-                com.example.util.CitraDocsFileManager.saveNoteMarkdown(
-                    context = getApplication(),
+                val note = Note(
+                    id = id,
+                    uuid = resolvedUuid,
                     title = finalTitle,
                     content = cleanContent,
-                    uuid = resolvedUuid,
-                    oldTitle = previousTitle
+                    category = category.ifBlank { "Geral" },
+                    iconEmoji = iconEmoji.ifBlank { "📝" },
+                    associatedDate = associatedDate,
+                    isPinned = isPinned,
+                    backgroundImageUri = backgroundImageUri,
+                    backgroundBlur = backgroundBlur,
+                    backgroundBrightness = backgroundBrightness,
+                    isDeleted = false,
+                    isArchived = isArchived || (existing?.isArchived == true),
+                    noteColor = noteColor ?: existing?.noteColor,
+                    documentType = existing?.documentType ?: NoteDocumentType.MARKDOWN.id,
+                    externalUri = existing?.externalUri,
+                    updatedAt = System.currentTimeMillis()
                 )
-            }
+                val savedId = if (id == 0L) {
+                    repository.insertNote(note)
+                } else {
+                    repository.updateNote(note)
+                    id
+                }
 
-            com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+                if (!note.isExternalDocument && previousTitle != null && !previousTitle.equals(finalTitle, ignoreCase = true)) {
+                    // Rename cleanup handled inside flushMarkdownSaveNow
+                    com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
+                        context = getApplication(),
+                        title = finalTitle,
+                        content = cleanContent,
+                        uuid = resolvedUuid,
+                        oldTitle = previousTitle
+                    )
+                }
+
+                com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
+                savedId
+            }
             onSaved?.invoke(resultId)
         }
     }
@@ -2510,45 +2767,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Backup & Restore
-    fun exportBackupJson(): String {
-        return kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-            val dbTasks = database.taskDao().getAllTasksSync()
-            val dbHabits = database.habitDao().getAllHabitsSync()
-            val dbSessions = database.focusSessionDao().getAllSessionsSync()
-            val dbCategories = database.categoryDao().getAllCategories().firstOrNull() ?: categories.value
-            val dbAchievements = database.achievementDao().getAllAchievements().firstOrNull() ?: achievements.value
-            val dbNotes = database.noteDao().getAllNotesIncludingDeletedSync()
-            val dbNoteVersions = database.noteVersionDao().getAllVersionsSync()
-            val finDao = database.financeDao()
-            val dbFinEntries = finDao.getAllEntriesIncludingDeleted()
-            val dbFinCategories = finDao.getAllCategoriesSync()
-            val dbFinWallets = finDao.getAllWalletsSync()
-            val dbFinRules = finDao.getAllRecurringRulesSync()
-            val dbFinBudgets = finDao.getAllBudgetsSync()
-            val dbFinLinks = finDao.getAllLinksSync()
-            val dbFinRates = finDao.getAllExchangeRatesSync()
-            val dbFinExecutions = finDao.getAllExecutionsSync()
-            val prefsMap = preferencesManager.exportPreferencesMap()
+    suspend fun exportBackupJson(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val dbTasks = database.taskDao().getAllTasksSync()
+        val dbHabits = database.habitDao().getAllHabitsSync()
+        val dbSessions = database.focusSessionDao().getAllSessionsSync()
+        val dbCategories = database.categoryDao().getAllCategories().firstOrNull() ?: categories.value
+        val dbAchievements = database.achievementDao().getAllAchievements().firstOrNull() ?: achievements.value
+        val dbNotes = database.noteDao().getAllNotesIncludingDeletedSync()
+        val dbNoteVersions = database.noteVersionDao().getAllVersionsSync()
+        val finDao = database.financeDao()
+        val dbFinEntries = finDao.getAllEntriesIncludingDeleted()
+        val dbFinCategories = finDao.getAllCategoriesSync()
+        val dbFinWallets = finDao.getAllWalletsSync()
+        val dbFinRules = finDao.getAllRecurringRulesSync()
+        val dbFinBudgets = finDao.getAllBudgetsSync()
+        val dbFinLinks = finDao.getAllLinksSync()
+        val dbFinRates = finDao.getAllExchangeRatesSync()
+        val dbFinExecutions = finDao.getAllExecutionsSync()
+        val prefsMap = preferencesManager.exportPreferencesMap()
 
-            BackupManager.createBackupJson(
-                tasks = dbTasks,
-                habits = dbHabits,
-                focusSessions = dbSessions,
-                categories = dbCategories,
-                achievements = dbAchievements,
-                notes = dbNotes,
-                financeEntries = dbFinEntries,
-                financeCategories = dbFinCategories,
-                financeWallets = dbFinWallets,
-                financeRecurringRules = dbFinRules,
-                financeBudgets = dbFinBudgets,
-                financeNoteLinks = dbFinLinks,
-                noteVersions = dbNoteVersions,
-                financeExchangeRates = dbFinRates,
-                financeLinkExecutions = dbFinExecutions,
-                preferences = prefsMap
-            )
-        }
+        BackupManager.createBackupJson(
+            tasks = dbTasks,
+            habits = dbHabits,
+            focusSessions = dbSessions,
+            categories = dbCategories,
+            achievements = dbAchievements,
+            notes = dbNotes,
+            financeEntries = dbFinEntries,
+            financeCategories = dbFinCategories,
+            financeWallets = dbFinWallets,
+            financeRecurringRules = dbFinRules,
+            financeBudgets = dbFinBudgets,
+            financeNoteLinks = dbFinLinks,
+            noteVersions = dbNoteVersions,
+            financeExchangeRates = dbFinRates,
+            financeLinkExecutions = dbFinExecutions,
+            preferences = prefsMap
+        )
     }
 
     fun restoreBackupJson(jsonString: String) {
@@ -2582,8 +2837,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun exportNotesJson(): String {
-        return BackupManager.exportNotesJson(notes.value, context = getApplication())
+    suspend fun exportNotesJson(): String = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        BackupManager.exportNotesJson(notes.value, context = getApplication())
     }
 
     fun importNotesJson(jsonString: String) {

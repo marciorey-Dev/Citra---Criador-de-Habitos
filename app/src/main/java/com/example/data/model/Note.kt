@@ -1,6 +1,7 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 enum class NoteDocumentType(val id: String, val label: String) {
@@ -15,7 +16,17 @@ enum class NoteDocumentType(val id: String, val label: String) {
     }
 }
 
-@Entity(tableName = "notes")
+@Entity(
+    tableName = "notes",
+    indices = [
+        Index(value = ["isDeleted"]),
+        Index(value = ["isArchived"]),
+        Index(value = ["uuid"]),
+        Index(value = ["category"]),
+        Index(value = ["associatedDate"]),
+        Index(value = ["updatedAt"])
+    ]
+)
 data class Note(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -50,13 +61,18 @@ val Note.isPdfDocument: Boolean
 val Note.isDocxDocument: Boolean
     get() = resolvedDocumentType == NoteDocumentType.DOCX
 
+private val noteIsoDateFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue(): java.text.SimpleDateFormat =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+}
+
 fun Note.isReadyForMainList(now: Long = System.currentTimeMillis()): Boolean {
     val dateStr = associatedDate ?: return true
     if (dateStr.isBlank()) return true
 
     val maxLeadTimeMs = 72L * 60L * 60L * 1000L
     val targetTs = try {
-        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).parse(dateStr)?.time
+        noteIsoDateFormat.get()?.parse(dateStr)?.time
     } catch (_: Exception) { null } ?: return true
 
     val diff = targetTs - now

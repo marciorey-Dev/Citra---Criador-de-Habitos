@@ -484,21 +484,12 @@ object NoteExportHelper {
 
     fun loadBitmapFromUrl(context: Context, url: String): Bitmap? {
         if (url.isBlank()) return null
-        return try {
-            if (url.startsWith("content://") || url.startsWith("file://")) {
-                val uri = Uri.parse(url)
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }
-            } else {
-                val file = File(url)
-                if (file.exists()) {
-                    BitmapFactory.decodeFile(file.absolutePath)
-                } else null
-            }
-        } catch (_: Exception) {
-            null
-        }
+        return MediaStorageHelper.decodeSampledBitmap(
+            context = context,
+            source = url,
+            maxDimensionPx = 1440,
+            preferredConfig = Bitmap.Config.ARGB_8888
+        )
     }
 
     fun loadAudioBytes(context: Context, url: String): Pair<ByteArray, String>? {

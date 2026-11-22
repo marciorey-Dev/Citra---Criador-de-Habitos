@@ -21,16 +21,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.OrangePrimary
 import com.example.ui.theme.RedAction
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
 fun BackupDialog(
-    onExportBackup: () -> String,
+    onExportBackup: suspend () -> String,
     onRestoreBackup: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var isRestoreMode by remember { mutableStateOf(false) }
+    var isBusy by remember { mutableStateOf(false) }
     var jsonInput by remember { mutableStateOf("") }
     var showErrorDialog by remember { mutableStateOf(false) }
 
@@ -38,19 +43,30 @@ fun BackupDialog(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                val content = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    stream.bufferedReader(Charsets.UTF_8).readText()
+            scope.launch {
+                isBusy = true
+                val content = withContext(Dispatchers.IO) {
+                    try {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            stream.bufferedReader(Charsets.UTF_8).readText()
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
                 }
-                if (content != null && isValidCitraBackup(content)) {
+                val valid = if (content != null) {
+                    withContext(Dispatchers.Default) { isValidCitraBackup(content) }
+                } else {
+                    false
+                }
+                isBusy = false
+                if (content != null && valid) {
                     onRestoreBackup(content)
                     Toast.makeText(context, "Backup restaurado com sucesso!", Toast.LENGTH_SHORT).show()
                     onDismiss()
                 } else {
                     showErrorDialog = true
                 }
-            } catch (_: Exception) {
-                showErrorDialog = true
             }
         }
     }
@@ -104,11 +120,19 @@ fun BackupDialog(
                         }
                     }
 
+                    if (isBusy) {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = OrangePrimary
+                        )
+                    }
+
                     // Button 1: Carregar Arquivo de Backup do Armazenamento (.txt / .json)
                     Button(
                         onClick = {
                             filePickerLauncher.launch(arrayOf("text/plain", "application/json", "*/*"))
                         },
+                        enabled = !isBusy,
                         colors = ButtonDefaults.buttonColors(containerColor = OrangePrimary),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -121,14 +145,19 @@ fun BackupDialog(
                     // Button 2: Exportar e Compartilhar
                     OutlinedButton(
                         onClick = {
-                            val json = onExportBackup()
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/json"
-                                putExtra(Intent.EXTRA_SUBJECT, "Citra_Backup.json")
-                                putExtra(Intent.EXTRA_TEXT, json)
+                            scope.launch {
+                                isBusy = true
+                                val json = withContext(Dispatchers.IO) { onExportBackup() }
+                                isBusy = false
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_SUBJECT, "Citra_Backup.json")
+                                    putExtra(Intent.EXTRA_TEXT, json)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Compartilhar / Salvar Backup JSON"))
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Compartilhar / Salvar Backup JSON"))
                         },
+                        enabled = !isBusy,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -140,11 +169,16 @@ fun BackupDialog(
                     // Button 3: Copiar JSON
                     OutlinedButton(
                         onClick = {
-                            val json = onExportBackup()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Citra Backup", json))
-                            Toast.makeText(context, "Backup copiado para a área de transferência!", Toast.LENGTH_SHORT).show()
+                            scope.launch {
+                                isBusy = true
+                                val json = withContext(Dispatchers.IO) { onExportBackup() }
+                                isBusy = false
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Citra Backup", json))
+                                Toast.makeText(context, "Backup copiado para a área de transferência!", Toast.LENGTH_SHORT).show()
+                            }
                         },
+                        enabled = !isBusy,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {

@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,7 +74,11 @@ import com.example.util.AmbientBreakMusicManager
 import com.example.notifications.ActiveAlarmData
 import com.example.notifications.ActiveAlarmManager
 import com.example.ui.screens.alarm.AlarmScreen
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -82,6 +87,7 @@ class MainActivity : ComponentActivity() {
     private var pendingWidgetNoteId by mutableStateOf<Long?>(null)
     private var pendingExternalDocumentUri by mutableStateOf<android.net.Uri?>(null)
     private var pendingExternalDocumentMime by mutableStateOf<String?>(null)
+    private var pendingExternalHandoffAction by mutableStateOf<String?>(null)
     private var pendingOpenTimerTab by mutableStateOf(false)
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -96,11 +102,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleExternalViewIntent(intent: android.content.Intent?) {
-        if (intent?.action == android.content.Intent.ACTION_VIEW) {
-            val dataUri = intent.data ?: intent.clipData?.getItemAt(0)?.uri
-            if (dataUri != null) {
-                pendingExternalDocumentUri = dataUri
-                pendingExternalDocumentMime = intent.type
+        when (intent?.action) {
+            ExternalReaderActivity.ACTION_HANDOFF_EXTERNAL_DOC -> {
+                val dataUri = intent.data ?: intent.clipData?.getItemAt(0)?.uri
+                if (dataUri != null) {
+                    pendingExternalDocumentUri = dataUri
+                    pendingExternalDocumentMime =
+                        intent.getStringExtra(ExternalReaderActivity.EXTRA_HANDOFF_MIME_TYPE)
+                            ?: intent.type
+                    pendingExternalHandoffAction =
+                        intent.getStringExtra(ExternalReaderActivity.EXTRA_HANDOFF_ACTION)
+                }
+            }
+            android.content.Intent.ACTION_VIEW -> {
+                val dataUri = intent.data ?: intent.clipData?.getItemAt(0)?.uri
+                if (dataUri != null) {
+                    pendingExternalDocumentUri = dataUri
+                    pendingExternalDocumentMime = intent.type
+                    pendingExternalHandoffAction = null
+                }
             }
         }
     }
@@ -157,7 +177,19 @@ class MainActivity : ComponentActivity() {
             val themeAccent by viewModel.themeAccent.collectAsState()
             val defaultStartTab by viewModel.defaultStartTab.collectAsState()
             val keepScreenOn by viewModel.keepScreenOn.collectAsState()
-            val pomodoroState by viewModel.pomodoroState.collectAsState()
+            val isTimerRunning by remember {
+                viewModel.pomodoroState.map { it.isRunning }.distinctUntilChanged()
+            }.collectAsState(initial = viewModel.pomodoroState.value.isRunning)
+            val isTimerPaused by remember {
+                viewModel.pomodoroState.map { it.isPaused }.distinctUntilChanged()
+            }.collectAsState(initial = viewModel.pomodoroState.value.isPaused)
+            val isTimerBreakPhase by remember {
+                viewModel.pomodoroState
+                    .map { it.isRunning && it.currentPhase == PomodoroPhase.BREAK }
+                    .distinctUntilChanged()
+            }.collectAsState(initial = false)
+            val isTimerActive = isTimerRunning || isTimerPaused
+
             val categories by viewModel.categories.collectAsState()
             val isNoteEditorOpen by viewModel.isNoteEditorOpen.collectAsState()
             val whatsNewVisible by viewModel.whatsNewVisible.collectAsState()
@@ -174,8 +206,8 @@ class MainActivity : ComponentActivity() {
             val effectiveDark = isDarkThemeSetting ?: systemDark
 
             // Handle Keep Screen On during active Timer
-            DisposableEffect(keepScreenOn, pomodoroState.isRunning) {
-                if (keepScreenOn && pomodoroState.isRunning) {
+            DisposableEffect(keepScreenOn, isTimerRunning) {
+                if (keepScreenOn && isTimerRunning) {
                     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -194,9 +226,8 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            LaunchedEffect(pomodoroState.currentPhase, pomodoroState.isRunning) {
-                val isBreak = pomodoroState.isRunning && (pomodoroState.currentPhase == PomodoroPhase.BREAK)
-                AmbientBreakMusicManager.onBreakStateChanged(this@MainActivity, isBreak)
+            LaunchedEffect(isTimerBreakPhase) {
+                AmbientBreakMusicManager.onBreakStateChanged(this@MainActivity, isTimerBreakPhase)
             }
 
             val currentDensity = androidx.compose.ui.platform.LocalDensity.current
@@ -252,30 +283,96 @@ class MainActivity : ComponentActivity() {
                 val isStartupScanDone by viewModel.isStartupScanDone.collectAsState()
                 val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsState()
 
+                val appBgUri by viewModel.appBgUri.collectAsState()
+                val appBgBlur by viewModel.appBgBlur.collectAsState()
+                val appBgBrightness by viewModel.appBgBrightness.collectAsState()
+
+                var processedAppBgBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+                var isWallpaperWarm by remember { mutableStateOf(false) }
+
                 LaunchedEffect(Unit) {
                     viewModel.performStartupFolderScan()
                     viewModel.runDueFinanceLinksOnStartup()
+                    // Safety ceiling so wallpaper decoding never blocks app startup
+                    delay(2000L)
+                    isWallpaperWarm = true
                 }
 
-                // Organic Loading Screen: Wait until local resources are resolved
-                if (!isStartupScanDone) {
-                    CitraLoadingScreen(loadingText = "Carregando recursos do Citra...")
-                    return@CitraTheme
-                }
-
-                // First-launch Citra Mascot intro animation & adaptive personalization quiz
-                if (!hasCompletedOnboarding) {
-                    val savedProfileAnswers by viewModel.onboardingProfileAnswers.collectAsState()
-                    com.example.ui.screens.welcome.WelcomeIntroScreen(
-                        initialAnswers = savedProfileAnswers,
-                        onPreviewThemeMode = { viewModel.setThemeMode(it) },
-                        onPreviewThemeAccent = { viewModel.setThemeAccent(it) },
-                        onFinishOnboarding = { displayName, photoPath, profileAnswers ->
-                            viewModel.completeOnboarding(displayName, photoPath, profileAnswers)
+                LaunchedEffect(appBgUri, appBgBlur) {
+                    val uriStr = appBgUri
+                    if (!uriStr.isNullOrBlank()) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                val boundsOpts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                val localFile = java.io.File(uriStr)
+                                if (localFile.exists()) {
+                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, boundsOpts)
+                                } else {
+                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
+                                        android.graphics.BitmapFactory.decodeStream(it, null, boundsOpts)
+                                    }
+                                }
+                                var sampleSize = 1
+                                val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
+                                while (maxDim / sampleSize > 1080) {
+                                    sampleSize *= 2
+                                }
+                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
+                                    inSampleSize = sampleSize
+                                    inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
+                                }
+                                val original = if (localFile.exists()) {
+                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, decodeOpts)
+                                } else {
+                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
+                                        android.graphics.BitmapFactory.decodeStream(it, null, decodeOpts)
+                                    }
+                                }
+                                if (original != null) {
+                                    val radius = (appBgBlur * 20).toInt().coerceAtLeast(0)
+                                    val processed = if (radius > 0) {
+                                        com.example.util.FastBlur.blur(original, radius)
+                                    } else {
+                                        original
+                                    }
+                                    if (processed !== original && !original.isRecycled) {
+                                        original.recycle()
+                                    }
+                                    processedAppBgBitmap = processed
+                                } else {
+                                    processedAppBgBitmap = null
+                                }
+                            } catch (_: Throwable) {
+                                processedAppBgBitmap = null
+                            }
                         }
-                    )
-                    return@CitraTheme
+                    } else {
+                        processedAppBgBitmap = null
+                    }
+                    isWallpaperWarm = true
                 }
+
+                val isAppReady = isStartupScanDone && isWallpaperWarm
+
+                // Organic Loading Screen: Wait until local resources, previews, and wallpaper are warm
+                Crossfade(
+                    targetState = isAppReady,
+                    animationSpec = tween(durationMillis = 240),
+                    label = "citra_startup_ready_crossfade"
+                ) { ready ->
+                    if (!ready) {
+                        CitraLoadingScreen(loadingText = "Preparando seus dados e documentos...")
+                    } else if (!hasCompletedOnboarding) {
+                        val savedProfileAnswers by viewModel.onboardingProfileAnswers.collectAsState()
+                        com.example.ui.screens.welcome.WelcomeIntroScreen(
+                            initialAnswers = savedProfileAnswers,
+                            onPreviewThemeMode = { viewModel.setThemeMode(it) },
+                            onPreviewThemeAccent = { viewModel.setThemeAccent(it) },
+                            onFinishOnboarding = { displayName, photoPath, profileAnswers ->
+                                viewModel.completeOnboarding(displayName, photoPath, profileAnswers)
+                            }
+                        )
+                    } else {
 
                 val snackbarHostState = remember { SnackbarHostState() }
                 val coroutineScope = rememberCoroutineScope()
@@ -351,18 +448,29 @@ class MainActivity : ComponentActivity() {
                     pendingWidgetNoteId = null
                 }
 
-                // Handle OS "Open with / Default app" intents for PDF and Word (.docx)
-                LaunchedEffect(pendingExternalDocumentUri, screens) {
+                // Handle OS "Open with / Default app" & ExternalReaderActivity handoff intents
+                LaunchedEffect(pendingExternalDocumentUri, pendingExternalHandoffAction, screens) {
                     val externalUri = pendingExternalDocumentUri ?: return@LaunchedEffect
+                    val handoffAction = pendingExternalHandoffAction
                     val notesPageIndex = screens.indexOf(Screen.Notes).coerceAtLeast(0)
                     pagerState.scrollToPage(notesPageIndex)
-                    viewModel.openOrRegisterExternalDocumentFromIntent(
-                        uri = externalUri,
-                        mimeType = pendingExternalDocumentMime,
-                        context = this@MainActivity
-                    )
+                    if (!handoffAction.isNullOrBlank()) {
+                        viewModel.handleExternalReaderHandoff(
+                            uri = externalUri,
+                            mimeType = pendingExternalDocumentMime,
+                            action = handoffAction,
+                            context = this@MainActivity
+                        )
+                    } else {
+                        viewModel.openOrRegisterExternalDocumentFromIntent(
+                            uri = externalUri,
+                            mimeType = pendingExternalDocumentMime,
+                            context = this@MainActivity
+                        )
+                    }
                     pendingExternalDocumentUri = null
                     pendingExternalDocumentMime = null
+                    pendingExternalHandoffAction = null
                 }
 
                 var showMenu by remember { mutableStateOf(false) }
@@ -372,57 +480,6 @@ class MainActivity : ComponentActivity() {
                 var showSettingsDialog by remember { mutableStateOf(false) }
                 var showAddCategoryDialog by remember { mutableStateOf(false) }
                 var showQuickAddTaskDialog by remember { mutableStateOf(false) }
-
-                val appBgUri by viewModel.appBgUri.collectAsState()
-                val appBgBlur by viewModel.appBgBlur.collectAsState()
-                val appBgBrightness by viewModel.appBgBrightness.collectAsState()
-
-                var processedAppBgBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-
-                LaunchedEffect(appBgUri, appBgBlur) {
-                    val uriStr = appBgUri
-                    if (!uriStr.isNullOrBlank()) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            try {
-                                val boundsOpts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                val localFile = java.io.File(uriStr)
-                                if (localFile.exists()) {
-                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, boundsOpts)
-                                } else {
-                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
-                                        android.graphics.BitmapFactory.decodeStream(it, null, boundsOpts)
-                                    }
-                                }
-                                var sampleSize = 1
-                                val maxDim = maxOf(boundsOpts.outWidth, boundsOpts.outHeight)
-                                while (maxDim / sampleSize > 1080) {
-                                    sampleSize *= 2
-                                }
-                                val decodeOpts = android.graphics.BitmapFactory.Options().apply {
-                                    inSampleSize = sampleSize
-                                    inPreferredConfig = android.graphics.Bitmap.Config.RGB_565
-                                }
-                                val original = if (localFile.exists()) {
-                                    android.graphics.BitmapFactory.decodeFile(localFile.absolutePath, decodeOpts)
-                                } else {
-                                    com.example.util.MediaStorageHelper.openInputStream(this@MainActivity, uriStr)?.use {
-                                        android.graphics.BitmapFactory.decodeStream(it, null, decodeOpts)
-                                    }
-                                }
-                                if (original != null) {
-                                    val radius = (appBgBlur * 20).toInt().coerceAtLeast(0)
-                                    processedAppBgBitmap = if (radius > 0) com.example.util.FastBlur.blur(original, radius) else original
-                                } else {
-                                    processedAppBgBitmap = null
-                                }
-                            } catch (_: Throwable) {
-                                processedAppBgBitmap = null
-                            }
-                        }
-                    } else {
-                        processedAppBgBitmap = null
-                    }
-                }
 
                 val achievements by viewModel.achievements.collectAsState()
 
@@ -485,9 +542,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     contentWindowInsets = if (isNoteEditorOpen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                     topBar = {
-                        val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
-                                currentScreen == Screen.Timer
-                        val isTimerActive = pomodoroState.isRunning || pomodoroState.isPaused
+                        val isTimerImmersive = isTimerActive && currentScreen == Screen.Timer
                         if (!isNoteEditorOpen && !isTimerImmersive) {
                             if (currentScreen == Screen.Notes) {
                                 // Flush-left Notes search bar on the exact same top strip as the 3-dots menu
@@ -567,34 +622,13 @@ class MainActivity : ComponentActivity() {
                                         }
 
                                         if (isTimerActive) {
-                                            val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
-                                            val mins = displaySec / 60
-                                            val secs = displaySec % 60
-                                            val formatted = String.format("%02d:%02d", mins, secs)
-
-                                            Surface(
-                                                shape = RoundedCornerShape(16.dp),
-                                                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                                modifier = Modifier
-                                                    .clickable {
-                                                        coroutineScope.launch { pagerState.scrollToPage(1) }
-                                                    }
-                                                    .testTag("top_floating_timer_pill")
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(text = "🍊", fontSize = 12.sp)
-                                                    Spacer(modifier = Modifier.width(3.dp))
-                                                    Text(
-                                                        text = formatted,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.ExtraBold,
-                                                        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
+                                            TopFloatingTimerPill(
+                                                pomodoroStateFlow = viewModel.pomodoroState,
+                                                compact = true,
+                                                onClick = {
+                                                    coroutineScope.launch { pagerState.scrollToPage(1) }
                                                 }
-                                            }
+                                            )
                                         }
 
                                         CitraTopOverflowMenuBox(
@@ -639,41 +673,13 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                     if (isTimerActive) {
                                                         Spacer(modifier = Modifier.width(8.dp))
-                                                        val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
-                                                        val mins = displaySec / 60
-                                                        val secs = displaySec % 60
-                                                        val formatted = String.format("%02d:%02d", mins, secs)
-
-                                                        Surface(
-                                                            shape = RoundedCornerShape(16.dp),
-                                                            color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                                            modifier = Modifier
-                                                                .clickable {
-                                                                    coroutineScope.launch { pagerState.scrollToPage(1) }
-                                                                }
-                                                                .testTag("top_floating_timer_pill")
-                                                        ) {
-                                                            Row(
-                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                                verticalAlignment = Alignment.CenterVertically
-                                                            ) {
-                                                                Text(text = "🍊", fontSize = 12.sp)
-                                                                Spacer(modifier = Modifier.width(4.dp))
-                                                                Text(
-                                                                    text = formatted,
-                                                                    fontSize = 12.sp,
-                                                                    fontWeight = FontWeight.ExtraBold,
-                                                                    color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                                )
-                                                                Spacer(modifier = Modifier.width(4.dp))
-                                                                Icon(
-                                                                    imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                                    contentDescription = null,
-                                                                    modifier = Modifier.size(14.dp),
-                                                                    tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                                )
+                                                        TopFloatingTimerPill(
+                                                            pomodoroStateFlow = viewModel.pomodoroState,
+                                                            compact = false,
+                                                            onClick = {
+                                                                coroutineScope.launch { pagerState.scrollToPage(1) }
                                                             }
-                                                        }
+                                                        )
                                                     }
                                                 }
                                             }
@@ -684,41 +690,13 @@ class MainActivity : ComponentActivity() {
                                             ) {
                                                 // Floating Top Mini-timer counter when timer is active outside the Timer tab
                                                 if (isTimerActive && currentScreen != Screen.Timer) {
-                                                    val displaySec = if (pomodoroState.isStopwatchMode) pomodoroState.stopwatchSeconds else pomodoroState.remainingSeconds
-                                                    val mins = displaySec / 60
-                                                    val secs = displaySec % 60
-                                                    val formatted = String.format("%02d:%02d", mins, secs)
-
-                                                    Surface(
-                                                        shape = RoundedCornerShape(16.dp),
-                                                        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                                        modifier = Modifier
-                                                            .clickable {
-                                                                coroutineScope.launch { pagerState.scrollToPage(1) }
-                                                            }
-                                                            .testTag("top_floating_timer_pill")
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Text(text = "🍊", fontSize = 12.sp)
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Text(
-                                                                text = formatted,
-                                                                fontSize = 12.sp,
-                                                                fontWeight = FontWeight.ExtraBold,
-                                                                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Icon(
-                                                                imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                                contentDescription = null,
-                                                                modifier = Modifier.size(14.dp),
-                                                                tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
+                                                    TopFloatingTimerPill(
+                                                        pomodoroStateFlow = viewModel.pomodoroState,
+                                                        compact = false,
+                                                        onClick = {
+                                                            coroutineScope.launch { pagerState.scrollToPage(1) }
                                                         }
-                                                    }
+                                                    )
                                                 }
                                             }
                                         }
@@ -821,7 +799,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 bottomBar = {
-                    val isTimerImmersive = (pomodoroState.isRunning || pomodoroState.isPaused) &&
+                    val isTimerImmersive = isTimerActive &&
                             screens[pagerState.currentPage] == Screen.Timer
                     if (!isNoteEditorOpen && !isTimerImmersive) {
                         NavigationBar(
@@ -1019,6 +997,8 @@ class MainActivity : ComponentActivity() {
                         onSkipAll = { viewModel.skipAllTutorials() }
                     )
                 }
+                    } // else ready
+                } // Crossfade
             }
             }
         }
@@ -1293,6 +1273,62 @@ fun CitraLoadingScreen(loadingText: String = "Carregando...") {
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
                 )
             )
+        }
+    }
+}
+
+/**
+ * Leaf-isolated floating timer badge so 1Hz timer ticks only recompose this tiny pill
+ * instead of recomposing the entire root Scaffold & HorizontalPager.
+ */
+@Composable
+private fun TopFloatingTimerPill(
+    pomodoroStateFlow: StateFlow<com.example.ui.FlexiblePomodoroState>,
+    compact: Boolean,
+    onClick: () -> Unit
+) {
+    val pomodoroState by pomodoroStateFlow.collectAsState()
+    if (!pomodoroState.isRunning && !pomodoroState.isPaused) return
+    val displaySec = if (pomodoroState.isStopwatchMode) {
+        pomodoroState.stopwatchSeconds
+    } else {
+        pomodoroState.remainingSeconds
+    }
+    val mins = displaySec / 60
+    val secs = displaySec % 60
+    val formatted = remember(mins, secs) { String.format(java.util.Locale.US, "%02d:%02d", mins, secs) }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .testTag("top_floating_timer_pill")
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = if (compact) 8.dp else 10.dp,
+                vertical = 4.dp
+            ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = "🍊", fontSize = 12.sp)
+            Spacer(modifier = Modifier.width(if (compact) 3.dp else 4.dp))
+            Text(
+                text = formatted,
+                fontSize = if (compact) 11.sp else 12.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!compact) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = if (pomodoroState.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = if (pomodoroState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

@@ -26,7 +26,7 @@ import com.example.data.model.*
         FinanceBudget::class,
         FinanceRecurringRule::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -234,6 +234,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_isDeleted` ON `notes` (`isDeleted`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_isArchived` ON `notes` (`isArchived`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_uuid` ON `notes` (`uuid`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_category` ON `notes` (`category`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_associatedDate` ON `notes` (`associatedDate`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_updatedAt` ON `notes` (`updatedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_note_versions_noteId` ON `note_versions` (`noteId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_isCompleted` ON `tasks` (`isCompleted`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_isWontDo` ON `tasks` (`isWontDo`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_tasks_dueDateTimestamp` ON `tasks` (`dueDateTimestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_focus_sessions_weekIdentifier` ON `focus_sessions` (`weekIdentifier`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_focus_sessions_timestamp` ON `focus_sessions` (`timestamp`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_finance_entries_deletedAt` ON `finance_entries` (`deletedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_finance_entries_dateMillis` ON `finance_entries` (`dateMillis`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_finance_entries_categoryId` ON `finance_entries` (`categoryId`)")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -241,7 +261,18 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "citra.db"
                 )
-                .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+                .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+                .addMigrations(
+                    MIGRATION_7_8,
+                    MIGRATION_8_9,
+                    MIGRATION_9_10,
+                    MIGRATION_10_11,
+                    MIGRATION_11_12,
+                    MIGRATION_12_13,
+                    MIGRATION_13_14,
+                    MIGRATION_14_15,
+                    MIGRATION_15_16
+                )
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

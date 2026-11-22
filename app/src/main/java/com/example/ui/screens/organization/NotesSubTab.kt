@@ -71,6 +71,7 @@ import com.example.ui.MainViewModel
 import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.CategoryNoteStack
+import com.example.ui.screens.organization.notes.DocumentExplorerDialog
 import com.example.ui.screens.organization.notes.DocxPageOnePreviewBox
 import com.example.ui.screens.organization.notes.DocxSheetAccentColor
 import com.example.ui.screens.organization.notes.ExternalDocxReaderScreen
@@ -139,6 +140,7 @@ fun NotesSubTab(
     val selectedDocFilter by viewModel.selectedNoteDocumentFilter.collectAsState()
     val defaultNoteOpenMode by viewModel.defaultNoteOpenMode.collectAsState()
     val recentExternalDocs by viewModel.recentExternalDocs.collectAsState()
+    val authorizedDocTreeUris by viewModel.authorizedDocTreeUris.collectAsState()
     val batchExportState by viewModel.batchExportState.collectAsState()
     val openCreateTrigger by viewModel.openCreateNoteTrigger.collectAsState()
     val openTrashTrigger by viewModel.openNotesTrashTrigger.collectAsState()
@@ -149,6 +151,7 @@ fun NotesSubTab(
     var activeNoteToEdit by remember { mutableStateOf<Note?>(null) }
     var activePdfToRead by remember { mutableStateOf<Note?>(null) }
     var activeDocxToRead by remember { mutableStateOf<Note?>(null) }
+    var activeDocIsTransient by remember { mutableStateOf(false) }
     var isConvertingExternalDoc by remember { mutableStateOf(false) }
     var noteForCategoryPicker by remember { mutableStateOf<Note?>(null) }
     var noteAwaitingRelink by remember { mutableStateOf<Note?>(null) }
@@ -198,6 +201,7 @@ fun NotesSubTab(
     }
 
     val openNoteItem: (Note) -> Unit = { target ->
+        activeDocIsTransient = false
         when (target.resolvedDocumentType) {
             NoteDocumentType.PDF -> {
                 activeNoteToEdit = null
@@ -239,10 +243,11 @@ fun NotesSubTab(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            viewModel.importMultipleMarkdownFiles(
+            if (uris.size == 1) recentPickerDocType = null
+            viewModel.openOrSelectPickedExternalDocuments(
                 uris = uris,
-                context = context,
-                preferredCategory = selectedCategoryFilter
+                targetType = NoteDocumentType.PDF,
+                context = context
             )
         }
     }
@@ -251,11 +256,20 @@ fun NotesSubTab(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            viewModel.importMultipleMarkdownFiles(
+            if (uris.size == 1) recentPickerDocType = null
+            viewModel.openOrSelectPickedExternalDocuments(
                 uris = uris,
-                context = context,
-                preferredCategory = selectedCategoryFilter
+                targetType = NoteDocumentType.DOCX,
+                context = context
             )
+        }
+    }
+
+    val pickDocumentTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            viewModel.addAuthorizedDocTreeUri(treeUri, context)
         }
     }
 
@@ -285,12 +299,14 @@ fun NotesSubTab(
     }
 
     val noteToOpen by viewModel.noteToOpen.collectAsState()
+    val transientDocToOpen by viewModel.transientExternalDocToOpen.collectAsState()
 
     // Respond to Home screen "Nova Nota" shortcut trigger
     LaunchedEffect(openCreateTrigger) {
         if (openCreateTrigger) {
             activePdfToRead = null
             activeDocxToRead = null
+            activeDocIsTransient = false
             isCreateMenuExpanded = false
             isCreatingNew = true
             viewModel.resetCreateNoteTrigger()
@@ -324,6 +340,24 @@ fun NotesSubTab(
         noteToOpen?.let { note ->
             openNoteItem(note)
             viewModel.clearNoteToOpen()
+        }
+    }
+
+    // Respond to 2-column Document Explorer transient open (read-only without creating a DB link)
+    LaunchedEffect(transientDocToOpen) {
+        transientDocToOpen?.let { doc ->
+            activeNoteToEdit = null
+            isCreatingNew = false
+            isCreateMenuExpanded = false
+            activeDocIsTransient = true
+            if (doc.resolvedDocumentType == NoteDocumentType.PDF) {
+                activeDocxToRead = null
+                activePdfToRead = doc
+            } else {
+                activePdfToRead = null
+                activeDocxToRead = doc
+            }
+            viewModel.clearTransientExternalDocToOpen()
         }
     }
 
@@ -386,8 +420,21 @@ fun NotesSubTab(
             note = pdfNote,
             categories = categories,
             isConverting = isConvertingExternalDoc,
+            isTransientMode = activeDocIsTransient,
+            onSaveToVault = if (activeDocIsTransient) {
+                {
+                    viewModel.saveTransientDocumentToVault(
+                        docNote = pdfNote,
+                        preferredCategory = selectedCategoryFilter
+                    ) { saved ->
+                        activeDocIsTransient = false
+                        activePdfToRead = saved
+                    }
+                }
+            } else null,
             onClose = {
                 activePdfToRead = null
+                activeDocIsTransient = false
                 viewModel.setNoteEditorOpen(false)
             },
             onChangeCategory = { newCat ->
@@ -407,7 +454,10 @@ fun NotesSubTab(
             },
             onRemoveLink = {
                 activePdfToRead = null
-                noteToDelete = pdfNote
+                activeDocIsTransient = false
+                if (!activeDocIsTransient && pdfNote.id > 0L) {
+                    noteToDelete = pdfNote
+                }
             },
             onConvertToNote = {
                 if (!isConvertingExternalDoc) {
@@ -418,6 +468,7 @@ fun NotesSubTab(
                         onConverted = { convertedNote ->
                             isConvertingExternalDoc = false
                             activePdfToRead = null
+                            activeDocIsTransient = false
                             activeNoteToEdit = convertedNote
                             isCreatingNew = false
                         },
@@ -437,8 +488,21 @@ fun NotesSubTab(
             note = docxNote,
             categories = categories,
             isConverting = isConvertingExternalDoc,
+            isTransientMode = activeDocIsTransient,
+            onSaveToVault = if (activeDocIsTransient) {
+                {
+                    viewModel.saveTransientDocumentToVault(
+                        docNote = docxNote,
+                        preferredCategory = selectedCategoryFilter
+                    ) { saved ->
+                        activeDocIsTransient = false
+                        activeDocxToRead = saved
+                    }
+                }
+            } else null,
             onClose = {
                 activeDocxToRead = null
+                activeDocIsTransient = false
                 viewModel.setNoteEditorOpen(false)
             },
             onChangeCategory = { newCat ->
@@ -468,8 +532,12 @@ fun NotesSubTab(
                 )
             },
             onRemoveLink = {
+                val wasTransient = activeDocIsTransient
                 activeDocxToRead = null
-                noteToDelete = docxNote
+                activeDocIsTransient = false
+                if (!wasTransient && docxNote.id > 0L) {
+                    noteToDelete = docxNote
+                }
             },
             onConvertToNote = {
                 if (!isConvertingExternalDoc) {
@@ -480,6 +548,7 @@ fun NotesSubTab(
                         onConverted = { convertedNote ->
                             isConvertingExternalDoc = false
                             activeDocxToRead = null
+                            activeDocIsTransient = false
                             activeNoteToEdit = convertedNote
                             isCreatingNew = false
                         },
@@ -1601,50 +1670,33 @@ fun NotesSubTab(
         }
     }
 
-    // Recent PDF / DOCX picker modal with search bar and multi-file import from device
+    // 2-Column Visual Device Document Explorer for PDF and DOCX
     recentPickerDocType?.let { targetType ->
-        val allTypeEntries = remember(recentExternalDocs, notes, archivedNotes, targetType) {
-            val merged = linkedMapOf<String, RecentExternalDocEntry>()
-            recentExternalDocs
-                .filter { NoteDocumentType.fromId(it.docType) == targetType }
-                .forEach { merged[it.uri.trim()] = it }
-            (notes + archivedNotes)
-                .filter { it.resolvedDocumentType == targetType && !it.externalUri.isNullOrBlank() }
-                .forEach { existing ->
-                    val uriKey = existing.externalUri!!.trim()
-                    if (!merged.containsKey(uriKey)) {
-                        merged[uriKey] = RecentExternalDocEntry(
-                            uri = uriKey,
-                            title = existing.title.ifBlank { "Documento" },
-                            docType = targetType.id,
-                            addedAt = existing.updatedAt
-                        )
-                    }
-                }
-            merged.values.sortedByDescending { it.addedAt }
-        }
-
-        RecentExternalDocsPickerDialog(
+        DocumentExplorerDialog(
             docType = targetType,
-            recentDocs = allTypeEntries,
+            recentDocs = recentExternalDocs,
+            authorizedTreeUris = authorizedDocTreeUris,
+            existingNotes = notes + archivedNotes,
             onImportFromDevice = {
-                recentPickerDocType = null
                 if (targetType == NoteDocumentType.PDF) {
                     pickPdfDocsLauncher.launch(ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES)
                 } else {
                     pickDocxDocsLauncher.launch(ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES)
                 }
             },
-            onLoadEntries = { entries ->
-                recentPickerDocType = null
-                viewModel.openOrAddRecentExternalDocs(
-                    entries = entries,
-                    preferredCategory = selectedCategoryFilter,
-                    openIfSingle = true
-                )
+            onLinkFolder = {
+                pickDocumentTreeLauncher.launch(null)
             },
-            onRemoveRecent = { entry ->
-                viewModel.removeRecentExternalDoc(entry.uri)
+            onOpenTransient = { entry ->
+                recentPickerDocType = null
+                viewModel.openTransientExternalDocument(entry)
+            },
+            onSaveSelectedToVault = { entries ->
+                recentPickerDocType = null
+                viewModel.saveDiscoveredDocsToVault(
+                    docs = entries,
+                    preferredCategory = selectedCategoryFilter
+                )
             },
             onDismiss = { recentPickerDocType = null }
         )
@@ -4027,284 +4079,6 @@ private fun BatchExportProgressDialog(
                     }
 
                     BatchExportUiState.Idle -> Unit
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecentExternalDocsPickerDialog(
-    docType: NoteDocumentType,
-    recentDocs: List<RecentExternalDocEntry>,
-    onImportFromDevice: () -> Unit,
-    onLoadEntries: (List<RecentExternalDocEntry>) -> Unit,
-    onRemoveRecent: (RecentExternalDocEntry) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var search by remember { mutableStateOf("") }
-    var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val isPdf = docType == NoteDocumentType.PDF
-    val accentColor = if (isPdf) PdfSheetAccentColor else DocxSheetAccentColor
-    val titleText = if (isPdf) "Abrir ou Importar PDF" else "Abrir ou Importar Word (.docx)"
-
-    val filteredDocs = remember(recentDocs, search) {
-        val q = search.trim()
-        if (q.isBlank()) recentDocs else {
-            recentDocs.filter {
-                it.title.contains(q, ignoreCase = true) ||
-                    ExternalDocumentUriHelper.formatReadablePath(it.uri).contains(q, ignoreCase = true)
-            }
-        }
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.86f)
-                .padding(horizontal = 14.dp, vertical = 18.dp)
-                .testTag("recent_external_docs_picker_dialog")
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(accentColor.copy(alpha = 0.14f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Text(
-                            text = titleText,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.minimumInteractiveComponentSize()
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Fechar")
-                    }
-                }
-
-                // Top Long Button for System Multi-File Device Import
-                Button(
-                    onClick = onImportFromDevice,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = accentColor,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp)
-                        .testTag("recent_picker_import_device_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderOpen,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = if (isPdf) {
-                            "Importar do celular (selecionar PDFs)"
-                        } else {
-                            "Importar do celular (selecionar .docx)"
-                        },
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // Search bar for recent documents
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = { search = it },
-                    placeholder = {
-                        Text(
-                            text = if (isPdf) "Buscar PDFs recentes..." else "Buscar documentos Word recentes..."
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                    },
-                    trailingIcon = if (search.isNotBlank()) {
-                        {
-                            IconButton(onClick = { search = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Limpar busca")
-                            }
-                        }
-                    } else null,
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("recent_picker_search_input")
-                )
-
-                Text(
-                    text = "Recentes (${filteredDocs.size})",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (filteredDocs.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
-                                contentDescription = null,
-                                tint = accentColor.copy(alpha = 0.4f),
-                                modifier = Modifier.size(44.dp)
-                            )
-                            Text(
-                                text = if (search.isNotBlank()) {
-                                    "Nenhum arquivo encontrado para \"$search\"."
-                                } else {
-                                    "Nenhum arquivo recente deste tipo ainda.\nToque no botão acima para selecionar do celular."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(filteredDocs, key = { it.uri }) { entry ->
-                            val isChecked = entry.uri in selectedUris
-                            Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (isChecked) {
-                                    accentColor.copy(alpha = 0.12f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                },
-                                border = if (isChecked) {
-                                    androidx.compose.foundation.BorderStroke(1.5.dp, accentColor)
-                                } else null,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable {
-                                        if (selectedUris.isNotEmpty()) {
-                                            selectedUris = if (isChecked) selectedUris - entry.uri else selectedUris + entry.uri
-                                        } else {
-                                            onLoadEntries(listOf(entry))
-                                        }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 10.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Checkbox(
-                                        checked = isChecked,
-                                        onCheckedChange = { checked ->
-                                            selectedUris = if (checked) selectedUris + entry.uri else selectedUris - entry.uri
-                                        },
-                                        colors = CheckboxDefaults.colors(checkedColor = accentColor)
-                                    )
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = entry.title.ifBlank { "Documento" },
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = ExternalDocumentUriHelper.formatReadablePath(entry.uri),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { onRemoveRecent(entry) },
-                                        modifier = Modifier.minimumInteractiveComponentSize()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.DeleteOutline,
-                                            contentDescription = "Remover dos recentes",
-                                            tint = MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (selectedUris.isNotEmpty()) {
-                    val toLoad = filteredDocs.filter { it.uri in selectedUris }
-                    Button(
-                        onClick = { onLoadEntries(toLoad) },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accentColor,
-                            contentColor = Color.White
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp)
-                            .testTag("recent_picker_load_selected_btn")
-                    ) {
-                        Text(
-                            text = "Carregar selecionado(s) (${toLoad.size})",
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
         }

@@ -11,26 +11,43 @@ import kotlin.math.min
  * without requiring RenderScript or RenderEffect.
  */
 object FastBlur {
+    private const val MAX_BLUR_DIMENSION = 720
+
     fun blur(sentBitmap: Bitmap, radius: Int): Bitmap? {
         if (radius < 1) return sentBitmap
 
-        val w = sentBitmap.width
-        val h = sentBitmap.height
+        val w = sentBitmap.width.coerceAtLeast(1)
+        val h = sentBitmap.height.coerceAtLeast(1)
 
-        // Downsample moderately for smooth Gaussian blur without extreme pixelation
-        val scale = when {
-            radius > 15 -> 0.5f
-            else -> 0.75f
+        // Downsample moderately while capping max dimension to prevent OOM on large images
+        val baseScale = if (radius > 15) 0.5f else 0.75f
+        val longestSide = max(w, h).toFloat()
+        val capScale = if (longestSide * baseScale > MAX_BLUR_DIMENSION) {
+            MAX_BLUR_DIMENSION / longestSide
+        } else {
+            baseScale
         }
-        val scaledW = max(1, (w * scale).toInt())
-        val scaledH = max(1, (h * scale).toInt())
-        val scaledBitmap = Bitmap.createScaledBitmap(sentBitmap, scaledW, scaledH, true)
+        val scaledW = max(1, (w * capScale).toInt())
+        val scaledH = max(1, (h * capScale).toInt())
+        val scaledBitmap = try {
+            Bitmap.createScaledBitmap(sentBitmap, scaledW, scaledH, true)
+        } catch (_: OutOfMemoryError) {
+            return null
+        }
 
         val sw = scaledBitmap.width
         val sh = scaledBitmap.height
 
-        val pix = IntArray(sw * sh)
+        val pix = try {
+            IntArray(sw * sh)
+        } catch (_: OutOfMemoryError) {
+            if (scaledBitmap !== sentBitmap && !scaledBitmap.isRecycled) scaledBitmap.recycle()
+            return null
+        }
         scaledBitmap.getPixels(pix, 0, sw, 0, 0, sw, sh)
+        if (scaledBitmap !== sentBitmap && !scaledBitmap.isRecycled) {
+            scaledBitmap.recycle()
+        }
 
         val wm = sw - 1
         val hm = sh - 1
@@ -236,8 +253,12 @@ object FastBlur {
             }
         }
 
-        val resultBitmap = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888)
-        resultBitmap.setPixels(pix, 0, sw, 0, 0, sw, sh)
-        return resultBitmap
+        return try {
+            val resultBitmap = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888)
+            resultBitmap.setPixels(pix, 0, sw, 0, 0, sw, sh)
+            resultBitmap
+        } catch (_: OutOfMemoryError) {
+            null
+        }
     }
 }

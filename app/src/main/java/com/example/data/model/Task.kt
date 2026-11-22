@@ -1,6 +1,7 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 enum class TaskPriority(val label: String) {
@@ -9,7 +10,14 @@ enum class TaskPriority(val label: String) {
     BAIXA("Baixa")
 }
 
-@Entity(tableName = "tasks")
+@Entity(
+    tableName = "tasks",
+    indices = [
+        Index(value = ["isCompleted"]),
+        Index(value = ["isWontDo"]),
+        Index(value = ["dueDateTimestamp"])
+    ]
+)
 data class Task(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -29,20 +37,33 @@ data class Task(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+private val taskIsoDateTimeFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue(): java.text.SimpleDateFormat =
+        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+}
+private val taskIsoDateFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue(): java.text.SimpleDateFormat =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+}
+private val taskBrDateTimeFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue(): java.text.SimpleDateFormat =
+        java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.US)
+}
+private val taskBrDateFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue(): java.text.SimpleDateFormat =
+        java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.US)
+}
+
 fun Task.getEffectiveDueTimestamp(): Long? {
     dueDateTimestamp?.let { if (it > 0) return it }
     return try {
         if (dueDateText.isNotBlank()) {
             val clean = dueDateText.trim()
             val sdf = when {
-                clean.contains("-") && clean.contains(":") ->
-                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
-                clean.contains("-") ->
-                    java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-                clean.contains("/") && clean.contains(":") ->
-                    java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
-                clean.contains("/") ->
-                    java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
+                clean.contains("-") && clean.contains(":") -> taskIsoDateTimeFormat.get()
+                clean.contains("-") -> taskIsoDateFormat.get()
+                clean.contains("/") && clean.contains(":") -> taskBrDateTimeFormat.get()
+                clean.contains("/") -> taskBrDateFormat.get()
                 else -> null
             }
             sdf?.parse(clean)?.time

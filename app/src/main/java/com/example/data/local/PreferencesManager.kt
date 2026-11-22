@@ -1388,6 +1388,37 @@ class PreferencesManager(private val context: Context) {
         }
     }
 
+    // Authorized SAF Document Tree URIs for 2-column Device Document Explorer
+    private val _authorizedDocTreeUris = MutableStateFlow(loadAuthorizedDocTreeUris())
+    val authorizedDocTreeUris: StateFlow<Set<String>> = _authorizedDocTreeUris.asStateFlow()
+
+    private fun loadAuthorizedDocTreeUris(): Set<String> {
+        return prefs.getStringSet("authorized_doc_tree_uris", emptySet())
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+    }
+
+    fun addAuthorizedDocTreeUri(treeUri: String) {
+        val clean = treeUri.trim()
+        if (clean.isBlank()) return
+        synchronized(recentExternalDocsLock) {
+            val updated = (_authorizedDocTreeUris.value + clean).toSet()
+            prefs.edit().putStringSet("authorized_doc_tree_uris", updated).apply()
+            _authorizedDocTreeUris.value = updated
+        }
+    }
+
+    fun removeAuthorizedDocTreeUri(treeUri: String) {
+        val clean = treeUri.trim()
+        synchronized(recentExternalDocsLock) {
+            val updated = (_authorizedDocTreeUris.value - clean).toSet()
+            prefs.edit().putStringSet("authorized_doc_tree_uris", updated).apply()
+            _authorizedDocTreeUris.value = updated
+        }
+    }
+
     companion object {
         private val citraBallLock = Any()
         private val timerSnapshotLock = Any()

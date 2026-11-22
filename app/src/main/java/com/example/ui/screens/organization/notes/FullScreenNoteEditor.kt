@@ -210,15 +210,23 @@ fun FullScreenNoteEditor(
         if (!bgUri.isNullOrBlank()) {
             withContext(Dispatchers.IO) {
                 try {
-                    val stream = MediaStorageHelper.openInputStream(context, bgUri!!)
-                    val original = stream?.use { BitmapFactory.decodeStream(it) }
+                    val original = MediaStorageHelper.decodeSampledBitmap(
+                        context = context,
+                        source = bgUri!!,
+                        maxDimensionPx = 1080,
+                        preferredConfig = Bitmap.Config.RGB_565
+                    )
                     if (original != null) {
                         val radius = (bgBlur * 24).toInt().coerceAtLeast(0)
-                        processedBackgroundBitmap = if (radius > 0) FastBlur.blur(original, radius) else original
+                        val processed = if (radius > 0) FastBlur.blur(original, radius) else original
+                        if (processed !== original && !original.isRecycled) {
+                            original.recycle()
+                        }
+                        processedBackgroundBitmap = processed
                     } else {
                         processedBackgroundBitmap = null
                     }
-                } catch (_: Exception) {
+                } catch (_: Throwable) {
                     processedBackgroundBitmap = null
                 }
             }
@@ -439,6 +447,21 @@ fun FullScreenNoteEditor(
         return title.isBlank() && editorValue.text.isBlank()
     }
 
+    // Debounced background markdown autosave while user edits
+    LaunchedEffect(title, editorValue.text) {
+        if (isCompletelyEmpty() && initialNote == null) return@LaunchedEffect
+        val liveTitle = title.trim().ifBlank { "Sem título" }
+        val liveContent = com.example.data.backup.FinanceNoteMarkdownEngine.stripFinanceMarkers(editorValue.text)
+        com.example.util.CitraPersistenceQueue.scheduleMarkdownSave(
+            context = context,
+            title = liveTitle,
+            content = liveContent,
+            uuid = initialNote?.uuid.orEmpty(),
+            oldTitle = currentSavedTitle,
+            debounceMs = 900L
+        )
+    }
+
     fun saveCurrent(close: Boolean = true, silent: Boolean = false) {
         if (isCompletelyEmpty() && initialNote == null) {
             if (close) onClose()
@@ -447,8 +470,8 @@ fun FullScreenNoteEditor(
         val finalTitle = title.trim().ifBlank { "Sem título" }
         val finalContent = com.example.data.backup.FinanceNoteMarkdownEngine.stripFinanceMarkers(editorValue.text)
 
-        // Sync directly to physical .md file in Documents/Citra Docs/ with UUID and old title cleanup
-        CitraDocsFileManager.saveNoteMarkdown(
+        // Flush physical .md file asynchronously in serialized NonCancellable IO queue
+        com.example.util.CitraPersistenceQueue.flushMarkdownSaveAsync(
             context = context,
             title = finalTitle,
             content = finalContent,

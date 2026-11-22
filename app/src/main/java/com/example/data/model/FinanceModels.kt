@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.text.NumberFormat
 import java.util.Locale
@@ -152,7 +153,14 @@ data class FinanceCategory(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "finance_entries")
+@Entity(
+    tableName = "finance_entries",
+    indices = [
+        Index("deletedAt"),
+        Index("dateMillis"),
+        Index("categoryId")
+    ]
+)
 data class FinanceEntry(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val type: String, // "EXPENSE" or "INCOME"

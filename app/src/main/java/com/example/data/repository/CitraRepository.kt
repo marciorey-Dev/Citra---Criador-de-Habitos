@@ -182,7 +182,7 @@ class CitraRepository(
         val finalNote = note.copy(uuid = noteUuid)
         val id = noteDao.insertNote(finalNote)
         if (!finalNote.isExternalDocument && !finalNote.isDeleted) {
-            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+            com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
                 context = context,
                 title = finalNote.title,
                 content = finalNote.content,
@@ -217,7 +217,7 @@ class CitraRepository(
                     )
                     noteDao.updateNote(merged)
                     if (!merged.isExternalDocument) {
-                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
                             context = context,
                             title = merged.title,
                             content = merged.content,
@@ -234,7 +234,7 @@ class CitraRepository(
                         uuid = noteUuid
                     )
                     noteDao.updateNote(merged)
-                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                    com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
                         context = context,
                         title = merged.title,
                         content = merged.content,
@@ -244,7 +244,7 @@ class CitraRepository(
                 } else {
                     noteDao.insertNote(incomingNote.copy(id = 0L, uuid = noteUuid))
                     if (!incomingNote.isExternalDocument) {
-                        com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                        com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
                             context = context,
                             title = incomingNote.title,
                             content = incomingNote.content,
@@ -305,7 +305,7 @@ class CitraRepository(
         val oldNote = noteDao.getNoteById(note.id)
         noteDao.updateNote(note)
         if (!note.isExternalDocument && !note.isDeleted && !note.isArchived) {
-            com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+            com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
                 context = context,
                 title = note.title,
                 content = note.content,
@@ -313,11 +313,15 @@ class CitraRepository(
                 oldTitle = oldNote?.title
             )
         } else if (note.isDeleted || note.isArchived) {
-            com.example.util.CitraDocsFileManager.deleteNoteMarkdown(context, note.title, note.uuid)
+            com.example.util.CitraPersistenceQueue.cancelPendingMarkdownSave(note.uuid, note.title)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.util.CitraDocsFileManager.deleteNoteMarkdown(context, note.title, note.uuid)
+            }
         }
     }
 
     suspend fun moveToTrash(note: Note) {
+        com.example.util.CitraPersistenceQueue.cancelPendingMarkdownSave(note.uuid, note.title)
         noteDao.moveToTrash(note.id, System.currentTimeMillis())
     }
 
@@ -326,6 +330,7 @@ class CitraRepository(
     }
 
     suspend fun permanentlyDeleteNote(note: Note) {
+        com.example.util.CitraPersistenceQueue.cancelPendingMarkdownSave(note.uuid, note.title)
         noteDao.permanentlyDelete(note.id)
     }
 
@@ -339,6 +344,9 @@ class CitraRepository(
     val allArchivedNotes: Flow<List<Note>> = noteDao.getArchivedNotes()
 
     suspend fun setNoteArchived(note: Note, isArchived: Boolean) {
+        if (isArchived) {
+            com.example.util.CitraPersistenceQueue.cancelPendingMarkdownSave(note.uuid, note.title)
+        }
         noteDao.setArchived(note.id, isArchived)
     }
 
@@ -540,7 +548,7 @@ class CitraRepository(
                     noteIdMap[oldId] = savedId
                 }
                 if (!incoming.isExternalDocument && !incoming.isDeleted) {
-                    com.example.util.CitraDocsFileManager.saveNoteMarkdown(
+                    com.example.util.CitraPersistenceQueue.flushMarkdownSaveNow(
                         context = context,
                         title = incoming.title,
                         content = incoming.content,

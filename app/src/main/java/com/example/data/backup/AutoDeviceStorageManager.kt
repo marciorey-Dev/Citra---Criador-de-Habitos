@@ -160,7 +160,12 @@ object AutoDeviceStorageManager {
             root.put("categories", categoriesArr)
 
             val file = getBackupFile(context)
-            file.writeText(root.toString(2))
+            val tempFile = File(file.parentFile, ".${file.name}.tmp")
+            tempFile.writeText(root.toString(2))
+            if (!tempFile.renameTo(file)) {
+                tempFile.copyTo(file, overwrite = true)
+                tempFile.delete()
+            }
         } catch (_: Exception) {}
     }
 

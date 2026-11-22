@@ -35,10 +35,15 @@ fun getMondayOfCurrentWeek(cal: java.util.Calendar = java.util.Calendar.getInsta
     return c
 }
 
+private val habitIsoDateFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
+    override fun initialValue(): java.text.SimpleDateFormat =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+}
+
 fun Habit.calculateWeeklyStreak(todayCal: java.util.Calendar = java.util.Calendar.getInstance()): Int {
     val completedSet = completedDatesCsv.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
     val mondayCal = getMondayOfCurrentWeek(todayCal)
-    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+    val sdf = habitIsoDateFormat.get()!!
     val checkCal = (mondayCal.clone() as java.util.Calendar)
     val todayStr = sdf.format(todayCal.time)
 

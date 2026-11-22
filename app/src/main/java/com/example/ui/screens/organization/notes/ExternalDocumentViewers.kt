@@ -42,7 +42,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -357,6 +360,8 @@ private fun ExternalDocumentReaderHeader(
     editToggleTestTag: String = "docx_toggle_edit_btn",
     categoryTestTag: String,
     badgeTestTag: String,
+    isTransientMode: Boolean = false,
+    onSaveToVault: (() -> Unit)? = null,
     secondaryControls: @Composable RowScope.() -> Unit
 ) {
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -423,39 +428,64 @@ private fun ExternalDocumentReaderHeader(
                             }
                         }
 
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .clickable(onClick = onCategoryClick)
-                                .testTag(categoryTestTag)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        if (!isTransientMode) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .clickable(onClick = onCategoryClick)
+                                    .testTag(categoryTestTag)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Label,
-                                    contentDescription = "Alterar categoria",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Text(
-                                    text = category.ifBlank { "Geral" },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Label,
+                                        contentDescription = "Alterar categoria",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = category.ifBlank { "Geral" },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                if (showEditToggle) {
+                if (isTransientMode && onSaveToVault != null) {
+                    FilledTonalButton(
+                        onClick = onSaveToVault,
+                        enabled = !isConverting,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .height(38.dp)
+                            .testTag("external_doc_save_to_vault_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LibraryAdd,
+                            contentDescription = "Guardar no Cofre",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "Guardar",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (showEditToggle && !isTransientMode) {
                     FilledTonalIconButton(
                         onClick = onToggleEditMode,
                         enabled = !isConverting,
@@ -509,6 +539,16 @@ private fun ExternalDocumentReaderHeader(
                         onDismissRequest = { showMoreMenu = false },
                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                     ) {
+                        if (isTransientMode && onSaveToVault != null) {
+                            DropdownMenuItem(
+                                text = { Text("Guardar no Cofre") },
+                                leadingIcon = { Icon(Icons.Default.LibraryAdd, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onSaveToVault()
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Converter para nota") },
                             leadingIcon = { Icon(Icons.Default.EditNote, contentDescription = null) },
@@ -517,7 +557,7 @@ private fun ExternalDocumentReaderHeader(
                                 onConvertToNote()
                             }
                         )
-                        if (showEditToggle) {
+                        if (showEditToggle && !isTransientMode) {
                             DropdownMenuItem(
                                 text = {
                                     Text(if (isEditingDocx) "Modo leitura (só leitura)" else "Editar texto (.docx)")
@@ -534,14 +574,16 @@ private fun ExternalDocumentReaderHeader(
                                 }
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Renomear arquivo") },
-                            leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
-                            onClick = {
-                                showMoreMenu = false
-                                onRenameClick()
-                            }
-                        )
+                        if (!isTransientMode) {
+                            DropdownMenuItem(
+                                text = { Text("Renomear arquivo") },
+                                leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onRenameClick()
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Enviar para...") },
                             leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
@@ -558,15 +600,17 @@ private fun ExternalDocumentReaderHeader(
                                 onPrintClick()
                             }
                         )
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-                        DropdownMenuItem(
-                            text = { Text("Carregar outro arquivo") },
-                            leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
-                            onClick = {
-                                showMoreMenu = false
-                                onRelinkClick()
-                            }
-                        )
+                        if (!isTransientMode) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                            DropdownMenuItem(
+                                text = { Text("Carregar outro arquivo") },
+                                leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onRelinkClick()
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -598,7 +642,9 @@ fun ExternalPdfReaderScreen(
     onRelinkClick: () -> Unit,
     onRemoveLink: () -> Unit,
     onConvertToNote: () -> Unit,
-    isConverting: Boolean = false
+    isConverting: Boolean = false,
+    isTransientMode: Boolean = false,
+    onSaveToVault: (() -> Unit)? = null
 ) {
     BackHandler(enabled = !isConverting) { onClose() }
 
@@ -628,6 +674,7 @@ fun ExternalPdfReaderScreen(
     var activePfd by remember { mutableStateOf<ParcelFileDescriptor?>(null) }
     var activeRenderer by remember { mutableStateOf<PdfRenderer?>(null) }
     val renderMutex = remember { Mutex() }
+    val isDisposed = remember(note.externalUri) { AtomicBoolean(false) }
 
     val bitmapCache = remember(note.externalUri) {
         val maxKb = (Runtime.getRuntime().maxMemory() / 1024L).toInt()
@@ -638,6 +685,7 @@ fun ExternalPdfReaderScreen(
     }
 
     DisposableEffect(note.externalUri) {
+        isDisposed.set(false)
         val pfd = ExternalDocumentUriHelper.openParcelFileDescriptor(context, note.externalUri)
         if (pfd == null) {
             loadError = "Arquivo PDF inacessível neste caminho. Se o arquivo foi movido ou a permissão expirou, toque em Carregar outro PDF."
@@ -676,11 +724,18 @@ fun ExternalPdfReaderScreen(
         }
 
         onDispose {
+            isDisposed.set(true)
             bitmapCache.evictAll()
-            try { activeRenderer?.close() } catch (_: Exception) {}
-            try { activePfd?.close() } catch (_: Exception) {}
+            val rendererToClose = activeRenderer
+            val pfdToClose = activePfd
             activeRenderer = null
             activePfd = null
+            CoroutineScope(Dispatchers.IO + NonCancellable).launch {
+                renderMutex.withLock {
+                    try { rendererToClose?.close() } catch (_: Exception) {}
+                    try { pfdToClose?.close() } catch (_: Exception) {}
+                }
+            }
         }
     }
 
@@ -831,6 +886,7 @@ fun ExternalPdfReaderScreen(
                                 PdfPageCard(
                                     renderer = renderer,
                                     renderMutex = renderMutex,
+                                    isDisposed = isDisposed,
                                     bitmapCache = bitmapCache,
                                     pageIndex = pageIdx,
                                     pageCount = pageCount,
@@ -894,7 +950,9 @@ fun ExternalPdfReaderScreen(
                 closeTestTag = "pdf_reader_close_btn",
                 moreMenuTestTag = "pdf_reader_more_menu_btn",
                 categoryTestTag = "pdf_reader_category_chip",
-                badgeTestTag = "pdf_reader_badge"
+                badgeTestTag = "pdf_reader_badge",
+                isTransientMode = isTransientMode,
+                onSaveToVault = onSaveToVault
             ) {
                 Surface(
                     shape = CircleShape,
@@ -968,6 +1026,7 @@ fun ExternalPdfReaderScreen(
 private fun PdfPageCard(
     renderer: PdfRenderer,
     renderMutex: Mutex,
+    isDisposed: AtomicBoolean,
     bitmapCache: LruCache<String, Bitmap>,
     pageIndex: Int,
     pageCount: Int,
@@ -979,6 +1038,7 @@ private fun PdfPageCard(
     var renderedBitmap by remember(cacheKey) { mutableStateOf(bitmapCache.get(cacheKey)) }
 
     LaunchedEffect(renderer, cacheKey, targetWidthPx) {
+        if (isDisposed.get()) return@LaunchedEffect
         val cached = bitmapCache.get(cacheKey)
         if (cached != null && !cached.isRecycled) {
             renderedBitmap = cached
@@ -986,6 +1046,7 @@ private fun PdfPageCard(
         }
         val bmp = withContext(Dispatchers.IO) {
             renderMutex.withLock {
+                if (isDisposed.get()) return@withLock null
                 bitmapCache.get(cacheKey)?.takeIf { !it.isRecycled } ?: try {
                     renderer.openPage(pageIndex).use { page ->
                         val ratio = page.height.toFloat() / page.width.coerceAtLeast(1).toFloat()
@@ -994,7 +1055,9 @@ private fun PdfPageCard(
                         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                         out.eraseColor(AndroidColor.WHITE)
                         page.render(out, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        bitmapCache.put(cacheKey, out)
+                        if (!isDisposed.get()) {
+                            bitmapCache.put(cacheKey, out)
+                        }
                         out
                     }
                 } catch (_: Throwable) {
@@ -1002,7 +1065,7 @@ private fun PdfPageCard(
                 }
             }
         }
-        if (bmp != null) {
+        if (bmp != null && !isDisposed.get()) {
             renderedBitmap = bmp
         }
     }
@@ -1070,7 +1133,9 @@ fun ExternalDocxReaderScreen(
     onRelinkClick: () -> Unit,
     onRemoveLink: () -> Unit,
     onConvertToNote: () -> Unit,
-    isConverting: Boolean = false
+    isConverting: Boolean = false,
+    isTransientMode: Boolean = false,
+    onSaveToVault: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -1365,7 +1430,9 @@ fun ExternalDocxReaderScreen(
                 moreMenuTestTag = "docx_reader_more_menu_btn",
                 editToggleTestTag = "docx_toggle_edit_btn",
                 categoryTestTag = "docx_reader_category_chip",
-                badgeTestTag = "docx_reader_badge"
+                badgeTestTag = "docx_reader_badge",
+                isTransientMode = isTransientMode,
+                onSaveToVault = onSaveToVault
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

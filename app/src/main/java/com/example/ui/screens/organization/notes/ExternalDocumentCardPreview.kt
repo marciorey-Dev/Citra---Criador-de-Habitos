@@ -1,9 +1,9 @@
 package com.example.ui.screens.organization.notes
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
-import android.net.Uri
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
@@ -26,7 +25,6 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +54,8 @@ import com.example.util.DocxDocumentEngine
 import com.example.util.DocxRun
 import com.example.util.ExternalDocumentUriHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 val PdfSheetAccentColor = Color(0xFFDC2626)
@@ -74,8 +74,17 @@ sealed class DocxPreviewItem {
 }
 
 object DocumentCardPreviewCache {
-    private val pdfThumbCache = LruCache<String, Bitmap>(28)
-    private val docxPreviewCache = LruCache<String, DocxPreviewEntry>(40)
+    private val previewSemaphore = Semaphore(2)
+
+    private val pdfThumbCache: LruCache<String, Bitmap> by lazy {
+        val maxKb = (Runtime.getRuntime().maxMemory() / 1024L).toInt().coerceAtLeast(16 * 1024)
+        val budgetKb = (maxKb / 10).coerceIn(6 * 1024, 16 * 1024)
+        object : LruCache<String, Bitmap>(budgetKb) {
+            override fun sizeOf(key: String, value: Bitmap): Int =
+                (value.byteCount / 1024).coerceAtLeast(1)
+        }
+    }
+    private val docxPreviewCache = LruCache<String, DocxPreviewEntry>(48)
 
     fun getPdfThumbnail(uri: String): Bitmap? =
         synchronized(pdfThumbCache) {
@@ -114,6 +123,132 @@ object DocumentCardPreviewCache {
     fun invalidate(uri: String) {
         invalidatePdfThumbnail(uri)
         invalidateDocxPreview(uri)
+    }
+
+    suspend fun getOrRenderPdfThumbnail(context: Context, uriStr: String): Bitmap? {
+        getPdfThumbnail(uriStr)?.let { return it }
+        val rendered = withContext(Dispatchers.IO) {
+            previewSemaphore.withPermit {
+                getPdfThumbnail(uriStr)?.let { return@withPermit it }
+                try {
+                    ExternalDocumentUriHelper.openParcelFileDescriptor(context, uriStr)?.use { pfd ->
+                        PdfRenderer(pfd).use { renderer ->
+                            if (renderer.pageCount <= 0) return@use null
+                            renderer.openPage(0).use { page ->
+                                val targetW = 300
+                                val ratio = page.height.toFloat() / page.width.coerceAtLeast(1).toFloat()
+                                val targetH = (targetW * ratio).toInt().coerceIn(200, 440)
+                                val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                                bmp.eraseColor(AndroidColor.WHITE)
+                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                bmp
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
+        if (rendered != null) {
+            putPdfThumbnail(uriStr, rendered)
+        }
+        return rendered
+    }
+
+    suspend fun getOrParseDocxPreview(context: Context, uriStr: String): DocxPreviewEntry? {
+        getDocxPreview(uriStr)?.let { return it }
+        val parsed = withContext(Dispatchers.IO) {
+            previewSemaphore.withPermit {
+                getDocxPreview(uriStr)?.let { return@withPermit it }
+                try {
+                    val stream = ExternalDocumentUriHelper.openInputStream(context, uriStr) ?: return@withPermit null
+                    stream.use { inp ->
+                        val doc = DocxDocumentEngine.parseDocx(inp)
+                        val items = mutableListOf<DocxPreviewItem>()
+                        for (block in doc.blocks) {
+                            if (block is DocxBlock.PageBreak) break
+                            if (items.size >= 7) break
+                            when (block) {
+                                is DocxBlock.Heading -> {
+                                    val text = block.runs.joinToString("") { it.text }.trim()
+                                    if (text.isNotBlank()) items.add(DocxPreviewItem.Heading(text, block.level))
+                                }
+                                is DocxBlock.Paragraph -> {
+                                    val raw = block.runs.joinToString("") { it.text }.trim()
+                                    if (raw.isNotBlank()) items.add(DocxPreviewItem.Paragraph(buildPreviewAnnotated(block.runs)))
+                                }
+                                is DocxBlock.ListItem -> {
+                                    val raw = block.runs.joinToString("") { it.text }.trim()
+                                    if (raw.isNotBlank()) {
+                                        val prefix = if (block.ordered) "${block.indexNumber}." else "•"
+                                        items.add(DocxPreviewItem.ListRow(prefix, buildPreviewAnnotated(block.runs)))
+                                    }
+                                }
+                                is DocxBlock.ChecklistItem -> {
+                                    val raw = block.runs.joinToString("") { it.text }.trim()
+                                    if (raw.isNotBlank()) {
+                                        val prefix = if (block.checked) "☑" else "☐"
+                                        items.add(DocxPreviewItem.ListRow(prefix, buildPreviewAnnotated(block.runs)))
+                                    }
+                                }
+                                is DocxBlock.Quote -> {
+                                    val raw = block.runs.joinToString("") { it.text }.trim()
+                                    if (raw.isNotBlank()) items.add(DocxPreviewItem.ListRow("┃", buildPreviewAnnotated(block.runs)))
+                                }
+                                is DocxBlock.Callout -> {
+                                    val raw = block.runs.joinToString("") { it.text }.trim()
+                                    if (raw.isNotBlank()) items.add(DocxPreviewItem.ListRow("!", buildPreviewAnnotated(block.runs)))
+                                }
+                                is DocxBlock.Table -> {
+                                    val headerRow = block.headers.joinToString(" | ") { cell ->
+                                        cell.joinToString("") { it.text }.trim()
+                                    }.trim()
+                                    val firstBodyRow = block.rows.firstOrNull()?.joinToString(" | ") { cell ->
+                                        cell.joinToString("") { it.text }.trim()
+                                    }?.trim().orEmpty()
+                                    val summaryRow = headerRow.ifBlank { firstBodyRow }
+                                    if (summaryRow.isNotBlank()) {
+                                        items.add(DocxPreviewItem.TableHint(summaryRow, block.rows.size + if (headerRow.isNotBlank()) 1 else 0))
+                                    }
+                                }
+                                is DocxBlock.Image -> {
+                                    items.add(DocxPreviewItem.ImageHint(block.alt.ifBlank { "Imagem" }))
+                                }
+                                is DocxBlock.Code -> {
+                                    val firstLine = block.code.lineSequence().firstOrNull()?.trim().orEmpty()
+                                    if (firstLine.isNotBlank()) {
+                                        items.add(DocxPreviewItem.Paragraph(AnnotatedString(firstLine)))
+                                    }
+                                }
+                                is DocxBlock.Math -> {
+                                    if (block.formula.isNotBlank()) {
+                                        items.add(DocxPreviewItem.Paragraph(AnnotatedString(block.formula)))
+                                    }
+                                }
+                                else -> Unit
+                            }
+                        }
+                        DocxPreviewEntry(items)
+                    }
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
+        if (parsed != null) {
+            putDocxPreview(uriStr, parsed)
+        }
+        return parsed
+    }
+
+    suspend fun prewarmDocumentPreview(context: Context, uriStr: String, isPdf: Boolean) {
+        if (uriStr.isBlank()) return
+        if (isPdf) {
+            getOrRenderPdfThumbnail(context, uriStr)
+        } else {
+            getOrParseDocxPreview(context, uriStr)
+        }
     }
 }
 
@@ -161,35 +296,8 @@ fun PdfPageOnePreviewBox(
             loadFailed = true
             return@LaunchedEffect
         }
-        val cached = DocumentCardPreviewCache.getPdfThumbnail(uriStr)
-        if (cached != null) {
-            previewBitmap = cached
-            loadFailed = false
-            return@LaunchedEffect
-        }
-        val rendered = withContext(Dispatchers.IO) {
-            try {
-                val parsed = Uri.parse(uriStr)
-                context.contentResolver.openFileDescriptor(parsed, "r")?.use { pfd ->
-                    PdfRenderer(pfd).use { renderer ->
-                        if (renderer.pageCount <= 0) return@use null
-                        renderer.openPage(0).use { page ->
-                            val targetW = 320
-                            val ratio = page.height.toFloat() / page.width.coerceAtLeast(1).toFloat()
-                            val targetH = (targetW * ratio).toInt().coerceIn(220, 480)
-                            val bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-                            bmp.eraseColor(AndroidColor.WHITE)
-                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            bmp
-                        }
-                    }
-                }
-            } catch (_: Throwable) {
-                null
-            }
-        }
+        val rendered = DocumentCardPreviewCache.getOrRenderPdfThumbnail(context, uriStr)
         if (rendered != null) {
-            DocumentCardPreviewCache.putPdfThumbnail(uriStr, rendered)
             previewBitmap = rendered
             loadFailed = false
         } else {
@@ -279,89 +387,8 @@ fun DocxPageOnePreviewBox(
             loadFailed = true
             return@LaunchedEffect
         }
-        val cached = DocumentCardPreviewCache.getDocxPreview(uriStr)
-        if (cached != null) {
-            previewEntry = cached
-            loadFailed = false
-            return@LaunchedEffect
-        }
-        val parsed = withContext(Dispatchers.IO) {
-            try {
-                val stream = ExternalDocumentUriHelper.openInputStream(context, uriStr) ?: return@withContext null
-                stream.use { inp ->
-                    val doc = DocxDocumentEngine.parseDocx(inp)
-                    val items = mutableListOf<DocxPreviewItem>()
-                    for (block in doc.blocks) {
-                        if (block is DocxBlock.PageBreak) break
-                        if (items.size >= 7) break
-                        when (block) {
-                            is DocxBlock.Heading -> {
-                                val text = block.runs.joinToString("") { it.text }.trim()
-                                if (text.isNotBlank()) items.add(DocxPreviewItem.Heading(text, block.level))
-                            }
-                            is DocxBlock.Paragraph -> {
-                                val raw = block.runs.joinToString("") { it.text }.trim()
-                                if (raw.isNotBlank()) items.add(DocxPreviewItem.Paragraph(buildPreviewAnnotated(block.runs)))
-                            }
-                            is DocxBlock.ListItem -> {
-                                val raw = block.runs.joinToString("") { it.text }.trim()
-                                if (raw.isNotBlank()) {
-                                    val prefix = if (block.ordered) "${block.indexNumber}." else "•"
-                                    items.add(DocxPreviewItem.ListRow(prefix, buildPreviewAnnotated(block.runs)))
-                                }
-                            }
-                            is DocxBlock.ChecklistItem -> {
-                                val raw = block.runs.joinToString("") { it.text }.trim()
-                                if (raw.isNotBlank()) {
-                                    val prefix = if (block.checked) "☑" else "☐"
-                                    items.add(DocxPreviewItem.ListRow(prefix, buildPreviewAnnotated(block.runs)))
-                                }
-                            }
-                            is DocxBlock.Quote -> {
-                                val raw = block.runs.joinToString("") { it.text }.trim()
-                                if (raw.isNotBlank()) items.add(DocxPreviewItem.ListRow("┃", buildPreviewAnnotated(block.runs)))
-                            }
-                            is DocxBlock.Callout -> {
-                                val raw = block.runs.joinToString("") { it.text }.trim()
-                                if (raw.isNotBlank()) items.add(DocxPreviewItem.ListRow("!", buildPreviewAnnotated(block.runs)))
-                            }
-                            is DocxBlock.Table -> {
-                                val headerRow = block.headers.joinToString(" | ") { cell ->
-                                    cell.joinToString("") { it.text }.trim()
-                                }.trim()
-                                val firstBodyRow = block.rows.firstOrNull()?.joinToString(" | ") { cell ->
-                                    cell.joinToString("") { it.text }.trim()
-                                }?.trim().orEmpty()
-                                val summaryRow = headerRow.ifBlank { firstBodyRow }
-                                if (summaryRow.isNotBlank()) {
-                                    items.add(DocxPreviewItem.TableHint(summaryRow, block.rows.size + if (headerRow.isNotBlank()) 1 else 0))
-                                }
-                            }
-                            is DocxBlock.Image -> {
-                                items.add(DocxPreviewItem.ImageHint(block.alt.ifBlank { "Imagem" }))
-                            }
-                            is DocxBlock.Code -> {
-                                val firstLine = block.code.lineSequence().firstOrNull()?.trim().orEmpty()
-                                if (firstLine.isNotBlank()) {
-                                    items.add(DocxPreviewItem.Paragraph(AnnotatedString(firstLine)))
-                                }
-                            }
-                            is DocxBlock.Math -> {
-                                if (block.formula.isNotBlank()) {
-                                    items.add(DocxPreviewItem.Paragraph(AnnotatedString(block.formula)))
-                                }
-                            }
-                            else -> Unit
-                        }
-                    }
-                    DocxPreviewEntry(items)
-                }
-            } catch (_: Throwable) {
-                null
-            }
-        }
+        val parsed = DocumentCardPreviewCache.getOrParseDocxPreview(context, uriStr)
         if (parsed != null) {
-            DocumentCardPreviewCache.putDocxPreview(uriStr, parsed)
             previewEntry = parsed
             loadFailed = false
         } else {

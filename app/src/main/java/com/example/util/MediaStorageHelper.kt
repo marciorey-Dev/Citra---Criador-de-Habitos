@@ -541,15 +541,49 @@ object MediaStorageHelper {
         }
     }
 
-    fun loadBitmap(context: Context, source: String): Bitmap? {
+    fun decodeSampledBitmap(
+        context: Context,
+        source: String,
+        maxDimensionPx: Int = 1280,
+        preferredConfig: Bitmap.Config = Bitmap.Config.RGB_565
+    ): Bitmap? {
+        if (source.isBlank()) return null
         return try {
-            openInputStream(context, source)?.use { stream ->
-                android.graphics.BitmapFactory.decodeStream(stream)
+            val boundsOpts = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to decode bitmap from $source", e)
+            openInputStream(context, source)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, boundsOpts)
+            }
+            val outW = boundsOpts.outWidth
+            val outH = boundsOpts.outHeight
+            var sampleSize = 1
+            if (outW > 0 && outH > 0) {
+                val longest = maxOf(outW, outH)
+                while (longest / sampleSize > maxDimensionPx) {
+                    sampleSize *= 2
+                }
+            }
+            val decodeOpts = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = preferredConfig
+            }
+            openInputStream(context, source)?.use { stream ->
+                android.graphics.BitmapFactory.decodeStream(stream, null, decodeOpts)
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to decode sampled bitmap from $source", e)
             null
         }
+    }
+
+    fun loadBitmap(context: Context, source: String): Bitmap? {
+        return decodeSampledBitmap(
+            context = context,
+            source = source,
+            maxDimensionPx = 1280,
+            preferredConfig = Bitmap.Config.RGB_565
+        )
     }
 
     /**
