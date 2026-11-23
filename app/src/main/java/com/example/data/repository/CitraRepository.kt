@@ -424,6 +424,7 @@ class CitraRepository(
         withContext(Dispatchers.IO) {
             com.example.data.backup.AutoDeviceStorageManager.clearSnapshot(context)
             com.example.util.CitraDocsFileManager.deleteAllDocsFiles(context)
+            com.example.util.ExternalDocumentUriHelper.deleteAllInternalImportedDocuments(context)
             com.example.util.MediaStorageHelper.deleteAllCitraPicFiles(context)
         }
     }

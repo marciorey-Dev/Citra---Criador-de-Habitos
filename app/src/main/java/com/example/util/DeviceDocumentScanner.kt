@@ -41,28 +41,56 @@ object DeviceDocumentScanner {
         authorizedTreeUris: Set<String>,
         existingNotes: List<Note>
     ): List<DiscoveredExternalDocument> = withContext(Dispatchers.IO) {
-        val activeVaultUris = existingNotes
-            .filter { !it.isDeleted && it.resolvedDocumentType == targetType }
+        val targetTypes: Set<NoteDocumentType> = if (targetType.isEbookOrComic) {
+            NoteDocumentType.EBOOK_COMIC_TYPES
+        } else {
+            setOf(targetType)
+        }
+
+        val matchingVaultNotes = existingNotes.filter {
+            !it.isDeleted && it.resolvedDocumentType in targetTypes && !it.externalUri.isNullOrBlank()
+        }
+        val activeVaultUris = matchingVaultNotes
             .mapNotNull { it.externalUri?.trim()?.takeIf { u -> u.isNotBlank() } }
             .toSet()
+
+        // Match origin digests so external files copied to citra_imported_docs still show as imported
+        val importedOriginTags = activeVaultUris
+            .filter { ExternalDocumentUriHelper.isInternalImportedFile(context, it) }
+            .mapNotNull { path ->
+                val base = path.substringAfterLast('/').substringBeforeLast('.')
+                val tag = base.substringAfterLast('_', "")
+                tag.takeIf { it.length >= 6 }
+            }
+            .toSet()
+
+        fun isUriImported(cleanUri: String): Boolean {
+            if (cleanUri in activeVaultUris) return true
+            if (importedOriginTags.isNotEmpty()) {
+                val originTag = ExternalDocumentUriHelper.computeOriginTag(cleanUri)
+                if (originTag in importedOriginTags) return true
+            }
+            return false
+        }
 
         val collected = linkedMapOf<String, DiscoveredExternalDocument>()
 
         fun addCandidate(
             uri: String,
             title: String,
+            docType: NoteDocumentType,
             modifiedAt: Long,
             sourceLabel: String
         ) {
             val cleanUri = uri.trim()
-            if (cleanUri.isBlank()) return
+            if (cleanUri.isBlank() || docType !in targetTypes) return
             val existing = collected[cleanUri]
-            val inVault = cleanUri in activeVaultUris
+            val inVault = isUriImported(cleanUri)
             if (existing == null) {
                 collected[cleanUri] = DiscoveredExternalDocument(
                     uri = cleanUri,
                     title = title.ifBlank { "Documento" },
-                    docType = targetType,
+                    docType = docType,
                     modifiedAt = modifiedAt,
                     sourceLabel = sourceLabel,
                     isInVault = inVault
@@ -75,36 +103,37 @@ object DeviceDocumentScanner {
             }
         }
 
-        // 1. Existing vault items of this type (so they remain searchable/discoverable)
-        existingNotes
-            .filter { !it.isDeleted && it.resolvedDocumentType == targetType && !it.externalUri.isNullOrBlank() }
-            .forEach { note ->
-                addCandidate(
-                    uri = note.externalUri!!,
-                    title = note.title,
-                    modifiedAt = note.updatedAt,
-                    sourceLabel = "No Cofre (${note.category})"
-                )
-            }
+        // 1. Existing imported items of this type (so they remain searchable/discoverable)
+        matchingVaultNotes.forEach { note ->
+            addCandidate(
+                uri = note.externalUri!!,
+                title = note.title,
+                docType = note.resolvedDocumentType,
+                modifiedAt = note.updatedAt,
+                sourceLabel = "Importado (${note.category})"
+            )
+        }
 
         // 2. Recent user-picked or opened documents
         recentDocs
-            .filter { NoteDocumentType.fromId(it.docType) == targetType }
+            .filter { NoteDocumentType.fromId(it.docType) in targetTypes }
             .forEach { entry ->
                 addCandidate(
                     uri = entry.uri,
                     title = entry.title,
+                    docType = NoteDocumentType.fromId(entry.docType),
                     modifiedAt = entry.addedAt,
                     sourceLabel = "Recente"
                 )
             }
 
         // 3. Scan Citra Docs & app-accessible folders
-        scanLocalAccessibleFolders(context, targetType).forEach { file ->
+        scanLocalAccessibleFolders(context, targetTypes).forEach { (file, detectedType) ->
             val rawName = file.name.substringBeforeLast(".").ifBlank { file.name }
             addCandidate(
                 uri = file.absolutePath,
                 title = rawName,
+                docType = detectedType,
                 modifiedAt = file.lastModified(),
                 sourceLabel = file.parentFile?.name ?: "Citra Docs"
             )
@@ -112,28 +141,28 @@ object DeviceDocumentScanner {
 
         // 4. Scan user-authorized SAF directory trees
         authorizedTreeUris.forEach { treeUriStr ->
-            scanSafTree(context, treeUriStr, targetType).forEach { doc ->
+            scanSafTree(context, treeUriStr, targetTypes).forEach { doc ->
                 addCandidate(
                     uri = doc.uri,
                     title = doc.title,
+                    docType = doc.docType,
                     modifiedAt = doc.modifiedAt,
                     sourceLabel = doc.sourceLabel
                 )
             }
         }
 
-        // 5. Query MediaStore.Files for system-indexed PDF / DOCX documents
-        scanMediaStoreFiles(context, targetType).forEach { doc ->
+        // 5. Query MediaStore.Files for system-indexed documents
+        scanMediaStoreFiles(context, targetTypes).forEach { doc ->
             addCandidate(
                 uri = doc.uri,
                 title = doc.title,
+                docType = doc.docType,
                 modifiedAt = doc.modifiedAt,
                 sourceLabel = doc.sourceLabel
             )
         }
 
-        // Deduplicate identical titles + type when a content:// and file:// copy point to same doc name,
-        // keeping the vault-linked or newest entry first
         val sorted = collected.values.sortedWith(
             compareByDescending<DiscoveredExternalDocument> { it.isInVault }
                 .thenByDescending { it.modifiedAt }
@@ -143,11 +172,38 @@ object DeviceDocumentScanner {
         sorted.take(MAX_RESULTS_PER_TYPE)
     }
 
+    private fun matchExtensionToType(fileName: String, targetTypes: Set<NoteDocumentType>): NoteDocumentType? {
+        val low = fileName.lowercase().trim()
+        return when {
+            low.endsWith(".pdf") && NoteDocumentType.PDF in targetTypes -> NoteDocumentType.PDF
+            low.endsWith(".docx") && NoteDocumentType.DOCX in targetTypes -> NoteDocumentType.DOCX
+            low.endsWith(".epub") && NoteDocumentType.EPUB in targetTypes -> NoteDocumentType.EPUB
+            (low.endsWith(".mobi") || low.endsWith(".azw") || low.endsWith(".azw3")) &&
+                NoteDocumentType.MOBI in targetTypes -> NoteDocumentType.MOBI
+            low.endsWith(".cbz") && NoteDocumentType.CBZ in targetTypes -> NoteDocumentType.CBZ
+            (low.endsWith(".fb2") || low.endsWith(".fb2.zip")) &&
+                NoteDocumentType.FB2 in targetTypes -> NoteDocumentType.FB2
+            else -> null
+        }
+    }
+
+    private fun extensionsForTypes(targetTypes: Set<NoteDocumentType>): List<String> {
+        val list = mutableListOf<String>()
+        if (NoteDocumentType.PDF in targetTypes) list.add(".pdf")
+        if (NoteDocumentType.DOCX in targetTypes) list.add(".docx")
+        if (NoteDocumentType.EPUB in targetTypes) list.add(".epub")
+        if (NoteDocumentType.MOBI in targetTypes) {
+            list.add(".mobi"); list.add(".azw"); list.add(".azw3")
+        }
+        if (NoteDocumentType.CBZ in targetTypes) list.add(".cbz")
+        if (NoteDocumentType.FB2 in targetTypes) list.add(".fb2")
+        return list
+    }
+
     private fun scanLocalAccessibleFolders(
         context: Context,
-        targetType: NoteDocumentType
-    ): List<File> {
-        val ext = if (targetType == NoteDocumentType.PDF) ".pdf" else ".docx"
+        targetTypes: Set<NoteDocumentType>
+    ): List<Pair<File, NoteDocumentType>> {
         val folders = mutableListOf<File>()
         folders.addAll(CitraDocsFileManager.getAllDocsFolders(context))
         try {
@@ -161,11 +217,11 @@ object DeviceDocumentScanner {
             if (docs != null) folders.add(docs)
         } catch (_: Exception) {}
 
-        val found = mutableListOf<File>()
+        val found = mutableListOf<Pair<File, NoteDocumentType>>()
         val seenPaths = mutableSetOf<String>()
         for (folder in folders.distinctBy { it.absolutePath }) {
             if (!folder.exists() || !folder.isDirectory || !folder.canRead()) continue
-            walkFolderDepth(folder, ext, depth = 0, maxDepth = 2, out = found, seenPaths = seenPaths)
+            walkFolderDepth(folder, targetTypes, depth = 0, maxDepth = 2, out = found, seenPaths = seenPaths)
             if (found.size >= MAX_RESULTS_PER_TYPE) break
         }
         return found
@@ -173,10 +229,10 @@ object DeviceDocumentScanner {
 
     private fun walkFolderDepth(
         dir: File,
-        ext: String,
+        targetTypes: Set<NoteDocumentType>,
         depth: Int,
         maxDepth: Int,
-        out: MutableList<File>,
+        out: MutableList<Pair<File, NoteDocumentType>>,
         seenPaths: MutableSet<String>
     ) {
         if (out.size >= MAX_RESULTS_PER_TYPE) return
@@ -184,11 +240,14 @@ object DeviceDocumentScanner {
         for (child in children) {
             if (out.size >= MAX_RESULTS_PER_TYPE) return
             if (child.isDirectory && depth < maxDepth && !child.name.startsWith(".")) {
-                walkFolderDepth(child, ext, depth + 1, maxDepth, out, seenPaths)
-            } else if (child.isFile && child.canRead() && child.name.lowercase().endsWith(ext) && child.length() > 0L) {
-                val path = child.absolutePath
-                if (seenPaths.add(path)) {
-                    out.add(child)
+                walkFolderDepth(child, targetTypes, depth + 1, maxDepth, out, seenPaths)
+            } else if (child.isFile && child.canRead() && child.length() > 0L) {
+                val matchedType = matchExtensionToType(child.name, targetTypes)
+                if (matchedType != null) {
+                    val path = child.absolutePath
+                    if (seenPaths.add(path)) {
+                        out.add(child to matchedType)
+                    }
                 }
             }
         }
@@ -196,15 +255,11 @@ object DeviceDocumentScanner {
 
     private fun scanMediaStoreFiles(
         context: Context,
-        targetType: NoteDocumentType
+        targetTypes: Set<NoteDocumentType>
     ): List<DiscoveredExternalDocument> {
         val results = mutableListOf<DiscoveredExternalDocument>()
-        val ext = if (targetType == NoteDocumentType.PDF) ".pdf" else ".docx"
-        val targetMime = if (targetType == NoteDocumentType.PDF) {
-            "application/pdf"
-        } else {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        }
+        val extensions = extensionsForTypes(targetTypes)
+        if (extensions.isEmpty()) return results
 
         val collectionUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -220,10 +275,11 @@ object DeviceDocumentScanner {
             MediaStore.Files.FileColumns.SIZE
         )
 
-        val selection = "${MediaStore.Files.FileColumns.SIZE} > 0 AND (" +
-            "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR " +
-            "LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?)"
-        val selectionArgs = arrayOf(targetMime, "%$ext")
+        val likeClauses = extensions.joinToString(" OR ") {
+            "LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?"
+        }
+        val selection = "${MediaStore.Files.FileColumns.SIZE} > 0 AND ($likeClauses)"
+        val selectionArgs = extensions.map { "%$it" }.toTypedArray()
         val sortOrder = "${MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
 
         try {
@@ -241,7 +297,7 @@ object DeviceDocumentScanner {
                 while (cursor.moveToNext() && results.size < MAX_RESULTS_PER_TYPE) {
                     val id = cursor.getLong(idIdx)
                     val displayName = if (nameIdx != -1) cursor.getString(nameIdx).orEmpty() else ""
-                    if (displayName.isBlank() || !displayName.lowercase().endsWith(ext)) continue
+                    val matchedType = matchExtensionToType(displayName, targetTypes) ?: continue
                     val modSec = if (dateIdx != -1) cursor.getLong(dateIdx) else 0L
                     val contentUri = ContentUris.withAppendedId(collectionUri, id)
                     val title = displayName.substringBeforeLast(".").ifBlank { displayName }
@@ -249,7 +305,7 @@ object DeviceDocumentScanner {
                         DiscoveredExternalDocument(
                             uri = contentUri.toString(),
                             title = title,
-                            docType = targetType,
+                            docType = matchedType,
                             modifiedAt = if (modSec > 0L) modSec * 1000L else System.currentTimeMillis(),
                             sourceLabel = "Armazenamento",
                             isInVault = false
@@ -266,10 +322,9 @@ object DeviceDocumentScanner {
     private fun scanSafTree(
         context: Context,
         treeUriStr: String,
-        targetType: NoteDocumentType
+        targetTypes: Set<NoteDocumentType>
     ): List<DiscoveredExternalDocument> {
         val results = mutableListOf<DiscoveredExternalDocument>()
-        val ext = if (targetType == NoteDocumentType.PDF) ".pdf" else ".docx"
         try {
             val treeUri = Uri.parse(treeUriStr)
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
@@ -277,8 +332,7 @@ object DeviceDocumentScanner {
                 context = context,
                 treeUri = treeUri,
                 parentDocId = rootDocId,
-                ext = ext,
-                targetType = targetType,
+                targetTypes = targetTypes,
                 depth = 0,
                 out = results
             )
@@ -291,8 +345,7 @@ object DeviceDocumentScanner {
         context: Context,
         treeUri: Uri,
         parentDocId: String,
-        ext: String,
-        targetType: NoteDocumentType,
+        targetTypes: Set<NoteDocumentType>,
         depth: Int,
         out: MutableList<DiscoveredExternalDocument>
     ) {
@@ -319,21 +372,24 @@ object DeviceDocumentScanner {
 
                     if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                         if (!name.startsWith(".")) {
-                            scanSafFolderRecursive(context, treeUri, docId, ext, targetType, depth + 1, out)
+                            scanSafFolderRecursive(context, treeUri, docId, targetTypes, depth + 1, out)
                         }
-                    } else if (name.lowercase().endsWith(ext)) {
-                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                        val title = name.substringBeforeLast(".").ifBlank { name }
-                        out.add(
-                            DiscoveredExternalDocument(
-                                uri = docUri.toString(),
-                                title = title,
-                                docType = targetType,
-                                modifiedAt = mod,
-                                sourceLabel = "Pasta vinculada",
-                                isInVault = false
+                    } else {
+                        val matchedType = matchExtensionToType(name, targetTypes)
+                        if (matchedType != null) {
+                            val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                            val title = name.substringBeforeLast(".").ifBlank { name }
+                            out.add(
+                                DiscoveredExternalDocument(
+                                    uri = docUri.toString(),
+                                    title = title,
+                                    docType = matchedType,
+                                    modifiedAt = mod,
+                                    sourceLabel = "Pasta vinculada",
+                                    isInVault = false
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }

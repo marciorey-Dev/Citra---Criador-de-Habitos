@@ -53,18 +53,20 @@ class CitraNotesListRemoteViewsFactory(private val context: Context) : RemoteVie
         val views = RemoteViews(context.packageName, R.layout.widget_note_item)
 
         val docType = com.example.data.model.NoteDocumentType.fromId(note.documentType)
-        val typePrefix = when (docType) {
-            com.example.data.model.NoteDocumentType.PDF -> "📄 [PDF] "
-            com.example.data.model.NoteDocumentType.DOCX -> "📘 [DOCX] "
+        val typePrefix = when {
+            docType == com.example.data.model.NoteDocumentType.PDF -> "📄 [PDF] "
+            docType == com.example.data.model.NoteDocumentType.DOCX -> "📘 [DOCX] "
+            docType.isEbookOrComic -> "📚 [${docType.label}] "
             else -> ""
         }
         val pinPrefix = if (note.isPinned) "📌 " else ""
         views.setTextViewText(R.id.widget_item_note_title, "$pinPrefix$typePrefix${note.title.ifBlank { "Sem título" }}")
         views.setTextViewText(R.id.widget_item_note_category, note.category.ifBlank { "Geral" })
 
-        val cleanSnippet = when (docType) {
-            com.example.data.model.NoteDocumentType.PDF -> "Documento PDF externo (somente leitura)"
-            com.example.data.model.NoteDocumentType.DOCX -> "Documento Word .docx externo (somente leitura)"
+        val cleanSnippet = when {
+            docType == com.example.data.model.NoteDocumentType.PDF -> "Documento PDF importado no Citra"
+            docType == com.example.data.model.NoteDocumentType.DOCX -> "Documento Word .docx importado no Citra"
+            docType.isEbookOrComic -> "Leitura ${docType.label} no Citra"
             else -> CitraWidgetHelper.cleanMarkdown(note.content)
         }
         views.setTextViewText(

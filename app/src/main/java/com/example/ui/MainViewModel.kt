@@ -439,6 +439,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val msg = when (note.resolvedDocumentType) {
                 NoteDocumentType.PDF -> if (isArchived) "PDF arquivado com sucesso" else "PDF restaurado para as notas"
                 NoteDocumentType.DOCX -> if (isArchived) "Word (.docx) arquivado com sucesso" else "Word (.docx) restaurado para as notas"
+                NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 ->
+                    if (isArchived) "${note.resolvedDocumentType.label} arquivado com sucesso" else "${note.resolvedDocumentType.label} restaurado para as notas"
                 NoteDocumentType.MARKDOWN -> if (isArchived) "Nota arquivada com sucesso" else "Nota restaurada para as notas principais"
             }
             _userMessage.emit(msg)
@@ -1499,7 +1501,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 com.example.ui.screens.organization.notes.DocumentCardPreviewCache.prewarmDocumentPreview(
                                     context = context,
                                     uriStr = doc.externalUri!!,
-                                    isPdf = doc.resolvedDocumentType == NoteDocumentType.PDF
+                                    docType = doc.resolvedDocumentType
                                 )
                             }
                         }
@@ -1556,6 +1558,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     if (externalDocType != null) {
                         val uriStr = uri.toString()
+                        val persistentUri = com.example.util.ExternalDocumentUriHelper.copyDocumentToInternalStorage(
+                            context = context,
+                            sourcePathOrUri = uriStr,
+                            title = rawTitle,
+                            docType = externalDocType
+                        ) ?: uriStr
                         recentDocsToSave.add(
                             com.example.data.local.RecentExternalDocEntry(
                                 uri = uriStr,
@@ -1564,11 +1572,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 addedAt = System.currentTimeMillis()
                             )
                         )
-                        if (existingExternalUris.contains(uriStr)) {
+                        if (existingExternalUris.contains(uriStr) || existingExternalUris.contains(persistentUri)) {
                             skippedDuplicatesCount++
                             continue
                         }
-                        val docIcon = if (externalDocType == NoteDocumentType.PDF) "📄" else "📘"
+                        val docIcon = externalDocEmoji(externalDocType)
                         val docLinkNote = Note(
                             uuid = java.util.UUID.randomUUID().toString(),
                             title = rawTitle,
@@ -1576,11 +1584,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             category = resolvedCategory,
                             iconEmoji = docIcon,
                             documentType = externalDocType.id,
-                            externalUri = uriStr,
+                            externalUri = persistentUri,
                             updatedAt = System.currentTimeMillis()
                         )
                         repository.insertNote(docLinkNote)
-                        existingExternalUris.add(uriStr)
+                        existingExternalUris.add(persistentUri)
                         linkedDocsCount++
                         continue
                     }
@@ -1741,7 +1749,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             val parts = mutableListOf<String>()
             if (linkedDocsCount > 0) {
-                parts.add("$linkedDocsCount documento(s) (PDF/Word) adicionado(s)")
+                parts.add("$linkedDocsCount documento(s) importado(s)")
             }
             if (importedNotesCount > 0) {
                 parts.add("$importedNotesCount nota(s) importada(s)")
@@ -1757,6 +1765,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun externalDocEmoji(docType: NoteDocumentType): String = when {
+        docType == NoteDocumentType.PDF -> "📄"
+        docType == NoteDocumentType.DOCX -> "📘"
+        docType == NoteDocumentType.CBZ -> "🖼️"
+        docType.isEbookOrComic -> "📚"
+        else -> "📝"
+    }
+
     fun openOrAddRecentExternalDocs(
         entries: List<com.example.data.local.RecentExternalDocEntry>,
         preferredCategory: String? = null,
@@ -1764,6 +1780,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (entries.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
+            val ctx = getApplication<android.app.Application>()
             val allExisting = repository.getAllNotesSync()
             val resolvedCategory = preferredCategory
                 ?.trim()
@@ -1774,15 +1791,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             for (entry in entries) {
                 val docType = NoteDocumentType.fromId(entry.docType)
+                val cleanEntryUri = entry.uri.trim()
+                val persistentUri = com.example.util.ExternalDocumentUriHelper.copyDocumentToInternalStorage(
+                    context = ctx,
+                    sourcePathOrUri = cleanEntryUri,
+                    title = entry.title,
+                    docType = docType
+                ) ?: cleanEntryUri
                 val existing = allExisting.firstOrNull {
-                    it.externalUri?.trim() == entry.uri.trim() && it.resolvedDocumentType == docType
+                    val existingUri = it.externalUri?.trim()
+                    (existingUri == cleanEntryUri || existingUri == persistentUri) &&
+                        it.resolvedDocumentType == docType
                 }
                 if (existing != null) {
-                    val activeCopy = if (existing.isArchived || existing.isDeleted) {
+                    val needsCopyUpgrade = !com.example.util.ExternalDocumentUriHelper.isInternalImportedFile(ctx, existing.externalUri) &&
+                        com.example.util.ExternalDocumentUriHelper.isInternalImportedFile(ctx, persistentUri)
+                    val activeCopy = if (existing.isArchived || existing.isDeleted || needsCopyUpgrade) {
                         val restored = existing.copy(
                             isArchived = false,
                             isDeleted = false,
                             deletedAt = null,
+                            externalUri = if (needsCopyUpgrade) persistentUri else existing.externalUri,
                             updatedAt = System.currentTimeMillis()
                         )
                         repository.updateNote(restored)
@@ -1792,7 +1821,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     if (entries.size == 1) resolvedSingle = activeCopy
                 } else {
-                    val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
+                    val docIcon = externalDocEmoji(docType)
                     val newDoc = Note(
                         uuid = java.util.UUID.randomUUID().toString(),
                         title = entry.title.ifBlank { "Documento" },
@@ -1800,7 +1829,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         category = resolvedCategory,
                         iconEmoji = docIcon,
                         documentType = docType.id,
-                        externalUri = entry.uri,
+                        externalUri = persistentUri,
                         updatedAt = System.currentTimeMillis()
                     )
                     val newId = repository.insertNote(newDoc)
@@ -1818,9 +1847,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (openIfSingle && entries.size == 1 && resolvedSingle != null) {
                 _noteToOpen.value = resolvedSingle
             } else if (addedCount > 0) {
-                _userMessage.emit("$addedCount documento(s) carregado(s) para as notas!")
+                _userMessage.emit("$addedCount documento(s) importado(s) para o Citra!")
             } else {
-                _userMessage.emit("Documentos já estão na lista de notas.")
+                _userMessage.emit("Documentos já estão importados.")
             }
         }
     }
@@ -1838,10 +1867,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Opens a discovered document in transient read-only mode WITHOUT creating a Room vault entry.
+     * Opens a discovered document in transient read-only mode WITHOUT creating a persistent copy or Room entry.
      */
     fun openTransientExternalDocument(doc: com.example.util.DiscoveredExternalDocument) {
-        val docIcon = if (doc.docType == NoteDocumentType.PDF) "📄" else "📘"
+        val docIcon = externalDocEmoji(doc.docType)
         preferencesManager.recordRecentExternalDocs(
             listOf(
                 com.example.data.local.RecentExternalDocEntry(
@@ -1866,9 +1895,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Handles picked PDF or DOCX URIs from the system multi-picker inside the 2-column Explorer:
+     * Handles picked document URIs from the system multi-picker inside the 2-column Explorer:
      * persists read permissions and records in recents; if 1 document was selected, opens it in
-     * transient read-only mode (no DB link created unless user taps 'Guardar').
+     * transient read-only mode (no DB link created unless user taps 'Importar').
      */
     fun openOrSelectPickedExternalDocuments(
         uris: List<Uri>,
@@ -1902,7 +1931,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (recentEntries.size == 1) {
                 val single = recentEntries.first()
                 val docType = NoteDocumentType.fromId(single.docType)
-                val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
+                val docIcon = externalDocEmoji(docType)
                 _transientExternalDocToOpen.value = Note(
                     id = 0L,
                     uuid = "",
@@ -1921,7 +1950,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Imports discovered documents into the Citra vault explicitly upon user request.
+     * Imports discovered documents into Citra's persistent storage upon user request.
      */
     fun saveDiscoveredDocsToVault(
         docs: List<com.example.util.DiscoveredExternalDocument>,
@@ -1943,7 +1972,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Persists a transient external document into the Citra vault when user taps 'Guardar no Cofre'.
+     * Persists a transient external document into Citra's persistent storage when user taps 'Importar'.
      */
     fun saveTransientDocumentToVault(
         docNote: Note,
@@ -1953,16 +1982,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val uriStr = docNote.externalUri?.trim()
         if (uriStr.isNullOrBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
+            val ctx = getApplication<android.app.Application>()
             val docType = docNote.resolvedDocumentType
+            val persistentUri = com.example.util.ExternalDocumentUriHelper.copyDocumentToInternalStorage(
+                context = ctx,
+                sourcePathOrUri = uriStr,
+                title = docNote.title,
+                docType = docType
+            ) ?: uriStr
             val existing = repository.getAllNotesSync().firstOrNull {
-                it.externalUri?.trim() == uriStr && it.resolvedDocumentType == docType
+                val existingUri = it.externalUri?.trim()
+                (existingUri == uriStr || existingUri == persistentUri) &&
+                    it.resolvedDocumentType == docType
             }
             val savedNote = if (existing != null) {
-                if (existing.isDeleted || existing.isArchived) {
+                val needsUpgrade = !com.example.util.ExternalDocumentUriHelper.isInternalImportedFile(ctx, existing.externalUri) &&
+                    com.example.util.ExternalDocumentUriHelper.isInternalImportedFile(ctx, persistentUri)
+                if (existing.isDeleted || existing.isArchived || needsUpgrade) {
                     val restored = existing.copy(
                         isDeleted = false,
                         deletedAt = null,
                         isArchived = false,
+                        externalUri = if (needsUpgrade) persistentUri else existing.externalUri,
                         updatedAt = System.currentTimeMillis()
                     )
                     repository.updateNote(restored)
@@ -1979,14 +2020,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     id = 0L,
                     uuid = java.util.UUID.randomUUID().toString(),
                     category = resolvedCategory,
-                    iconEmoji = if (docType == NoteDocumentType.PDF) "📄" else "📘",
+                    iconEmoji = externalDocEmoji(docType),
+                    externalUri = persistentUri,
                     updatedAt = System.currentTimeMillis()
                 )
                 val id = repository.insertNote(newNote)
                 newNote.copy(id = id)
             }
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
-            _userMessage.emit("Documento guardado no cofre do Citra!")
+            _userMessage.emit("Documento importado com segurança no Citra!")
             kotlinx.coroutines.withContext(Dispatchers.Main) {
                 onSaved?.invoke(savedNote)
             }
@@ -1995,7 +2037,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Handles handoff from isolated ExternalReaderActivity when the user explicitly requests
-     * 'Guardar no Cofre' or 'Converter para nota'.
+     * 'Importar' or 'Converter para nota'.
      */
     fun handleExternalReaderHandoff(
         uri: Uri,
@@ -2026,7 +2068,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 title = rawTitle,
                 content = "",
                 category = "Geral",
-                iconEmoji = if (docType == NoteDocumentType.PDF) "📄" else "📘",
+                iconEmoji = externalDocEmoji(docType),
                 documentType = docType.id,
                 externalUri = uriStr,
                 updatedAt = System.currentTimeMillis()
@@ -2073,8 +2115,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
 
                 if (docType == null && isMarkdownOrTextIntent) {
-                    val rawText = context.contentResolver.openInputStream(uri)?.use {
-                        it.bufferedReader(Charsets.UTF_8).readText()
+                    val rawText = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        stream.bufferedReader(Charsets.UTF_8).readText()
                     } ?: run {
                         _userMessage.emit("Não foi possível ler o arquivo de texto.")
                         return@launch
@@ -2111,6 +2153,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val uriStr = uri.toString()
                 val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+                val persistentUri = com.example.util.ExternalDocumentUriHelper.copyDocumentToInternalStorage(
+                    context = context,
+                    sourcePathOrUri = uriStr,
+                    title = rawTitle,
+                    docType = docType
+                ) ?: uriStr
                 preferencesManager.recordRecentExternalDocs(
                     listOf(
                         com.example.data.local.RecentExternalDocEntry(
@@ -2124,16 +2172,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 val existingNotes = repository.getAllNotesSync()
                 val existing = existingNotes.firstOrNull {
-                    it.externalUri?.trim() == uriStr && it.resolvedDocumentType == docType
+                    val existingUri = it.externalUri?.trim()
+                    (existingUri == uriStr || existingUri == persistentUri) &&
+                        it.resolvedDocumentType == docType
                 }
 
                 if (existing != null) {
-                    if (existing.isArchived) {
-                        repository.setNoteArchived(existing, false)
+                    val upgraded = existing.copy(
+                        isArchived = false,
+                        isDeleted = false,
+                        deletedAt = null,
+                        externalUri = if (!com.example.util.ExternalDocumentUriHelper.isInternalImportedFile(context, existing.externalUri) &&
+                            com.example.util.ExternalDocumentUriHelper.isInternalImportedFile(context, persistentUri)
+                        ) persistentUri else existing.externalUri
+                    )
+                    if (upgraded != existing) {
+                        repository.updateNote(upgraded)
                     }
-                    _noteToOpen.value = existing.copy(isArchived = false)
+                    _noteToOpen.value = upgraded
                 } else {
-                    val docIcon = if (docType == NoteDocumentType.PDF) "📄" else "📘"
+                    val docIcon = externalDocEmoji(docType)
                     val newDoc = Note(
                         uuid = java.util.UUID.randomUUID().toString(),
                         title = rawTitle,
@@ -2141,14 +2199,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         category = "Geral",
                         iconEmoji = docIcon,
                         documentType = docType.id,
-                        externalUri = uriStr,
+                        externalUri = persistentUri,
                         updatedAt = System.currentTimeMillis()
                     )
                     val newId = repository.insertNote(newDoc)
                     com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
                     _noteToOpen.value = newDoc.copy(id = newId)
-                    val label = if (docType == NoteDocumentType.PDF) "PDF" else "Word (.docx)"
-                    _userMessage.emit("$label '$rawTitle' adicionado ao menu de notas!")
+                    _userMessage.emit("${docType.label} '$rawTitle' importado para as notas!")
                 }
             } catch (_: Exception) {
                 _userMessage.emit("Não foi possível abrir o arquivo selecionado.")
@@ -2488,11 +2545,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             com.example.util.ExternalDocumentUriHelper.takePersistableReadPermission(context, newUri)
             val displayName = com.example.util.ExternalDocumentUriHelper.resolveDisplayName(context, newUri)
             val detected = com.example.util.ExternalDocumentUriHelper.detectExternalDocumentType(context, newUri, displayName)
-            val cleanTitle = displayName?.substringBeforeLast(".")?.ifBlank { note.title } ?: note.title
+            val rawTitle = displayName?.substringBeforeLast(".")?.ifBlank { note.title } ?: note.title
+            val resolvedType = detected ?: note.resolvedDocumentType
+            val persistentUri = com.example.util.ExternalDocumentUriHelper.copyDocumentToInternalStorage(
+                context = context,
+                sourcePathOrUri = newUri.toString(),
+                title = rawTitle,
+                docType = resolvedType
+            ) ?: newUri.toString()
             val updated = note.copy(
-                title = cleanTitle,
-                externalUri = newUri.toString(),
-                documentType = detected?.id ?: note.documentType,
+                title = rawTitle,
+                externalUri = persistentUri,
+                documentType = resolvedType.id,
                 updatedAt = System.currentTimeMillis()
             )
             repository.updateNote(updated)
@@ -2500,7 +2564,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 listOf(
                     com.example.data.local.RecentExternalDocEntry(
                         uri = newUri.toString(),
-                        title = cleanTitle,
+                        title = rawTitle,
                         docType = updated.documentType,
                         addedAt = System.currentTimeMillis()
                     )
@@ -2532,10 +2596,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val markdownResult: Pair<String?, String?> = try {
                 val stream = com.example.util.ExternalDocumentUriHelper.openInputStream(context, uriString)
                 if (stream == null) {
-                    null to "Não foi possível abrir o arquivo. Verifique se o PDF ou Word (.docx) ainda existe ou selecione-o novamente."
+                    null to "Não foi possível abrir o arquivo. Verifique se o documento ainda existe ou selecione-o novamente."
                 } else {
                     stream.use { input ->
-                        when (docNote.resolvedDocumentType) {
+                        when (val dt = docNote.resolvedDocumentType) {
                             NoteDocumentType.PDF -> {
                                 val res = com.example.util.PdfDocumentEngine.extractMarkdown(context, input) { bytes, ext ->
                                     saveDocxExtractedImage(context, bytes, ext)
@@ -2553,6 +2617,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     is com.example.util.DocxConversionResult.Success -> res.markdown to null
                                     is com.example.util.DocxConversionResult.Error -> null to res.message
                                 }
+                            }
+                            NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 -> {
+                                val parsed = com.example.util.EbookComicEngine.buildParsedFromStream(
+                                    input = input,
+                                    docType = dt,
+                                    fallbackTitle = docNote.title.ifBlank { dt.label }
+                                )
+                                com.example.util.EbookComicEngine.extractMarkdown(parsed) to null
                             }
                             NoteDocumentType.MARKDOWN -> docNote.content to null
                         }
@@ -2629,9 +2701,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.moveToTrash(note)
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
-            val msg = when (note.resolvedDocumentType) {
-                NoteDocumentType.PDF -> "PDF movido para a Lixeira (seu arquivo original permanece intacto)."
-                NoteDocumentType.DOCX -> "Documento Word (.docx) movido para a Lixeira (seu arquivo original permanece intacto)."
+            val msg = when (val dt = note.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "PDF movido para a Lixeira."
+                NoteDocumentType.DOCX -> "Documento Word (.docx) movido para a Lixeira."
+                NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 ->
+                    "${dt.label} movido para a Lixeira."
                 NoteDocumentType.MARKDOWN -> "Anotação movida para a Lixeira (30 dias)."
             }
             _userMessage.emit(msg)
@@ -2670,6 +2744,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     note.externalUri,
                     survivingNotes
                 )
+                com.example.util.ExternalDocumentUriHelper.deleteInternalImportedDocumentIfUnused(
+                    ctx,
+                    note.externalUri,
+                    survivingNotes
+                )
             } else {
                 com.example.util.CitraDocsFileManager.deleteNoteMarkdown(ctx, note.title, note.uuid)
                 val candidateMedia = com.example.util.MediaStorageHelper.extractAllReferencedLocalMediaPaths(note)
@@ -2685,9 +2764,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             repository.permanentlyDeleteNote(note)
-            val msg = when (note.resolvedDocumentType) {
-                NoteDocumentType.PDF -> "PDF removido do Citra (arquivo original preservado)."
-                NoteDocumentType.DOCX -> "Word (.docx) removido do Citra (arquivo original preservado)."
+            val msg = when (val dt = note.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "PDF removido definitivamente do Citra."
+                NoteDocumentType.DOCX -> "Word (.docx) removido definitivamente do Citra."
+                NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 ->
+                    "${dt.label} removido definitivamente do Citra."
                 NoteDocumentType.MARKDOWN -> "Anotação e mídias exclusivas removidas definitivamente do aparelho."
             }
             _userMessage.emit(msg)
@@ -2706,6 +2787,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             currentTrash.forEach { note ->
                 if (note.isExternalDocument) {
                     com.example.util.ExternalDocumentUriHelper.releasePersistableReadPermissionIfUnused(
+                        ctx,
+                        note.externalUri,
+                        survivingNotes
+                    )
+                    com.example.util.ExternalDocumentUriHelper.deleteInternalImportedDocumentIfUnused(
                         ctx,
                         note.externalUri,
                         survivingNotes

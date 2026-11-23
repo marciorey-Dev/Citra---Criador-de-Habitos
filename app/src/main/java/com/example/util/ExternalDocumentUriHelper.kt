@@ -44,7 +44,13 @@ object ExternalDocumentUriHelper {
     val DOCUMENT_PICKER_MIME_TYPES = arrayOf(
         "application/pdf",
         "application/x-pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/epub+zip",
+        "application/x-mobipocket-ebook",
+        "application/vnd.amazon.ebook",
+        "application/vnd.comicbook+zip",
+        "application/x-cbz",
+        "application/x-fictionbook+xml"
     )
 
     val PDF_PICKER_MIME_TYPES = arrayOf(
@@ -57,6 +63,18 @@ object ExternalDocumentUriHelper {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.ms-word.document.macroEnabled.12",
         "application/octet-stream"
+    )
+
+    val EBOOK_PICKER_MIME_TYPES = arrayOf(
+        "application/epub+zip",
+        "application/x-mobipocket-ebook",
+        "application/vnd.amazon.ebook",
+        "application/vnd.comicbook+zip",
+        "application/x-cbz",
+        "application/x-fictionbook+xml",
+        "application/zip",
+        "application/octet-stream",
+        "*/*"
     )
 
     val MARKDOWN_IMPORT_MIME_TYPES = arrayOf(
@@ -80,6 +98,10 @@ object ExternalDocumentUriHelper {
     val ALL_IMPORT_AND_LINK_MIME_TYPES = arrayOf(
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/epub+zip",
+        "application/x-mobipocket-ebook",
+        "application/vnd.comicbook+zip",
+        "application/x-fictionbook+xml",
         "text/markdown",
         "text/plain",
         "text/html",
@@ -161,37 +183,76 @@ object ExternalDocumentUriHelper {
                 mime == "application/x-pdf" ||
                 name.endsWith(".pdf") -> NoteDocumentType.PDF
             mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-                mime == "application/vnd.ms-word.document.macroenabled.12" ||
+                mime == "application/vnd.ms-word.document.macroEnabled.12" ||
                 name.endsWith(".docx") -> NoteDocumentType.DOCX
+            mime == "application/epub+zip" ||
+                name.endsWith(".epub") -> NoteDocumentType.EPUB
+            mime == "application/x-mobipocket-ebook" ||
+                mime == "application/vnd.amazon.ebook" ||
+                name.endsWith(".mobi") ||
+                name.endsWith(".azw") ||
+                name.endsWith(".azw3") -> NoteDocumentType.MOBI
+            mime == "application/vnd.comicbook+zip" ||
+                mime == "application/x-cbz" ||
+                name.endsWith(".cbz") -> NoteDocumentType.CBZ
+            mime == "application/x-fictionbook+xml" ||
+                name.endsWith(".fb2") ||
+                name.endsWith(".fb2.zip") -> NoteDocumentType.FB2
             else -> null
         }
     }
 
     /**
-     * Sniffs binary header / ZIP structure so image-heavy PDFs and .docx files whose MIME type
-     * is reported as application/octet-stream or without extension are still reliably recognized.
+     * Sniffs binary header / ZIP structure so image-heavy PDFs, .docx, .epub, .mobi, .cbz, and .fb2
+     * files whose MIME type is reported as application/octet-stream or without extension are recognized.
      */
     fun detectExternalDocumentTypeFromBytes(bytes: ByteArray): NoteDocumentType? {
         if (bytes.size < 4) return null
-        val headerLimit = minOf(bytes.size, 1024)
+        val headerLimit = minOf(bytes.size, 2048)
         val asciiHeader = String(bytes, 0, headerLimit, Charsets.ISO_8859_1)
         if (asciiHeader.contains("%PDF-")) {
             return NoteDocumentType.PDF
+        }
+        if (bytes.size >= 68) {
+            val palmId = String(bytes, 60, 8, Charsets.ISO_8859_1)
+            if (palmId == "BOOKMOBI" || palmId == "TEXtREAd") {
+                return NoteDocumentType.MOBI
+            }
+        }
+        if (asciiHeader.contains("<FictionBook", ignoreCase = true)) {
+            return NoteDocumentType.FB2
         }
         if (bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()) {
             return try {
                 java.util.zip.ZipInputStream(bytes.inputStream()).use { zis ->
                     var entry = zis.nextEntry
-                    var foundDocx = false
+                    var hasImages = false
+                    var hasDocx = false
+                    var hasEpub = false
                     while (entry != null) {
                         val entryName = entry.name.replace('\\', '/')
-                        if (entryName.equals("word/document.xml", ignoreCase = true)) {
-                            foundDocx = true
-                            break
+                        val lower = entryName.lowercase()
+                        when {
+                            lower == "word/document.xml" -> {
+                                hasDocx = true
+                                break
+                            }
+                            lower == "mimetype" || lower == "meta-inf/container.xml" || lower.endsWith(".opf") -> {
+                                hasEpub = true
+                            }
+                            lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+                                lower.endsWith(".png") || lower.endsWith(".webp") -> {
+                                hasImages = true
+                            }
                         }
                         entry = zis.nextEntry
                     }
-                    if (foundDocx) NoteDocumentType.DOCX else null
+                    when {
+                        hasDocx -> NoteDocumentType.DOCX
+                        hasEpub -> NoteDocumentType.EPUB
+                        hasImages -> NoteDocumentType.CBZ
+                        else -> null
+                    }
                 }
             } catch (_: Exception) {
                 null
@@ -217,26 +278,39 @@ object ExternalDocumentUriHelper {
         // Magic-byte fallback when MIME is generic (e.g. application/octet-stream) or filename lacks extension
         return try {
             openInputStream(context, uri.toString())?.use { input ->
-                val head = ByteArray(1024)
+                val head = ByteArray(2048)
                 val readCount = input.read(head)
                 if (readCount >= 4) {
                     val actualHead = if (readCount == head.size) head else head.copyOf(readCount)
                     val asciiHead = String(actualHead, Charsets.ISO_8859_1)
                     when {
                         asciiHead.contains("%PDF-") -> NoteDocumentType.PDF
+                        actualHead.size >= 68 && String(actualHead, 60, 8, Charsets.ISO_8859_1).let {
+                            it == "BOOKMOBI" || it == "TEXtREAd"
+                        } -> NoteDocumentType.MOBI
+                        asciiHead.contains("<FictionBook", ignoreCase = true) -> NoteDocumentType.FB2
                         actualHead[0] == 0x50.toByte() && actualHead[1] == 0x4B.toByte() -> {
                             openInputStream(context, uri.toString())?.use { fullStream ->
                                 java.util.zip.ZipInputStream(fullStream).use { zis ->
                                     var entry = zis.nextEntry
+                                    var hasEpub = false
+                                    var hasImages = false
                                     while (entry != null) {
-                                        if (entry.name.replace('\\', '/').equals("word/document.xml", ignoreCase = true)) {
-                                            return NoteDocumentType.DOCX
+                                        val lower = entry.name.replace('\\', '/').lowercase()
+                                        when {
+                                            lower == "word/document.xml" -> return NoteDocumentType.DOCX
+                                            lower == "mimetype" || lower == "meta-inf/container.xml" || lower.endsWith(".opf") -> hasEpub = true
+                                            lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") -> hasImages = true
                                         }
                                         entry = zis.nextEntry
                                     }
+                                    when {
+                                        hasEpub -> NoteDocumentType.EPUB
+                                        hasImages -> NoteDocumentType.CBZ
+                                        else -> null
+                                    }
                                 }
                             }
-                            null
                         }
                         else -> null
                     }
@@ -341,6 +415,114 @@ object ExternalDocumentUriHelper {
         }
     }
 
+    fun getImportedDocsFolder(context: Context): File {
+        return File(context.filesDir, "citra_imported_docs").apply {
+            if (!exists()) mkdirs()
+        }
+    }
+
+    fun isInternalImportedFile(context: Context, pathOrUri: String?): Boolean {
+        if (pathOrUri.isNullOrBlank()) return false
+        val trimmed = pathOrUri.trim()
+        val folderPath = getImportedDocsFolder(context).absolutePath
+        return trimmed.startsWith(folderPath)
+    }
+
+    fun computeOriginTag(sourcePathOrUri: String): String {
+        return try {
+            val md = java.security.MessageDigest.getInstance("SHA-1")
+            val digest = md.digest(sourcePathOrUri.trim().toByteArray(Charsets.UTF_8))
+            digest.take(4).joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            (sourcePathOrUri.hashCode() and 0x7FFFFFFF).toString(16)
+        }
+    }
+
+    /**
+     * Copies an external document into app-private persistent storage (`citra_imported_docs`)
+     * so imported documents never lose their link when temporary OS grants expire or external files move.
+     * Also keeps the file directly writable for inline DOCX editing.
+     */
+    fun copyDocumentToInternalStorage(
+        context: Context,
+        sourcePathOrUri: String?,
+        title: String,
+        docType: NoteDocumentType
+    ): String? {
+        if (sourcePathOrUri.isNullOrBlank()) return null
+        val trimmed = sourcePathOrUri.trim()
+        val folder = getImportedDocsFolder(context)
+        if (isInternalImportedFile(context, trimmed)) {
+            val existing = File(trimmed)
+            if (existing.exists() && existing.canRead() && existing.length() > 0L) {
+                return existing.absolutePath
+            }
+        }
+
+        val ext = docType.fileExtension
+        val cleanBase = title.trim()
+            .replace(Regex("\\.(pdf|docx|epub|mobi|azw3?|cbz|fb2)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("[/\\\\:*?\"<>|\\x00-\\x1F]"), "_")
+            .trim()
+            .take(48)
+            .ifBlank { "Documento" }
+        val tag = computeOriginTag(trimmed)
+        val destFile = File(folder, "${cleanBase}_$tag.$ext")
+        if (destFile.exists() && destFile.canRead() && destFile.length() > 0L) {
+            return destFile.absolutePath
+        }
+
+        val tempFile = File(folder, ".tmp_${System.nanoTime()}_$tag.$ext")
+        return try {
+            val copied = openInputStream(context, trimmed)?.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output)
+                    output.fd.sync()
+                }
+                true
+            } ?: false
+
+            if (!copied || !tempFile.exists() || tempFile.length() == 0L) {
+                tempFile.delete()
+                null
+            } else {
+                if (destFile.exists()) destFile.delete()
+                if (tempFile.renameTo(destFile)) {
+                    destFile.absolutePath
+                } else {
+                    tempFile.copyTo(destFile, overwrite = true)
+                    tempFile.delete()
+                    destFile.absolutePath
+                }
+            }
+        } catch (_: Exception) {
+            try { tempFile.delete() } catch (_: Exception) {}
+            null
+        }
+    }
+
+    fun deleteInternalImportedDocumentIfUnused(
+        context: Context,
+        pathOrUri: String?,
+        remainingNotes: List<Note>
+    ) {
+        if (!isInternalImportedFile(context, pathOrUri)) return
+        val trimmed = pathOrUri!!.trim()
+        val stillReferenced = remainingNotes.any { !it.isDeleted && it.externalUri == trimmed }
+        if (stillReferenced) return
+        try {
+            File(trimmed).delete()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun deleteAllInternalImportedDocuments(context: Context) {
+        try {
+            getImportedDocsFolder(context).listFiles()?.forEach { it.delete() }
+        } catch (_: Exception) {
+        }
+    }
+
     fun isAccessible(context: Context, pathOrUri: String?): Boolean {
         if (pathOrUri.isNullOrBlank()) return false
         return try {
@@ -358,9 +540,9 @@ object ExternalDocumentUriHelper {
         newTitle: String,
         docType: NoteDocumentType
     ): RenameExternalDocumentResult {
-        val ext = if (docType == NoteDocumentType.PDF) "pdf" else "docx"
+        val ext = docType.fileExtension
         val cleanBase = newTitle.trim()
-            .replace(Regex("\\.(pdf|docx)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\.(pdf|docx|epub|mobi|azw3?|cbz|fb2)$", RegexOption.IGNORE_CASE), "")
             .replace(Regex("[/\\\\:*?\"<>|\\x00-\\x1F]"), "_")
             .trim()
             .ifBlank { "Documento" }
@@ -425,14 +607,10 @@ object ExternalDocumentUriHelper {
         docType: NoteDocumentType
     ): Boolean {
         if (pathOrUri.isNullOrBlank()) return false
-        val ext = if (docType == NoteDocumentType.PDF) "pdf" else "docx"
-        val mime = if (docType == NoteDocumentType.PDF) {
-            "application/pdf"
-        } else {
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        }
+        val ext = docType.fileExtension
+        val mime = docType.mimeType
         val safeTitle = title.trim()
-            .replace(Regex("\\.(pdf|docx)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\.(pdf|docx|epub|mobi|azw3?|cbz|fb2)$", RegexOption.IGNORE_CASE), "")
             .replace(Regex("[/\\\\:*?\"<>|\\x00-\\x1F]"), "_")
             .trim()
             .ifBlank { "Documento" }
@@ -471,10 +649,88 @@ object ExternalDocumentUriHelper {
         title: String,
         pathOrUri: String?,
         docType: NoteDocumentType,
-        docxParsed: DocxParsedDocument? = null
+        docxParsed: DocxParsedDocument? = null,
+        ebookParsed: EbookDocument? = null
     ): Boolean {
         val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return false
         val jobName = title.ifBlank { "Documento Citra" }
+
+        if (docType.isEbookOrComic) {
+            val doc = ebookParsed ?: run {
+                val stream = openInputStream(context, pathOrUri) ?: return false
+                stream.use { EbookComicEngine.buildParsedFromStream(it, docType, jobName) }
+            }
+            val adapter = object : PrintDocumentAdapter() {
+                private var currentAttributes: PrintAttributes? = null
+
+                override fun onLayout(
+                    oldAttributes: PrintAttributes?,
+                    newAttributes: PrintAttributes,
+                    cancellationSignal: CancellationSignal?,
+                    callback: LayoutResultCallback,
+                    extras: Bundle?
+                ) {
+                    if (cancellationSignal?.isCanceled == true) {
+                        callback.onLayoutCancelled()
+                        return
+                    }
+                    currentAttributes = newAttributes
+                    val info = PrintDocumentInfo.Builder("$jobName.pdf")
+                        .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                        .setPageCount(doc.pages.size.coerceAtLeast(1))
+                        .build()
+                    callback.onLayoutFinished(info, true)
+                }
+
+                override fun onWrite(
+                    pages: Array<out PageRange>,
+                    destination: ParcelFileDescriptor,
+                    cancellationSignal: CancellationSignal?,
+                    callback: WriteResultCallback
+                ) {
+                    val attrs = currentAttributes ?: PrintAttributes.Builder()
+                        .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                        .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                        .build()
+                    val pdfDoc = PrintedPdfDocument(context, attrs)
+                    try {
+                        val pageW = pdfDoc.pageContentRect.width().takeIf { it > 0 } ?: 595
+                        val pageH = pdfDoc.pageContentRect.height().takeIf { it > 0 } ?: 842
+                        doc.pages.indices.forEach { idx ->
+                            if (cancellationSignal?.isCanceled == true) {
+                                pdfDoc.close()
+                                callback.onWriteCancelled()
+                                return
+                            }
+                            val page = pdfDoc.startPage(idx)
+                            val bmp = EbookComicEngine.renderPageBitmap(doc, idx, 900)
+                            if (bmp != null) {
+                                val srcRect = android.graphics.Rect(0, 0, bmp.width, bmp.height)
+                                val scale = minOf(pageW.toFloat() / bmp.width, pageH.toFloat() / bmp.height)
+                                val drawW = bmp.width * scale
+                                val drawH = bmp.height * scale
+                                val left = (pageW - drawW) / 2f
+                                val top = (pageH - drawH) / 2f
+                                val dstRect = android.graphics.RectF(left, top, left + drawW, top + drawH)
+                                page.canvas.drawBitmap(bmp, srcRect, dstRect, null)
+                                bmp.recycle()
+                            }
+                            pdfDoc.finishPage(page)
+                        }
+                        FileOutputStream(destination.fileDescriptor).use { out ->
+                            pdfDoc.writeTo(out)
+                        }
+                        callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
+                    } catch (e: Exception) {
+                        callback.onWriteFailed(e.message ?: "Erro ao imprimir livro.")
+                    } finally {
+                        pdfDoc.close()
+                    }
+                }
+            }
+            printManager.print(jobName, adapter, null)
+            return true
+        }
 
         if (docType == NoteDocumentType.PDF) {
             if (pathOrUri.isNullOrBlank()) return false

@@ -3068,14 +3068,21 @@ document.addEventListener("DOMContentLoaded", function() {
                                 }
                             }
 
-                            NoteDocumentType.PDF, NoteDocumentType.DOCX -> {
-                                val ext = if (docType == NoteDocumentType.PDF) "pdf" else "docx"
+                            NoteDocumentType.PDF,
+                            NoteDocumentType.DOCX,
+                            NoteDocumentType.EPUB,
+                            NoteDocumentType.MOBI,
+                            NoteDocumentType.CBZ,
+                            NoteDocumentType.FB2 -> {
+                                val ext = docType.fileExtension
                                 val stream = note.externalUri?.let {
                                     ExternalDocumentUriHelper.openInputStream(context, it)
                                 }
                                 if (stream != null) {
                                     stream.use { input ->
                                         val shouldConvertFromDocxToFormat = docType == NoteDocumentType.DOCX &&
+                                            format in setOf(BatchExportFormat.MARKDOWN, BatchExportFormat.TXT, BatchExportFormat.HTML)
+                                        val shouldConvertFromEbookToFormat = docType.isEbookOrComic &&
                                             format in setOf(BatchExportFormat.MARKDOWN, BatchExportFormat.TXT, BatchExportFormat.HTML)
                                         if (shouldConvertFromDocxToFormat) {
                                             val conv = DocxDocumentEngine.convertToMarkdown(input)
@@ -3096,6 +3103,30 @@ document.addEventListener("DOMContentLoaded", function() {
                                                 exported++
                                             } else {
                                                 skipped++
+                                            }
+                                        } else if (shouldConvertFromEbookToFormat && !note.externalUri.isNullOrBlank()) {
+                                            val md = EbookComicEngine.extractMarkdown(context, note.externalUri, docType)
+                                            if (!md.isNullOrBlank()) {
+                                                val blocks = SmoothMarkdownConverter.markdownToBlocks(md)
+                                                val entryName = uniqueEntryName(title, format.extension)
+                                                val tmpFile = File(tempWorkDir, "doc_${idx}.${format.extension}")
+                                                when (format) {
+                                                    BatchExportFormat.MARKDOWN -> tmpFile.writeText(md, Charsets.UTF_8)
+                                                    BatchExportFormat.TXT -> tmpFile.writeText(exportToTxt(title, note.category, blocks), Charsets.UTF_8)
+                                                    BatchExportFormat.HTML -> streamNoteToHtmlFile(context, tmpFile, title, note.category, blocks, themeColor)
+                                                    else -> tmpFile.writeText(md, Charsets.UTF_8)
+                                                }
+                                                zos.putNextEntry(ZipEntry(entryName))
+                                                FileInputStream(tmpFile).use { it.copyTo(zos, 32768) }
+                                                zos.closeEntry()
+                                                tmpFile.delete()
+                                                exported++
+                                            } else {
+                                                val entryName = uniqueEntryName(title, ext)
+                                                zos.putNextEntry(ZipEntry(entryName))
+                                                input.copyTo(zos, 32768)
+                                                zos.closeEntry()
+                                                exported++
                                             }
                                         } else {
                                             val entryName = uniqueEntryName(title, ext)

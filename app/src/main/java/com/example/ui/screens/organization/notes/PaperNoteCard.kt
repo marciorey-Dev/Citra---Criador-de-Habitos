@@ -34,8 +34,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.Note
+import com.example.data.model.NoteDocumentType
 import com.example.data.model.isDocxDocument
 import com.example.data.model.isPdfDocument
+import com.example.data.model.resolvedDocumentType
 import com.example.ui.theme.*
 
 /**
@@ -183,6 +185,46 @@ object PaperNotePalette {
         darkFlap = Color(0xFF2B467C)
     )
 
+    private val epubDefaultOption = NoteColorOption(
+        key = "EPUB_EMERALD_DEFAULT",
+        displayName = "EPUB Padrão",
+        primaryColor = Color(0xFF059669),
+        lightBg = Color(0xFFD1FAE5),
+        lightFlap = Color(0xFF6EE7B7),
+        darkBg = Color(0xFF144234),
+        darkFlap = Color(0xFF1D5E4A)
+    )
+
+    private val mobiDefaultOption = NoteColorOption(
+        key = "MOBI_AMBER_DEFAULT",
+        displayName = "MOBI Padrão",
+        primaryColor = Color(0xFFD97706),
+        lightBg = Color(0xFFFEF3C7),
+        lightFlap = Color(0xFFFCD34D),
+        darkBg = Color(0xFF4A3114),
+        darkFlap = Color(0xFF68451C)
+    )
+
+    private val cbzDefaultOption = NoteColorOption(
+        key = "CBZ_VIOLET_DEFAULT",
+        displayName = "CBZ Padrão",
+        primaryColor = Color(0xFF7C3AED),
+        lightBg = Color(0xFFEDE9FE),
+        lightFlap = Color(0xFFC4B5FD),
+        darkBg = Color(0xFF34225E),
+        darkFlap = Color(0xFF493083)
+    )
+
+    private val fb2DefaultOption = NoteColorOption(
+        key = "FB2_CYAN_DEFAULT",
+        displayName = "FB2 Padrão",
+        primaryColor = Color(0xFF0891B2),
+        lightBg = Color(0xFFCFFAFE),
+        lightFlap = Color(0xFF67E8F9),
+        darkBg = Color(0xFF143C4A),
+        darkFlap = Color(0xFF1D5569)
+    )
+
     fun findColorOption(key: String?): NoteColorOption {
         if (key.isNullOrBlank()) return options[0]
         return options.firstOrNull { it.key.equals(key, ignoreCase = true) }
@@ -235,10 +277,18 @@ object PaperNotePalette {
 
     fun resolvePaperColors(note: Note, isDark: Boolean): PaperNoteColors {
         val useDocDefault = note.noteColor.isNullOrBlank() || note.noteColor.equals("DEFAULT", ignoreCase = true)
-        val opt = when {
-            useDocDefault && note.isPdfDocument -> pdfDefaultOption
-            useDocDefault && note.isDocxDocument -> docxDefaultOption
-            else -> findColorOption(note.noteColor)
+        val opt = if (useDocDefault) {
+            when (note.resolvedDocumentType) {
+                NoteDocumentType.PDF -> pdfDefaultOption
+                NoteDocumentType.DOCX -> docxDefaultOption
+                NoteDocumentType.EPUB -> epubDefaultOption
+                NoteDocumentType.MOBI -> mobiDefaultOption
+                NoteDocumentType.CBZ -> cbzDefaultOption
+                NoteDocumentType.FB2 -> fb2DefaultOption
+                NoteDocumentType.MARKDOWN -> findColorOption(note.noteColor)
+            }
+        } else {
+            findColorOption(note.noteColor)
         }
         return resolveOptionColors(opt, isDark, note.isPinned)
     }

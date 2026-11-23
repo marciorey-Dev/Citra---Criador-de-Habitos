@@ -7,12 +7,44 @@ import androidx.room.PrimaryKey
 enum class NoteDocumentType(val id: String, val label: String) {
     MARKDOWN("MARKDOWN", "Nota"),
     PDF("PDF", "PDF"),
-    DOCX("DOCX", "Word (.docx)");
+    DOCX("DOCX", "Word (.docx)"),
+    EPUB("EPUB", "EPUB"),
+    MOBI("MOBI", "MOBI"),
+    CBZ("CBZ", "CBZ"),
+    FB2("FB2", "FB2");
+
+    val isEbookOrComic: Boolean
+        get() = this == EPUB || this == MOBI || this == CBZ || this == FB2
+
+    val fileExtension: String
+        get() = when (this) {
+            MARKDOWN -> "md"
+            PDF -> "pdf"
+            DOCX -> "docx"
+            EPUB -> "epub"
+            MOBI -> "mobi"
+            CBZ -> "cbz"
+            FB2 -> "fb2"
+        }
+
+    val mimeType: String
+        get() = when (this) {
+            MARKDOWN -> "text/markdown"
+            PDF -> "application/pdf"
+            DOCX -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            EPUB -> "application/epub+zip"
+            MOBI -> "application/x-mobipocket-ebook"
+            CBZ -> "application/vnd.comicbook+zip"
+            FB2 -> "application/x-fictionbook+xml"
+        }
 
     companion object {
         fun fromId(id: String?): NoteDocumentType {
             return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: MARKDOWN
         }
+
+        val EBOOK_COMIC_TYPES: Set<NoteDocumentType>
+            get() = setOf(EPUB, MOBI, CBZ, FB2)
     }
 }
 
@@ -60,6 +92,9 @@ val Note.isPdfDocument: Boolean
 
 val Note.isDocxDocument: Boolean
     get() = resolvedDocumentType == NoteDocumentType.DOCX
+
+val Note.isEbookOrComicDocument: Boolean
+    get() = resolvedDocumentType.isEbookOrComic
 
 private val noteIsoDateFormat = object : ThreadLocal<java.text.SimpleDateFormat>() {
     override fun initialValue(): java.text.SimpleDateFormat =

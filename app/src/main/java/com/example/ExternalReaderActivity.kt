@@ -41,6 +41,7 @@ import com.example.data.model.NoteDocumentType
 import com.example.data.model.resolvedDocumentType
 import com.example.ui.MainViewModel
 import com.example.ui.screens.organization.notes.ExternalDocxReaderScreen
+import com.example.ui.screens.organization.notes.ExternalEbookReaderScreen
 import com.example.ui.screens.organization.notes.ExternalPdfReaderScreen
 import com.example.ui.theme.CitraTheme
 import com.example.util.ExternalDocumentUriHelper
@@ -148,13 +149,19 @@ private fun IsolatedExternalReaderHost(
                 mimeTypeHint = mimeHint
             ) ?: return@withContext null
             val rawTitle = filename.substringBeforeLast(".").ifBlank { filename }.trim()
+            val emoji = when {
+                detected == NoteDocumentType.PDF -> "📄"
+                detected == NoteDocumentType.DOCX -> "📘"
+                detected == NoteDocumentType.CBZ -> "🖼️"
+                else -> "📚"
+            }
             Note(
                 id = 0L,
                 uuid = "",
                 title = rawTitle,
                 content = "",
                 category = "Geral",
-                iconEmoji = if (detected == NoteDocumentType.PDF) "📄" else "📘",
+                iconEmoji = emoji,
                 documentType = detected.id,
                 externalUri = uri.toString(),
                 updatedAt = System.currentTimeMillis()
@@ -213,6 +220,25 @@ private fun IsolatedExternalReaderHost(
         }
         note.resolvedDocumentType == NoteDocumentType.PDF -> {
             ExternalPdfReaderScreen(
+                note = note,
+                categories = emptyList(),
+                isTransientMode = true,
+                onSaveToVault = {
+                    onHandoffToMain(uri, mimeHint, MainViewModel.HANDOFF_ACTION_SAVE_TO_VAULT)
+                },
+                onConvertToNote = {
+                    onHandoffToMain(uri, mimeHint, MainViewModel.HANDOFF_ACTION_CONVERT_TO_NOTE)
+                },
+                onClose = onClose,
+                onChangeCategory = {},
+                onCreateCategory = { _, _ -> },
+                onRenameDocument = {},
+                onRelinkClick = {},
+                onRemoveLink = onClose
+            )
+        }
+        note.resolvedDocumentType.isEbookOrComic -> {
+            ExternalEbookReaderScreen(
                 note = note,
                 categories = emptyList(),
                 isTransientMode = true,

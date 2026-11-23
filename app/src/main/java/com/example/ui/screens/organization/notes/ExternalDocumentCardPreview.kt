@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.Icon
@@ -49,9 +51,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.NoteDocumentType
 import com.example.util.DocxBlock
 import com.example.util.DocxDocumentEngine
 import com.example.util.DocxRun
+import com.example.util.EbookComicEngine
 import com.example.util.ExternalDocumentUriHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
@@ -60,6 +64,20 @@ import kotlinx.coroutines.withContext
 
 val PdfSheetAccentColor = Color(0xFFDC2626)
 val DocxSheetAccentColor = Color(0xFF2563EB)
+val EpubSheetAccentColor = Color(0xFF059669)
+val MobiSheetAccentColor = Color(0xFFD97706)
+val CbzSheetAccentColor = Color(0xFF7C3AED)
+val Fb2SheetAccentColor = Color(0xFF0891B2)
+
+fun accentColorForDocType(docType: NoteDocumentType): Color = when (docType) {
+    NoteDocumentType.PDF -> PdfSheetAccentColor
+    NoteDocumentType.DOCX -> DocxSheetAccentColor
+    NoteDocumentType.EPUB -> EpubSheetAccentColor
+    NoteDocumentType.MOBI -> MobiSheetAccentColor
+    NoteDocumentType.CBZ -> CbzSheetAccentColor
+    NoteDocumentType.FB2 -> Fb2SheetAccentColor
+    NoteDocumentType.MARKDOWN -> PdfSheetAccentColor
+}
 
 data class DocxPreviewEntry(
     val lines: List<DocxPreviewItem>
@@ -108,9 +126,23 @@ object DocumentCardPreviewCache {
         }
     }
 
+    fun getEbookThumbnail(uri: String, docType: NoteDocumentType): Bitmap? =
+        synchronized(pdfThumbCache) {
+            pdfThumbCache.get("${docType.id}|$uri")?.takeIf { !it.isRecycled }
+        }
+
+    fun putEbookThumbnail(uri: String, docType: NoteDocumentType, bitmap: Bitmap) {
+        synchronized(pdfThumbCache) {
+            pdfThumbCache.put("${docType.id}|$uri", bitmap)
+        }
+    }
+
     fun invalidatePdfThumbnail(uri: String) {
         synchronized(pdfThumbCache) {
             pdfThumbCache.remove(uri)
+            NoteDocumentType.EBOOK_COMIC_TYPES.forEach { t ->
+                pdfThumbCache.remove("${t.id}|$uri")
+            }
         }
     }
 
@@ -242,12 +274,46 @@ object DocumentCardPreviewCache {
         return parsed
     }
 
+    suspend fun getOrLoadEbookThumbnail(
+        context: Context,
+        uriStr: String,
+        docType: NoteDocumentType
+    ): Bitmap? {
+        getEbookThumbnail(uriStr, docType)?.let { return it }
+        val rendered = withContext(Dispatchers.IO) {
+            previewSemaphore.withPermit {
+                getEbookThumbnail(uriStr, docType)?.let { return@withPermit it }
+                try {
+                    EbookComicEngine.renderCoverOrPageOneThumbnail(
+                        context = context,
+                        pathOrUri = uriStr,
+                        docType = docType
+                    )
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
+        if (rendered != null) {
+            putEbookThumbnail(uriStr, docType, rendered)
+        }
+        return rendered
+    }
+
     suspend fun prewarmDocumentPreview(context: Context, uriStr: String, isPdf: Boolean) {
+        prewarmDocumentPreview(
+            context = context,
+            uriStr = uriStr,
+            docType = if (isPdf) NoteDocumentType.PDF else NoteDocumentType.DOCX
+        )
+    }
+
+    suspend fun prewarmDocumentPreview(context: Context, uriStr: String, docType: NoteDocumentType) {
         if (uriStr.isBlank()) return
-        if (isPdf) {
-            getOrRenderPdfThumbnail(context, uriStr)
-        } else {
-            getOrParseDocxPreview(context, uriStr)
+        when {
+            docType == NoteDocumentType.PDF -> getOrRenderPdfThumbnail(context, uriStr)
+            docType == NoteDocumentType.DOCX -> getOrParseDocxPreview(context, uriStr)
+            docType.isEbookOrComic -> getOrLoadEbookThumbnail(context, uriStr, docType)
         }
     }
 }
@@ -549,5 +615,124 @@ fun DocxPageOnePreviewBox(
                 )
             )
         }
+    }
+}
+
+@Composable
+fun EbookPageOnePreviewBox(
+    externalUri: String?,
+    docType: NoteDocumentType,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var previewBitmap by remember(externalUri, docType) {
+        mutableStateOf(externalUri?.let { DocumentCardPreviewCache.getEbookThumbnail(it, docType) })
+    }
+    var loadFailed by remember(externalUri, docType) { mutableStateOf(false) }
+
+    LaunchedEffect(externalUri, docType) {
+        val uriStr = externalUri?.trim()
+        if (uriStr.isNullOrBlank()) {
+            loadFailed = true
+            return@LaunchedEffect
+        }
+        val rendered = DocumentCardPreviewCache.getOrLoadEbookThumbnail(context, uriStr, docType)
+        if (rendered != null) {
+            previewBitmap = rendered
+            loadFailed = false
+        } else {
+            loadFailed = true
+        }
+    }
+
+    val accent = accentColorForDocType(docType)
+    val sheetShape = RoundedCornerShape(10.dp)
+    Box(
+        modifier = modifier
+            .clip(sheetShape)
+            .background(Color.White)
+            .border(1.dp, accent.copy(alpha = 0.35f), sheetShape)
+    ) {
+        val bmp = previewBitmap
+        if (bmp != null && !bmp.isRecycled) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = "Prévia da capa ou página 1 (${docType.label})",
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = if (docType == NoteDocumentType.CBZ) Icons.Default.AutoStories else Icons.Default.MenuBook,
+                    contentDescription = "Documento ${docType.label}",
+                    tint = accent.copy(alpha = 0.85f),
+                    modifier = Modifier.size(if (compact) 20.dp else 26.dp)
+                )
+                if (!compact) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = if (loadFailed) "${docType.label} · Página 1" else "Carregando capa...",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF475569),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(bottomEnd = 8.dp),
+            color = accent,
+            modifier = Modifier.align(Alignment.TopStart)
+        ) {
+            Text(
+                text = docType.label,
+                fontSize = if (compact) 7.5.sp else 9.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                modifier = Modifier.padding(
+                    horizontal = if (compact) 5.dp else 7.dp,
+                    vertical = if (compact) 1.5.dp else 2.5.dp
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun ExternalDocumentPageOnePreviewBox(
+    externalUri: String?,
+    docType: NoteDocumentType,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    when {
+        docType == NoteDocumentType.PDF -> PdfPageOnePreviewBox(
+            externalUri = externalUri,
+            modifier = modifier,
+            compact = compact
+        )
+        docType == NoteDocumentType.DOCX -> DocxPageOnePreviewBox(
+            externalUri = externalUri,
+            modifier = modifier,
+            compact = compact
+        )
+        else -> EbookPageOnePreviewBox(
+            externalUri = externalUri,
+            docType = docType,
+            modifier = modifier,
+            compact = compact
+        )
     }
 }

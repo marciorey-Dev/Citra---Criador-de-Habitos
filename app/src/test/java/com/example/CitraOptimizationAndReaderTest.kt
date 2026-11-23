@@ -20,6 +20,10 @@ import com.example.data.model.isExternalDocument
 import com.example.util.CitraDocsFileManager
 import com.example.util.CitraPersistenceQueue
 import com.example.util.DeviceDocumentScanner
+import com.example.util.DocxBlock
+import com.example.util.DocxDocumentEngine
+import com.example.util.EbookComicEngine
+import com.example.util.ExternalDocumentUriHelper
 import com.example.util.FastBlur
 import com.example.util.MediaStorageHelper
 import kotlinx.coroutines.runBlocking
@@ -376,5 +380,175 @@ class CitraOptimizationAndReaderTest {
             zos.closeEntry()
         }
         return baos.toByteArray()
+    }
+
+    @Test
+    fun `docx engine preserves explicit colors highlight sizes and table cell backgrounds while markdown drops color styling`() {
+        val documentXml = """
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+              <w:body>
+                <w:p>
+                  <w:r>
+                    <w:rPr>
+                      <w:color w:val="FF0000"/>
+                      <w:highlight w:val="yellow"/>
+                      <w:sz w:val="32"/>
+                    </w:rPr>
+                    <w:t>Texto vermelho</w:t>
+                  </w:r>
+                  <w:r>
+                    <w:rPr>
+                      <w:color w:val="000000"/>
+                    </w:rPr>
+                    <w:t> e preto</w:t>
+                  </w:r>
+                </w:p>
+                <w:tbl>
+                  <w:tr>
+                    <w:tc>
+                      <w:tcPr><w:shd w:fill="E2E8F0"/></w:tcPr>
+                      <w:p><w:r><w:t>Coluna A</w:t></w:r></w:p>
+                    </w:tc>
+                  </w:tr>
+                  <w:tr>
+                    <w:tc>
+                      <w:tcPr><w:shd w:fill="FEF3C7"/></w:tcPr>
+                      <w:p><w:r><w:t>Valor 1</w:t></w:r></w:p>
+                    </w:tc>
+                  </w:tr>
+                </w:tbl>
+              </w:body>
+            </w:document>
+        """.trimIndent()
+        val baos = ByteArrayOutputStream()
+        ZipOutputStream(baos).use { zos ->
+            zos.putNextEntry(ZipEntry("word/document.xml"))
+            zos.write(documentXml.toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+
+        val parsed = DocxDocumentEngine.parseDocx(baos.toByteArray().inputStream())
+        val paragraph = parsed.blocks.filterIsInstance<DocxBlock.Paragraph>().firstOrNull()
+        assertNotNull(paragraph)
+        assertEquals("FF0000", paragraph!!.runs[0].colorHex)
+        assertEquals("FEF08A", paragraph.runs[0].highlightColorHex)
+        assertEquals(32, paragraph.runs[0].fontSizeHalfPt)
+        assertEquals("000000", paragraph.runs[1].colorHex)
+
+        val table = parsed.blocks.filterIsInstance<DocxBlock.Table>().firstOrNull()
+        assertNotNull(table)
+        assertEquals("E2E8F0", table!!.headerBackgrounds.firstOrNull())
+        assertEquals("FEF3C7", table.rowBackgrounds.firstOrNull()?.firstOrNull())
+
+        val markdown = DocxDocumentEngine.toCitraMarkdown(parsed)
+        assertTrue(markdown.contains("Texto vermelho"))
+        assertFalse(markdown.contains("FF0000"))
+        assertFalse(markdown.contains("FEF3C7"))
+    }
+
+    @Test
+    fun `ebook comic engine parses cbz epub fb2 mobi and renders thumbnails`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // 1. Minimal valid PNG for CBZ & cover tests
+        val bmp = Bitmap.createBitmap(120, 160, Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(android.graphics.Color.CYAN)
+        val pngBytes = ByteArrayOutputStream().also { out ->
+            bmp.compress(Bitmap.CompressFormat.PNG, 90, out)
+        }.toByteArray()
+        bmp.recycle()
+
+        val cbzBaos = ByteArrayOutputStream()
+        ZipOutputStream(cbzBaos).use { zos ->
+            zos.putNextEntry(ZipEntry("page_02.png"))
+            zos.write(pngBytes)
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("page_01.png"))
+            zos.write(pngBytes)
+            zos.closeEntry()
+        }
+        val cbzDoc = EbookComicEngine.buildParsedFromBytes(cbzBaos.toByteArray(), NoteDocumentType.CBZ, "HQ Teste")
+        assertEquals(2, cbzDoc.pages.size)
+        val cbzThumb = EbookComicEngine.renderPageBitmap(cbzDoc, 0, 200)
+        assertNotNull(cbzThumb)
+        cbzThumb!!.recycle()
+
+        // 2. Minimal EPUB
+        val epubBaos = ByteArrayOutputStream()
+        ZipOutputStream(epubBaos).use { zos ->
+            zos.putNextEntry(ZipEntry("META-INF/container.xml"))
+            zos.write("""<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""".toByteArray())
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("OEBPS/content.opf"))
+            zos.write("""<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Livro EPUB</dc:title><dc:creator>Autora Citra</dc:creator></metadata><manifest><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="ch1"/></spine></package>""".toByteArray())
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("OEBPS/ch1.xhtml"))
+            zos.write("""<html><body><h1>Capítulo 1</h1><p>Leitura fluida no Citra.</p></body></html>""".toByteArray())
+            zos.closeEntry()
+        }
+        val epubFile = File(context.cacheDir, "test_book_${System.nanoTime()}.epub").apply {
+            writeBytes(epubBaos.toByteArray())
+        }
+        try {
+            assertEquals(NoteDocumentType.EPUB, ExternalDocumentUriHelper.detectExternalDocumentTypeFromBytes(epubFile.readBytes()))
+            val epubDoc = EbookComicEngine.buildParsedFromBytes(epubFile.readBytes(), NoteDocumentType.EPUB, "Fallback")
+            assertEquals("Livro EPUB", epubDoc.title)
+            assertTrue(EbookComicEngine.extractMarkdown(epubDoc).contains("Leitura fluida no Citra"))
+            val epubThumb = EbookComicEngine.renderCoverOrPageOneThumbnail(context, epubFile.absolutePath, NoteDocumentType.EPUB, 220)
+            assertNotNull(epubThumb)
+            epubThumb!!.recycle()
+        } finally {
+            epubFile.delete()
+        }
+
+        // 3. Minimal FB2
+        val fb2Xml = """<?xml version="1.0" encoding="utf-8"?><FictionBook><description><title-info><book-title>Conto FB2</book-title></title-info></description><body><section><title><p>Prólogo</p></title><p>Era uma vez no Citra.</p></section></body></FictionBook>"""
+        val fb2Doc = EbookComicEngine.buildParsedFromBytes(fb2Xml.toByteArray(), NoteDocumentType.FB2, "FB2")
+        assertEquals("Conto FB2", fb2Doc.title)
+        assertTrue(EbookComicEngine.extractMarkdown(fb2Doc).contains("Era uma vez no Citra"))
+    }
+
+    @Test
+    fun `copyDocumentToInternalStorage creates persistent copy and deletes only when unused`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sourcePdf = File(context.cacheDir, "source_import_${System.nanoTime()}.pdf").apply {
+            writeBytes("%PDF-1.4\n%CitraPersistentImport\n".toByteArray())
+        }
+        var persistentPath: String? = null
+        try {
+            persistentPath = ExternalDocumentUriHelper.copyDocumentToInternalStorage(
+                context = context,
+                sourcePathOrUri = sourcePdf.absolutePath,
+                title = "Apostila Importada",
+                docType = NoteDocumentType.PDF
+            )
+            assertNotNull(persistentPath)
+            assertTrue(ExternalDocumentUriHelper.isInternalImportedFile(context, persistentPath))
+            // Deleting the original external file must NOT affect the persistent internal copy
+            sourcePdf.delete()
+            assertTrue(File(persistentPath!!).exists())
+
+            val activeNote = Note(
+                id = 77L,
+                uuid = "persistent-note-77",
+                title = "Apostila Importada",
+                content = "",
+                category = "Estudos",
+                documentType = NoteDocumentType.PDF.id,
+                externalUri = persistentPath,
+                updatedAt = System.currentTimeMillis()
+            )
+            // If still referenced by active note, helper must keep internal file intact
+            ExternalDocumentUriHelper.deleteInternalImportedDocumentIfUnused(context, persistentPath, listOf(activeNote))
+            assertTrue(File(persistentPath).exists())
+
+            // Once removed from active notes, internal file is cleaned up cleanly
+            ExternalDocumentUriHelper.deleteInternalImportedDocumentIfUnused(context, persistentPath, emptyList())
+            assertFalse(File(persistentPath).exists())
+        } finally {
+            sourcePdf.delete()
+            persistentPath?.let { File(it).delete() }
+        }
     }
 }

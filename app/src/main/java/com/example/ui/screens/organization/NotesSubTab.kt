@@ -62,6 +62,7 @@ import com.example.data.model.NoteDocumentType
 import com.example.data.model.NoteVersion
 import com.example.data.model.TaskPriority
 import com.example.data.model.isDocxDocument
+import com.example.data.model.isEbookOrComicDocument
 import com.example.data.model.isExternalDocument
 import com.example.data.model.isPdfDocument
 import com.example.data.model.isReadyForMainList
@@ -72,9 +73,11 @@ import com.example.ui.components.AddCategoryDialog
 import com.example.ui.components.ConfirmDeleteDialog
 import com.example.ui.screens.organization.notes.CategoryNoteStack
 import com.example.ui.screens.organization.notes.DocumentExplorerDialog
-import com.example.ui.screens.organization.notes.DocxPageOnePreviewBox
 import com.example.ui.screens.organization.notes.DocxSheetAccentColor
+import com.example.ui.screens.organization.notes.EpubSheetAccentColor
 import com.example.ui.screens.organization.notes.ExternalDocxReaderScreen
+import com.example.ui.screens.organization.notes.ExternalDocumentPageOnePreviewBox
+import com.example.ui.screens.organization.notes.ExternalEbookReaderScreen
 import com.example.ui.screens.organization.notes.ExternalPdfReaderScreen
 import com.example.ui.screens.organization.notes.FullScreenNoteEditor
 import com.example.ui.screens.organization.notes.NoteCategoryPickerDialog
@@ -88,9 +91,9 @@ import com.example.ui.screens.organization.notes.NoteSortOption
 import com.example.ui.screens.organization.notes.PaperNoteColors
 import com.example.ui.screens.organization.notes.PaperNotePalette
 import com.example.ui.screens.organization.notes.PaperNoteSurface
-import com.example.ui.screens.organization.notes.PdfPageOnePreviewBox
 import com.example.ui.screens.organization.notes.PdfSheetAccentColor
 import com.example.ui.screens.organization.notes.SmoothMarkdownConverter
+import com.example.ui.screens.organization.notes.accentColorForDocType
 import com.example.ui.screens.organization.notes.filterNotesByDocumentType
 import com.example.ui.screens.organization.notes.groupNotesByCategory
 import com.example.ui.screens.organization.notes.rememberSelectionWobbleAngle
@@ -151,6 +154,7 @@ fun NotesSubTab(
     var activeNoteToEdit by remember { mutableStateOf<Note?>(null) }
     var activePdfToRead by remember { mutableStateOf<Note?>(null) }
     var activeDocxToRead by remember { mutableStateOf<Note?>(null) }
+    var activeEbookToRead by remember { mutableStateOf<Note?>(null) }
     var activeDocIsTransient by remember { mutableStateOf(false) }
     var isConvertingExternalDoc by remember { mutableStateOf(false) }
     var noteForCategoryPicker by remember { mutableStateOf<Note?>(null) }
@@ -202,24 +206,36 @@ fun NotesSubTab(
 
     val openNoteItem: (Note) -> Unit = { target ->
         activeDocIsTransient = false
-        when (target.resolvedDocumentType) {
-            NoteDocumentType.PDF -> {
+        val docType = target.resolvedDocumentType
+        when {
+            docType == NoteDocumentType.PDF -> {
                 activeNoteToEdit = null
                 isCreatingNew = false
                 isCreateMenuExpanded = false
                 activeDocxToRead = null
+                activeEbookToRead = null
                 activePdfToRead = target
             }
-            NoteDocumentType.DOCX -> {
+            docType == NoteDocumentType.DOCX -> {
                 activeNoteToEdit = null
                 isCreatingNew = false
                 isCreateMenuExpanded = false
                 activePdfToRead = null
+                activeEbookToRead = null
                 activeDocxToRead = target
             }
-            NoteDocumentType.MARKDOWN -> {
+            docType.isEbookOrComic -> {
+                activeNoteToEdit = null
+                isCreatingNew = false
+                isCreateMenuExpanded = false
                 activePdfToRead = null
                 activeDocxToRead = null
+                activeEbookToRead = target
+            }
+            else -> {
+                activePdfToRead = null
+                activeDocxToRead = null
+                activeEbookToRead = null
                 activeNoteToEdit = target
                 isCreatingNew = false
                 isCreateMenuExpanded = false
@@ -265,6 +281,19 @@ fun NotesSubTab(
         }
     }
 
+    val pickEbookDocsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            if (uris.size == 1) recentPickerDocType = null
+            viewModel.openOrSelectPickedExternalDocuments(
+                uris = uris,
+                targetType = NoteDocumentType.EPUB,
+                context = context
+            )
+        }
+    }
+
     val pickDocumentTreeLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { treeUri: Uri? ->
@@ -294,6 +323,7 @@ fun NotesSubTab(
             viewModel.relinkExternalDocumentUri(target, uri, context) { updated ->
                 if (activePdfToRead?.id == updated.id) activePdfToRead = updated
                 if (activeDocxToRead?.id == updated.id) activeDocxToRead = updated
+                if (activeEbookToRead?.id == updated.id) activeEbookToRead = updated
             }
         }
     }
@@ -306,6 +336,7 @@ fun NotesSubTab(
         if (openCreateTrigger) {
             activePdfToRead = null
             activeDocxToRead = null
+            activeEbookToRead = null
             activeDocIsTransient = false
             isCreateMenuExpanded = false
             isCreatingNew = true
@@ -343,19 +374,30 @@ fun NotesSubTab(
         }
     }
 
-    // Respond to 2-column Document Explorer transient open (read-only without creating a DB link)
+    // Respond to 2-column Document Explorer transient open (read-only without importing yet)
     LaunchedEffect(transientDocToOpen) {
         transientDocToOpen?.let { doc ->
             activeNoteToEdit = null
             isCreatingNew = false
             isCreateMenuExpanded = false
             activeDocIsTransient = true
-            if (doc.resolvedDocumentType == NoteDocumentType.PDF) {
-                activeDocxToRead = null
-                activePdfToRead = doc
-            } else {
-                activePdfToRead = null
-                activeDocxToRead = doc
+            val docType = doc.resolvedDocumentType
+            when {
+                docType == NoteDocumentType.PDF -> {
+                    activeDocxToRead = null
+                    activeEbookToRead = null
+                    activePdfToRead = doc
+                }
+                docType.isEbookOrComic -> {
+                    activePdfToRead = null
+                    activeDocxToRead = null
+                    activeEbookToRead = doc
+                }
+                else -> {
+                    activePdfToRead = null
+                    activeEbookToRead = null
+                    activeDocxToRead = doc
+                }
             }
             viewModel.clearTransientExternalDocToOpen()
         }
@@ -402,7 +444,7 @@ fun NotesSubTab(
 
     val pomodoroState by viewModel.pomodoroState.collectAsState()
     val isEditingNote = isCreatingNew || activeNoteToEdit != null
-    val isFullScreenOverlayOpen = isEditingNote || activePdfToRead != null || activeDocxToRead != null
+    val isFullScreenOverlayOpen = isEditingNote || activePdfToRead != null || activeDocxToRead != null || activeEbookToRead != null
 
     LaunchedEffect(isFullScreenOverlayOpen) {
         viewModel.setNoteEditorOpen(isFullScreenOverlayOpen)
@@ -517,13 +559,30 @@ fun NotesSubTab(
                 }
             },
             onSaveDocxEdits = { editsByParagraphIndex, onDone, onErr ->
-                viewModel.saveEditedDocxDocument(
-                    note = docxNote,
-                    editsByParagraphIndex = editsByParagraphIndex,
-                    context = context,
-                    onSuccess = onDone,
-                    onError = onErr
-                )
+                if (activeDocIsTransient && docxNote.id == 0L) {
+                    viewModel.saveTransientDocumentToVault(
+                        docNote = docxNote,
+                        preferredCategory = selectedCategoryFilter
+                    ) { saved ->
+                        activeDocIsTransient = false
+                        activeDocxToRead = saved
+                        viewModel.saveEditedDocxDocument(
+                            note = saved,
+                            editsByParagraphIndex = editsByParagraphIndex,
+                            context = context,
+                            onSuccess = onDone,
+                            onError = onErr
+                        )
+                    }
+                } else {
+                    viewModel.saveEditedDocxDocument(
+                        note = docxNote,
+                        editsByParagraphIndex = editsByParagraphIndex,
+                        context = context,
+                        onSuccess = onDone,
+                        onError = onErr
+                    )
+                }
             },
             onRelinkClick = {
                 noteAwaitingRelink = docxNote
@@ -548,6 +607,75 @@ fun NotesSubTab(
                         onConverted = { convertedNote ->
                             isConvertingExternalDoc = false
                             activeDocxToRead = null
+                            activeDocIsTransient = false
+                            activeNoteToEdit = convertedNote
+                            isCreatingNew = false
+                        },
+                        onError = {
+                            isConvertingExternalDoc = false
+                        }
+                    )
+                }
+            }
+        )
+        return
+    }
+
+    // Full-screen Ebook & Comic Reader (EPUB, MOBI, CBZ, FB2)
+    activeEbookToRead?.let { ebookNote ->
+        ExternalEbookReaderScreen(
+            note = ebookNote,
+            categories = categories,
+            isConverting = isConvertingExternalDoc,
+            isTransientMode = activeDocIsTransient,
+            onSaveToVault = if (activeDocIsTransient) {
+                {
+                    viewModel.saveTransientDocumentToVault(
+                        docNote = ebookNote,
+                        preferredCategory = selectedCategoryFilter
+                    ) { saved ->
+                        activeDocIsTransient = false
+                        activeEbookToRead = saved
+                    }
+                }
+            } else null,
+            onClose = {
+                activeEbookToRead = null
+                activeDocIsTransient = false
+                viewModel.setNoteEditorOpen(false)
+            },
+            onChangeCategory = { newCat ->
+                viewModel.updateNoteCategory(ebookNote, newCat) { updated ->
+                    activeEbookToRead = updated
+                }
+            },
+            onCreateCategory = { name, emoji -> viewModel.addCustomCategory(name, emoji) },
+            onRenameDocument = { newTitle ->
+                viewModel.renameExternalDocument(ebookNote, newTitle, context) { updated ->
+                    activeEbookToRead = updated
+                }
+            },
+            onRelinkClick = {
+                noteAwaitingRelink = ebookNote
+                relinkExternalDocLauncher.launch(ExternalDocumentUriHelper.EBOOK_PICKER_MIME_TYPES)
+            },
+            onRemoveLink = {
+                val wasTransient = activeDocIsTransient
+                activeEbookToRead = null
+                activeDocIsTransient = false
+                if (!wasTransient && ebookNote.id > 0L) {
+                    noteToDelete = ebookNote
+                }
+            },
+            onConvertToNote = {
+                if (!isConvertingExternalDoc) {
+                    isConvertingExternalDoc = true
+                    viewModel.convertExternalDocumentToEditableNote(
+                        docNote = ebookNote,
+                        context = context,
+                        onConverted = { convertedNote ->
+                            isConvertingExternalDoc = false
+                            activeEbookToRead = null
                             activeDocIsTransient = false
                             activeNoteToEdit = convertedNote
                             isCreatingNew = false
@@ -846,6 +974,23 @@ fun NotesSubTab(
                         onClick = {
                             viewModel.setSelectedNoteDocumentFilter(
                                 if (isSelected) NoteDocumentFilter.ALL else NoteDocumentFilter.DOCX
+                            )
+                        }
+                    )
+                }
+
+                item(key = "filter_ebooks") {
+                    val ebookCount = readyNotes.count { it.isEbookOrComicDocument }
+                    val isSelected = selectedDocFilter == NoteDocumentFilter.EBOOK
+                    FolderPillChip(
+                        label = "Ebooks",
+                        count = ebookCount,
+                        icon = Icons.Default.MenuBook,
+                        selected = isSelected,
+                        iconTint = if (isSelected) MaterialTheme.colorScheme.onSecondary else EpubSheetAccentColor,
+                        onClick = {
+                            viewModel.setSelectedNoteDocumentFilter(
+                                if (isSelected) NoteDocumentFilter.ALL else NoteDocumentFilter.EBOOK
                             )
                         }
                     )
@@ -1599,6 +1744,18 @@ fun NotesSubTab(
                     }
                 )
                 NotesSpeedDialItem(
+                    label = "Ebooks & Comics",
+                    subtitle = "EPUB · MOBI · CBZ · FB2",
+                    icon = Icons.Default.MenuBook,
+                    buttonColor = dialColor,
+                    iconTint = dialIconTint,
+                    testTag = "speed_dial_ebook",
+                    onClick = {
+                        isCreateMenuExpanded = false
+                        recentPickerDocType = NoteDocumentType.EPUB
+                    }
+                )
+                NotesSpeedDialItem(
                     label = "Word (.docx)",
                     icon = Icons.Default.Article,
                     buttonColor = dialColor,
@@ -1678,10 +1835,16 @@ fun NotesSubTab(
             authorizedTreeUris = authorizedDocTreeUris,
             existingNotes = notes + archivedNotes,
             onImportFromDevice = {
-                if (targetType == NoteDocumentType.PDF) {
-                    pickPdfDocsLauncher.launch(ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES)
-                } else {
-                    pickDocxDocsLauncher.launch(ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES)
+                when {
+                    targetType == NoteDocumentType.PDF -> {
+                        pickPdfDocsLauncher.launch(ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES)
+                    }
+                    targetType.isEbookOrComic -> {
+                        pickEbookDocsLauncher.launch(ExternalDocumentUriHelper.EBOOK_PICKER_MIME_TYPES)
+                    }
+                    else -> {
+                        pickDocxDocsLauncher.launch(ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES)
+                    }
                 }
             },
             onLinkFolder = {
@@ -1706,7 +1869,7 @@ fun NotesSubTab(
     if (showBatchDeleteConfirm && selectedNotes.isNotEmpty()) {
         ConfirmDeleteDialog(
             title = "Mover ${selectedNotes.size} para a Lixeira?",
-            message = "Os itens selecionados serão movidos para a lixeira. Documentos PDF e Word (.docx) originais no aparelho nunca são apagados.",
+            message = "Os itens selecionados serão movidos para a lixeira. Seus arquivos originais no aparelho nunca são apagados.",
             confirmButtonText = "Mover para Lixeira",
             onConfirm = {
                 viewModel.moveNotesToTrash(selectedNotes)
@@ -1829,11 +1992,15 @@ fun NotesSubTab(
             title = when (target.resolvedDocumentType) {
                 NoteDocumentType.PDF -> "Remover PDF"
                 NoteDocumentType.DOCX -> "Remover Word (.docx)"
+                NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 ->
+                    "Remover ${target.resolvedDocumentType.label}"
                 NoteDocumentType.MARKDOWN -> "Mover para a Lixeira"
             },
             message = when (target.resolvedDocumentType) {
                 NoteDocumentType.PDF -> "Deseja mover este PDF ('${target.title}') para a lixeira? O arquivo original no seu aparelho não será apagado."
                 NoteDocumentType.DOCX -> "Deseja mover este Word (.docx) ('${target.title}') para a lixeira? O arquivo original no seu aparelho não será apagado."
+                NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 ->
+                    "Deseja mover '${target.title}' (${target.resolvedDocumentType.label}) para a lixeira? O arquivo original no seu aparelho não será apagado."
                 NoteDocumentType.MARKDOWN -> "Deseja mover a anotação '${target.title}' para a lixeira? Ela ficará disponível por 30 dias para restauração."
             },
             confirmButtonText = "Mover para Lixeira",
@@ -1849,7 +2016,11 @@ fun NotesSubTab(
     noteToRenameExternal?.let { target ->
         RenameExternalDocumentDialog(
             currentTitle = target.title,
-            docTypeLabel = if (target.isPdfDocument) "PDF" else "Word (.docx)",
+            docTypeLabel = when (target.resolvedDocumentType) {
+                NoteDocumentType.PDF -> "PDF"
+                NoteDocumentType.DOCX -> "Word (.docx)"
+                else -> target.resolvedDocumentType.label
+            },
             onDismiss = { noteToRenameExternal = null },
             onConfirm = { newTitle ->
                 viewModel.renameExternalDocument(target, newTitle, context)
@@ -1888,10 +2059,11 @@ fun NotesSubTab(
             onRelinkExternal = if (note.isExternalDocument) {
                 {
                     noteAwaitingRelink = note
-                    val mime = if (note.isPdfDocument) {
-                        ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES
-                    } else {
-                        ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES
+                    val docType = note.resolvedDocumentType
+                    val mime = when {
+                        docType == NoteDocumentType.PDF -> ExternalDocumentUriHelper.PDF_PICKER_MIME_TYPES
+                        docType.isEbookOrComic -> ExternalDocumentUriHelper.EBOOK_PICKER_MIME_TYPES
+                        else -> ExternalDocumentUriHelper.DOCX_PICKER_MIME_TYPES
                     }
                     relinkExternalDocLauncher.launch(mime)
                 }
@@ -2272,34 +2444,36 @@ fun SquareNoteCard(
                             }
                         }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(0.dp)
-                        ) {
-                            IconButton(
-                                onClick = onTogglePin,
-                                modifier = Modifier.size(26.dp)
+                        if (!note.isExternalDocument) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
-                                Icon(
-                                    imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
-                                    contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                    tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                                IconButton(
+                                    onClick = onTogglePin,
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                        contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                        tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
 
-                            IconButton(
-                                onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .testTag("note_more_btn_${note.id}")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Opções",
-                                    tint = paperColors.mutedIconColor,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                IconButton(
+                                    onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .testTag("note_more_btn_${note.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Opções",
+                                        tint = paperColors.mutedIconColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -2317,22 +2491,54 @@ fun SquareNoteCard(
                         )
                     }
 
-                    // External PDF / DOCX Page 1 mini-sheet preview inside SquareNoteCard
+                    // External Document Page 1 mini-sheet preview with Pin & 3-dots overlaid cleanly at TopEnd
                     if (note.isExternalDocument) {
-                        if (note.isPdfDocument) {
-                            PdfPageOnePreviewBox(
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(132.dp)
+                        ) {
+                            ExternalDocumentPageOnePreviewBox(
                                 externalUri = note.externalUri,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(104.dp)
+                                docType = note.resolvedDocumentType,
+                                modifier = Modifier.fillMaxSize()
                             )
-                        } else {
-                            DocxPageOnePreviewBox(
-                                externalUri = note.externalUri,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(104.dp)
-                            )
+                            Surface(
+                                shape = RoundedCornerShape(bottomStart = 10.dp, topEnd = 10.dp),
+                                color = Color.Black.copy(alpha = 0.58f),
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = onTogglePin,
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                            contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                            tint = if (note.isPinned) paperColors.accentColor else Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .testTag("note_more_btn_${note.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "Opções",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -2363,30 +2569,32 @@ fun SquareNoteCard(
                     }
                 }
 
-                // Bottom row: Schedule Date + Media Badges / Document Type Tag
+                // Bottom row: Schedule Date (hidden for external docs so preview stands out) + Media Badges / Document Type Tag
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = if (note.isExternalDocument) Arrangement.End else Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Schedule,
-                            contentDescription = null,
-                            tint = paperColors.metaTextColor,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = dateText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = paperColors.metaTextColor
-                        )
+                    if (!note.isExternalDocument) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = paperColors.metaTextColor,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = dateText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = paperColors.metaTextColor
+                            )
+                        }
                     }
 
                     Row(
@@ -2394,11 +2602,12 @@ fun SquareNoteCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (note.isExternalDocument) {
+                            val docType = note.resolvedDocumentType
                             Text(
-                                text = if (note.isPdfDocument) "PDF" else "DOCX",
+                                text = docType.label,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = if (note.isPdfDocument) PdfSheetAccentColor else DocxSheetAccentColor
+                                color = accentColorForDocType(docType)
                             )
                         }
                         if (hasImage) {
@@ -2529,49 +2738,82 @@ fun SmallSquareNoteCard(
                     }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    if (note.isPinned) {
-                        Icon(
-                            imageVector = Icons.Filled.PushPin,
-                            contentDescription = "Fixada",
-                            tint = paperColors.accentColor,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
-                        modifier = Modifier.size(20.dp)
+                if (!note.isExternalDocument) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Opções",
-                            tint = paperColors.mutedIconColor,
-                            modifier = Modifier.size(14.dp)
-                        )
+                        if (note.isPinned) {
+                            Icon(
+                                imageVector = Icons.Filled.PushPin,
+                                contentDescription = "Fixada",
+                                tint = paperColors.accentColor,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Opções",
+                                tint = paperColors.mutedIconColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
 
             if (note.isExternalDocument) {
-                if (note.isPdfDocument) {
-                    PdfPageOnePreviewBox(
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                ) {
+                    ExternalDocumentPageOnePreviewBox(
                         externalUri = note.externalUri,
+                        docType = note.resolvedDocumentType,
                         compact = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
+                        modifier = Modifier.fillMaxSize()
                     )
-                } else {
-                    DocxPageOnePreviewBox(
-                        externalUri = note.externalUri,
-                        compact = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(bottomStart = 8.dp, topEnd = 10.dp),
+                        color = Color.Black.copy(alpha = 0.58f),
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(1.dp),
+                            modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
+                        ) {
+                            IconButton(
+                                onClick = onTogglePin,
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                    contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                    tint = if (note.isPinned) paperColors.accentColor else Color.White,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .testTag("note_more_btn_${note.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Opções",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -2580,17 +2822,19 @@ fun SmallSquareNoteCard(
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Bold,
                 color = paperColors.onBackgroundColor,
-                maxLines = if (note.isExternalDocument) 2 else 3,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 lineHeight = 13.5.sp
             )
 
-            Text(
-                text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = paperColors.metaTextColor
-            )
+            if (!note.isExternalDocument) {
+                Text(
+                    text = SimpleDateFormat("dd/MM", Locale.getDefault()).format(Date(note.updatedAt)),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = paperColors.metaTextColor
+                )
+            }
         }
     }
 }
@@ -2697,32 +2941,34 @@ fun DetailNoteCard(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = paperColors.metaTextColor
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
-                        Icon(
-                            imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
-                            contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                            tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
-                            modifier = Modifier.size(16.dp)
+                if (!note.isExternalDocument) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(note.updatedAt)),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = paperColors.metaTextColor
                         )
-                    }
-                    IconButton(
-                        onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
-                        modifier = Modifier.size(26.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Opções",
-                            tint = paperColors.mutedIconColor,
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Opções",
+                                tint = paperColors.mutedIconColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -2738,20 +2984,49 @@ fun DetailNoteCard(
 
             if (note.isExternalDocument) {
                 Spacer(modifier = Modifier.height(8.dp))
-                if (note.isPdfDocument) {
-                    PdfPageOnePreviewBox(
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(136.dp)
+                ) {
+                    ExternalDocumentPageOnePreviewBox(
                         externalUri = note.externalUri,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(110.dp)
+                        docType = note.resolvedDocumentType,
+                        modifier = Modifier.fillMaxSize()
                     )
-                } else {
-                    DocxPageOnePreviewBox(
-                        externalUri = note.externalUri,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(110.dp)
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(bottomStart = 10.dp, topEnd = 10.dp),
+                        color = Color.Black.copy(alpha = 0.58f),
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 2.dp)
+                        ) {
+                            IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
+                                Icon(
+                                    imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                    contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                    tint = if (note.isPinned) paperColors.accentColor else Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .testTag("note_more_btn_${note.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Opções",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             } else if (note.content.isNotBlank()) {
                 Spacer(modifier = Modifier.height(6.dp))
@@ -2852,20 +3127,45 @@ fun ListNoteCard(
                     Box(
                         modifier = Modifier
                             .padding(end = 10.dp)
-                            .size(width = 46.dp, height = 58.dp)
+                            .size(width = 64.dp, height = 80.dp)
                     ) {
-                        if (note.isPdfDocument) {
-                            PdfPageOnePreviewBox(
-                                externalUri = note.externalUri,
-                                compact = true,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            DocxPageOnePreviewBox(
-                                externalUri = note.externalUri,
-                                compact = true,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                        ExternalDocumentPageOnePreviewBox(
+                            externalUri = note.externalUri,
+                            docType = note.resolvedDocumentType,
+                            compact = true,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(bottomStart = 8.dp, topEnd = 10.dp),
+                            color = Color.Black.copy(alpha = 0.58f),
+                            modifier = Modifier.align(Alignment.TopEnd)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
+                            ) {
+                                IconButton(onClick = onTogglePin, modifier = Modifier.size(20.dp)) {
+                                    Icon(
+                                        imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                        contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                        tint = if (note.isPinned) paperColors.accentColor else Color.White,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .testTag("note_more_btn_${note.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Opções",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 } else {
@@ -2894,11 +3194,12 @@ fun ListNoteCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     if (note.isExternalDocument) {
+                        val docType = note.resolvedDocumentType
                         Text(
-                            text = "${if (note.isPdfDocument) "PDF" else "Word (.docx)"} · ${note.category}",
+                            text = "${docType.label} · ${note.category}",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (note.isPdfDocument) PdfSheetAccentColor else DocxSheetAccentColor,
+                            color = accentColorForDocType(docType),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -2906,26 +3207,28 @@ fun ListNoteCard(
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
-                    Icon(
-                        imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
-                        contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                        tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+            if (!note.isExternalDocument) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onTogglePin, modifier = Modifier.size(26.dp)) {
+                        Icon(
+                            imageVector = if (note.isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                            contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                            tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
 
-                IconButton(
-                    onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
-                    modifier = Modifier.size(26.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Opções",
-                        tint = paperColors.mutedIconColor,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    IconButton(
+                        onClick = { onMoreClick?.invoke() ?: onLongClick?.invoke() ?: onDelete() },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Opções",
+                            tint = paperColors.mutedIconColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }
@@ -3186,12 +3489,14 @@ fun NoteSubmenuDialog(
                     imageVector = when {
                         note.isPdfDocument -> Icons.Default.PictureAsPdf
                         note.isDocxDocument -> Icons.Default.Article
+                        note.isEbookOrComicDocument -> Icons.Default.MenuBook
                         else -> Icons.Default.Description
                     },
                     contentDescription = null,
                     tint = when {
                         note.isPdfDocument -> Color(0xFFDC2626)
                         note.isDocxDocument -> Color(0xFF2563EB)
+                        note.isEbookOrComicDocument -> accentColorForDocType(note.resolvedDocumentType)
                         else -> primaryColor
                     },
                     modifier = Modifier.size(22.dp)
@@ -3573,6 +3878,8 @@ fun NoteSubmenuDialog(
                             text = when (note.resolvedDocumentType) {
                                 NoteDocumentType.PDF -> "Mover PDF para a Lixeira"
                                 NoteDocumentType.DOCX -> "Mover Word para a Lixeira"
+                                NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 ->
+                                    "Mover ${note.resolvedDocumentType.label} para a Lixeira"
                                 NoteDocumentType.MARKDOWN -> "Mover para a Lixeira"
                             },
                             color = MaterialTheme.colorScheme.error,
@@ -3707,12 +4014,14 @@ fun ArchivedNotesDialog(
                                             imageVector = when {
                                                 note.isPdfDocument -> Icons.Default.PictureAsPdf
                                                 note.isDocxDocument -> Icons.Default.Article
+                                                note.isEbookOrComicDocument -> Icons.Default.MenuBook
                                                 else -> Icons.Default.Description
                                             },
                                             contentDescription = null,
                                             tint = when {
                                                 note.isPdfDocument -> Color(0xFFDC2626)
                                                 note.isDocxDocument -> Color(0xFF2563EB)
+                                                note.isEbookOrComicDocument -> accentColorForDocType(note.resolvedDocumentType)
                                                 else -> MaterialTheme.colorScheme.primary
                                             },
                                             modifier = Modifier.size(20.dp)

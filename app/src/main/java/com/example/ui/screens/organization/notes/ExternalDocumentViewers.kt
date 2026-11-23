@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -84,11 +85,14 @@ import androidx.compose.ui.window.Dialog
 import com.example.data.model.Category
 import com.example.data.model.Note
 import com.example.data.model.NoteDocumentType
+import com.example.data.model.resolvedDocumentType
 import com.example.ui.theme.isAppDarkTheme
 import com.example.util.DocxBlock
 import com.example.util.DocxDocumentEngine
 import com.example.util.DocxParsedDocument
 import com.example.util.DocxRun
+import com.example.util.EbookComicEngine
+import com.example.util.EbookDocument
 import com.example.util.ExternalDocumentUriHelper
 import com.example.util.LatexFormulaRenderer
 import kotlinx.coroutines.Dispatchers
@@ -472,43 +476,15 @@ private fun ExternalDocumentReaderHeader(
                             .testTag("external_doc_save_to_vault_btn")
                     ) {
                         Icon(
-                            imageVector = Icons.Default.LibraryAdd,
-                            contentDescription = "Guardar no Cofre",
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Importar",
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = "Guardar",
+                            text = "Importar",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                if (showEditToggle && !isTransientMode) {
-                    FilledTonalIconButton(
-                        onClick = onToggleEditMode,
-                        enabled = !isConverting,
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = if (isEditingDocx) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
-                            },
-                            contentColor = if (isEditingDocx) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        ),
-                        modifier = Modifier
-                            .size(44.dp)
-                            .testTag(editToggleTestTag)
-                    ) {
-                        Icon(
-                            imageVector = if (isEditingDocx) Icons.Default.Visibility else Icons.Default.Edit,
-                            contentDescription = if (isEditingDocx) "Modo leitura" else "Editar texto",
-                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -541,8 +517,8 @@ private fun ExternalDocumentReaderHeader(
                     ) {
                         if (isTransientMode && onSaveToVault != null) {
                             DropdownMenuItem(
-                                text = { Text("Guardar no Cofre") },
-                                leadingIcon = { Icon(Icons.Default.LibraryAdd, contentDescription = null) },
+                                text = { Text("Importar para o app") },
+                                leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
                                 onClick = {
                                     showMoreMenu = false
                                     onSaveToVault()
@@ -557,10 +533,10 @@ private fun ExternalDocumentReaderHeader(
                                 onConvertToNote()
                             }
                         )
-                        if (showEditToggle && !isTransientMode) {
+                        if (showEditToggle) {
                             DropdownMenuItem(
                                 text = {
-                                    Text(if (isEditingDocx) "Modo leitura (só leitura)" else "Editar texto (.docx)")
+                                    Text(if (isEditingDocx) "Modo leitura" else "Editar texto (.docx)")
                                 },
                                 leadingIcon = {
                                     Icon(
@@ -1225,13 +1201,63 @@ fun ExternalDocxReaderScreen(
         }
     }
 
-    val topSpacer by animateDpAsState(targetValue = if (showChrome || isEditingDocx) 118.dp else 16.dp, label = "docx_top_pad")
+    val topSpacer by animateDpAsState(targetValue = if (showChrome || isEditingDocx) 118.dp else 18.dp, label = "docx_top_pad")
     val bottomSpacer = 280.dp
+    val isDarkOuter = isAppDarkTheme()
+    val outerBackdropColor = if (isDarkOuter) Color(0xFF14161B) else Color(0xFFE5E7EB)
+
+    val pageChunks = remember(parsedDoc) {
+        val raw = parsedDoc?.blocks.orEmpty()
+        if (raw.isEmpty()) emptyList() else {
+            val pages = mutableListOf<List<DocxBlock>>()
+            var current = mutableListOf<DocxBlock>()
+            for (blk in raw) {
+                if (blk is DocxBlock.PageBreak) {
+                    if (current.isNotEmpty()) {
+                        pages.add(current)
+                        current = mutableListOf()
+                    }
+                } else {
+                    current.add(blk)
+                }
+            }
+            if (current.isNotEmpty() || pages.isEmpty()) {
+                pages.add(current)
+            }
+            pages
+        }
+    }
+
+    val toggleEditOrReturn = {
+        if (isEditingDocx) {
+            if (editedTexts.isNotEmpty() && !isTransientMode) {
+                isSavingDocx = true
+                onSaveDocxEdits(
+                    editedTexts.toMap(),
+                    {
+                        isSavingDocx = false
+                        editedTexts.clear()
+                        isEditingDocx = false
+                        reloadTrigger++
+                    },
+                    {
+                        isSavingDocx = false
+                    }
+                )
+            } else {
+                editedTexts.clear()
+                isEditingDocx = false
+            }
+        } else {
+            isEditingDocx = true
+            showChrome = true
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(outerBackdropColor)
             .clipToBounds()
     ) {
         Box(
@@ -1320,8 +1346,7 @@ fun ExternalDocxReaderScreen(
                     )
                 }
                 parsedDoc != null -> {
-                    val blocks = parsedDoc!!.blocks
-                    if (blocks.isEmpty()) {
+                    if (pageChunks.isEmpty() || parsedDoc!!.blocks.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 text = "Documento Word (.docx) sem conteúdo visível.",
@@ -1334,7 +1359,7 @@ fun ExternalDocxReaderScreen(
                             state = listState,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .widthIn(max = 760.dp)
+                                .widthIn(max = 780.dp)
                                 .align(Alignment.TopCenter)
                                 .graphicsLayer(
                                     scaleX = animatedScale,
@@ -1343,22 +1368,52 @@ fun ExternalDocxReaderScreen(
                                     translationY = animatedPan.y
                                 ),
                             contentPadding = PaddingValues(
-                                start = 20.dp,
-                                end = 20.dp,
+                                start = 12.dp,
+                                end = 12.dp,
                                 top = topSpacer,
                                 bottom = bottomSpacer
                             ),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            itemsIndexed(blocks) { _, block ->
-                                if (isEditingDocx) {
-                                    DocxEditableBlockItem(
-                                        block = block,
-                                        fontScale = textScale,
-                                        editedTexts = editedTexts
-                                    )
-                                } else {
-                                    DocxReadOnlyBlockItem(block = block, fontScale = textScale)
+                            itemsIndexed(pageChunks) { pageIdx, pageBlocks ->
+                                // Fixed White Paper Sheet regardless of app theme
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color.White,
+                                    shadowElevation = 4.dp,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .border(0.75.dp, Color(0xFFD1D5DB), RoundedCornerShape(6.dp))
+                                        .testTag("docx_white_paper_page_$pageIdx")
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 22.dp, vertical = 26.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        pageBlocks.forEach { block ->
+                                            if (isEditingDocx) {
+                                                DocxEditableBlockItem(
+                                                    block = block,
+                                                    fontScale = textScale,
+                                                    editedTexts = editedTexts
+                                                )
+                                            } else {
+                                                DocxReadOnlyBlockItem(block = block, fontScale = textScale)
+                                            }
+                                        }
+                                        if (pageChunks.size > 1) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = "${pageIdx + 1} / ${pageChunks.size}",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF94A3B8),
+                                                textAlign = TextAlign.End,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1367,7 +1422,38 @@ fun ExternalDocxReaderScreen(
             }
         }
 
-        // Top Bar Overlay (Single-tap hides/restores; stays visible in edit mode so Eye icon is reachable)
+        // Floating Right-Edge Edit / View Toggle Button (Pencil <-> Eye)
+        if (!isLoading && loadError == null && parsedDoc != null) {
+            Surface(
+                shape = CircleShape,
+                color = if (isEditingDocx) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.96f),
+                contentColor = if (isEditingDocx) MaterialTheme.colorScheme.onPrimary else Color(0xFF0F172A),
+                shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = if (isEditingDocx) MaterialTheme.colorScheme.primary else Color(0xFFCBD5E1)
+                ),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp)
+                    .size(48.dp)
+                    .testTag("docx_toggle_edit_btn")
+            ) {
+                IconButton(
+                    onClick = toggleEditOrReturn,
+                    enabled = !isConverting && !isSavingDocx,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Icon(
+                        imageVector = if (isEditingDocx) Icons.Default.Visibility else Icons.Default.Edit,
+                        contentDescription = if (isEditingDocx) "Voltar ao modo padrão" else "Editar trechos existentes",
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        // Top Bar Overlay (Single-tap hides/restores; stays visible in edit mode)
         AnimatedVisibility(
             visible = showChrome || loadError != null || isEditingDocx,
             enter = fadeIn() + slideInVertically { -it },
@@ -1382,15 +1468,7 @@ fun ExternalDocxReaderScreen(
                 isConverting = isConverting || isSavingDocx,
                 showEditToggle = true,
                 isEditingDocx = isEditingDocx,
-                onToggleEditMode = {
-                    if (isEditingDocx) {
-                        editedTexts.clear()
-                        isEditingDocx = false
-                    } else {
-                        isEditingDocx = true
-                        showChrome = true
-                    }
-                },
+                onToggleEditMode = toggleEditOrReturn,
                 onClose = {
                     if (isEditingDocx) {
                         editedTexts.clear()
@@ -1428,7 +1506,7 @@ fun ExternalDocxReaderScreen(
                 onRelinkClick = onRelinkClick,
                 closeTestTag = "docx_reader_close_btn",
                 moreMenuTestTag = "docx_reader_more_menu_btn",
-                editToggleTestTag = "docx_toggle_edit_btn",
+                editToggleTestTag = "docx_toggle_edit_menu_item",
                 categoryTestTag = "docx_reader_category_chip",
                 badgeTestTag = "docx_reader_badge",
                 isTransientMode = isTransientMode,
@@ -1516,9 +1594,9 @@ fun ExternalDocxReaderScreen(
                 ) {
                     Text(
                         text = if (editedTexts.isEmpty()) {
-                            "Toque em qualquer parágrafo para editar ou apagar texto"
+                            "Toque diretamente no texto da página para editar"
                         } else {
-                            "${editedTexts.size} parágrafo(s) alterado(s)"
+                            "${editedTexts.size} trecho(s) editado(s)"
                         },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1620,59 +1698,69 @@ private fun DocxEditableBlockItem(
     }
     val (pIndex, originalText) = extracted
     val currentText = editedTexts[pIndex] ?: originalText
-    val textColor = MaterialTheme.colorScheme.onBackground
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val borderColor = if (editedTexts.containsKey(pIndex)) {
-        primaryColor
-    } else {
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+
+    // White-paper dark ink for discreet, invisible inline editing directly on page
+    val paperInk = Color(0xFF1E293B)
+    val accentBlue = Color(0xFF2563EB)
+
+    val (baseRuns, align, indentDp) = when (block) {
+        is DocxBlock.Heading -> Triple(block.runs, TextAlign.Start, 0.dp)
+        is DocxBlock.Paragraph -> Triple(
+            block.runs,
+            when (block.alignment.lowercase()) {
+                "center" -> TextAlign.Center
+                "right", "end" -> TextAlign.End
+                "both", "justify" -> TextAlign.Justify
+                else -> TextAlign.Start
+            },
+            0.dp
+        )
+        is DocxBlock.ListItem -> Triple(block.runs, TextAlign.Start, (block.indentLevel.coerceIn(0, 4) * 18).dp + 4.dp)
+        is DocxBlock.ChecklistItem -> Triple(block.runs, TextAlign.Start, 4.dp)
+        is DocxBlock.Quote -> Triple(block.runs, TextAlign.Start, 0.dp)
+        is DocxBlock.Callout -> Triple(block.runs, TextAlign.Start, 0.dp)
+        else -> Triple(emptyList(), TextAlign.Start, 0.dp)
     }
 
-    val (fontSizeSp, fontWeight, prefixLabel) = when (block) {
-        is DocxBlock.Heading -> Triple(
-            when (block.level) {
-                1 -> 22f
-                2 -> 19f
-                3 -> 17f
-                else -> 15.5f
-            } * fontScale,
-            FontWeight.Bold,
-            "H${block.level}"
-        )
-        is DocxBlock.ListItem -> Triple(
-            15f * fontScale,
-            FontWeight.Normal,
-            if (block.ordered) "${block.indexNumber}." else "•"
-        )
-        is DocxBlock.ChecklistItem -> Triple(
-            15f * fontScale,
-            FontWeight.Normal,
-            if (block.checked) "☑" else "☐"
-        )
-        is DocxBlock.Quote -> Triple(14.5f * fontScale, FontWeight.Normal, "❝")
-        is DocxBlock.Callout -> Triple(14.5f * fontScale, FontWeight.Normal, "ℹ")
-        else -> Triple(15f * fontScale, FontWeight.Normal, null)
+    val dominantColor = remember(baseRuns) {
+        baseRuns.firstOrNull { !it.colorHex.isNullOrBlank() && it.colorHex.length == 6 }
+            ?.colorHex
+            ?.let { hex ->
+                try {
+                    Color(android.graphics.Color.parseColor("#$hex"))
+                } catch (_: Exception) {
+                    null
+                }
+            } ?: paperInk
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.7f))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        if (prefixLabel != null) {
-            Text(
-                text = prefixLabel,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = primaryColor,
-                modifier = Modifier.padding(top = 2.dp)
-            )
+    val fontSizeSp = when (block) {
+        is DocxBlock.Heading -> when (block.level) {
+            1 -> 24f
+            2 -> 20f
+            3 -> 18f
+            4 -> 16f
+            else -> 15f
         }
+        is DocxBlock.Quote, is DocxBlock.Callout -> 14.5f
+        else -> {
+            val runPt = baseRuns.firstOrNull { it.fontSizeHalfPt != null }?.fontSizeHalfPt?.div(2f)
+            runPt?.coerceIn(10f, 34f) ?: 15f
+        }
+    } * fontScale
+
+    val fontWeight = when (block) {
+        is DocxBlock.Heading -> FontWeight.ExtraBold
+        else -> if (baseRuns.isNotEmpty() && baseRuns.all { it.isBold }) FontWeight.Bold else FontWeight.Normal
+    }
+
+    val fontStyle = if (block is DocxBlock.Quote || (baseRuns.isNotEmpty() && baseRuns.all { it.isItalic })) {
+        FontStyle.Italic
+    } else {
+        FontStyle.Normal
+    }
+
+    val textField = @Composable { modifier: Modifier ->
         BasicTextField(
             value = currentText,
             onValueChange = { newText ->
@@ -1683,24 +1771,76 @@ private fun DocxEditableBlockItem(
                     editedTexts[pIndex] = sanitized
                 }
             },
+            cursorBrush = SolidColor(accentBlue),
             textStyle = TextStyle(
-                color = textColor,
+                color = dominantColor,
                 fontSize = fontSizeSp.sp,
                 lineHeight = (fontSizeSp * 1.4f).sp,
-                fontWeight = fontWeight
+                fontWeight = fontWeight,
+                fontStyle = fontStyle,
+                textAlign = align
             ),
-            modifier = Modifier.weight(1f),
-            decorationBox = { innerTextField ->
-                if (currentText.isEmpty()) {
-                    Text(
-                        text = "(Parágrafo vazio — texto removido)",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
-                    )
-                }
-                innerTextField()
-            }
+            modifier = modifier
         )
+    }
+
+    when (block) {
+        is DocxBlock.ListItem -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = indentDp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = if (block.ordered) "${block.indexNumber}." else "•",
+                    fontSize = fontSizeSp.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = paperInk,
+                    modifier = Modifier.width(if (block.ordered) 26.dp else 18.dp)
+                )
+                textField(Modifier.weight(1f))
+            }
+        }
+        is DocxBlock.ChecklistItem -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = if (block.checked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                    contentDescription = null,
+                    tint = if (block.checked) Color(0xFF10B981) else Color(0xFF64748B),
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .size(18.dp)
+                )
+                textField(Modifier.weight(1f))
+            }
+        }
+        is DocxBlock.Quote -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
+                    .padding(vertical = 8.dp, horizontal = 12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(22.dp)
+                        .background(accentBlue, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                textField(Modifier.weight(1f))
+            }
+        }
+        else -> {
+            textField(Modifier.fillMaxWidth())
+        }
     }
 }
 
@@ -1770,17 +1910,27 @@ private fun ExternalDocumentMissingState(
     }
 }
 
+private fun parseDocxHexColorOrNull(hex: String?): Color? {
+    val clean = hex?.trim()?.removePrefix("#") ?: return null
+    if (clean.length != 6) return null
+    return try {
+        Color(android.graphics.Color.parseColor("#$clean"))
+    } catch (_: Exception) {
+        null
+    }
+}
+
 @Composable
 private fun DocxReadOnlyBlockItem(
     block: DocxBlock,
     fontScale: Float
 ) {
-    val isDark = isAppDarkTheme()
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val textColor = MaterialTheme.colorScheme.onBackground
-    val secondaryColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val codeBg = if (isDark) Color(0xFF2B303B) else Color(0xFFF1F5F9)
-    val highlightBg = if (isDark) Color(0xFF713F12) else Color(0xFFFEF08A)
+    // White-paper aesthetic: fixed dark ink & bright sheet surfaces regardless of Dark Mode
+    val linkColor = Color(0xFF2563EB)
+    val textColor = Color(0xFF0F172A)
+    val secondaryColor = Color(0xFF475569)
+    val codeBg = Color(0xFFF1F5F9)
+    val defaultHighlightBg = Color(0xFFFEF08A)
 
     when (block) {
         is DocxBlock.Heading -> {
@@ -1791,8 +1941,8 @@ private fun DocxReadOnlyBlockItem(
                 4 -> 16f
                 else -> 15f
             } * fontScale
-            val annotated = remember(block.runs, isDark) {
-                buildDocxAnnotatedString(block.runs, primaryColor, codeBg, highlightBg, forceBold = true)
+            val annotated = remember(block.runs, fontScale) {
+                buildDocxAnnotatedString(block.runs, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale, forceBold = true)
             }
             Text(
                 text = annotated,
@@ -1805,8 +1955,8 @@ private fun DocxReadOnlyBlockItem(
         }
 
         is DocxBlock.Paragraph -> {
-            val annotated = remember(block.runs, isDark) {
-                buildDocxAnnotatedString(block.runs, primaryColor, codeBg, highlightBg)
+            val annotated = remember(block.runs, fontScale) {
+                buildDocxAnnotatedString(block.runs, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale)
             }
             val align = when (block.alignment.lowercase()) {
                 "center" -> TextAlign.Center
@@ -1814,8 +1964,9 @@ private fun DocxReadOnlyBlockItem(
                 "both", "justify" -> TextAlign.Justify
                 else -> TextAlign.Start
             }
+            val bgColor = parseDocxHexColorOrNull(block.backgroundHex)
             if (annotated.text.isEmpty()) {
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             } else {
                 Text(
                     text = annotated,
@@ -1823,14 +1974,22 @@ private fun DocxReadOnlyBlockItem(
                     lineHeight = (22f * fontScale).sp,
                     color = textColor,
                     textAlign = align,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (bgColor != null) {
+                                Modifier
+                                    .background(bgColor, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            } else Modifier
+                        )
                 )
             }
         }
 
         is DocxBlock.ListItem -> {
-            val annotated = remember(block.runs, isDark) {
-                buildDocxAnnotatedString(block.runs, primaryColor, codeBg, highlightBg)
+            val annotated = remember(block.runs, fontScale) {
+                buildDocxAnnotatedString(block.runs, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale)
             }
             val indentDp = (block.indentLevel.coerceIn(0, 4) * 18).dp
             Row(
@@ -1843,7 +2002,7 @@ private fun DocxReadOnlyBlockItem(
                     text = if (block.ordered) "${block.indexNumber}." else "•",
                     fontSize = (15f * fontScale).sp,
                     fontWeight = FontWeight.Bold,
-                    color = primaryColor,
+                    color = Color(0xFF1E293B),
                     modifier = Modifier.width(if (block.ordered) 26.dp else 18.dp)
                 )
                 Text(
@@ -1857,8 +2016,8 @@ private fun DocxReadOnlyBlockItem(
         }
 
         is DocxBlock.ChecklistItem -> {
-            val annotated = remember(block.runs, isDark) {
-                buildDocxAnnotatedString(block.runs, primaryColor, codeBg, highlightBg)
+            val annotated = remember(block.runs, fontScale) {
+                buildDocxAnnotatedString(block.runs, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale)
             }
             Row(
                 modifier = Modifier
@@ -1870,7 +2029,7 @@ private fun DocxReadOnlyBlockItem(
                 Icon(
                     imageVector = if (block.checked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
                     contentDescription = if (block.checked) "Concluído" else "Pendente",
-                    tint = if (block.checked) Color(0xFF10B981) else MaterialTheme.colorScheme.outline,
+                    tint = if (block.checked) Color(0xFF10B981) else Color(0xFF64748B),
                     modifier = Modifier
                         .padding(top = 2.dp)
                         .size(18.dp)
@@ -1887,23 +2046,20 @@ private fun DocxReadOnlyBlockItem(
         }
 
         is DocxBlock.Quote -> {
-            val annotated = remember(block.runs, isDark) {
-                buildDocxAnnotatedString(block.runs, primaryColor, codeBg, highlightBg)
+            val annotated = remember(block.runs, fontScale) {
+                buildDocxAnnotatedString(block.runs, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale)
             }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                        RoundedCornerShape(10.dp)
-                    )
+                    .background(Color(0xFFF8FAFC), RoundedCornerShape(8.dp))
                     .padding(vertical = 8.dp, horizontal = 12.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .width(3.dp)
                         .height(22.dp)
-                        .background(primaryColor, CircleShape)
+                        .background(linkColor, CircleShape)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
@@ -1918,8 +2074,8 @@ private fun DocxReadOnlyBlockItem(
         }
 
         is DocxBlock.Callout -> {
-            val annotated = remember(block.runs, isDark) {
-                buildDocxAnnotatedString(block.runs, primaryColor, codeBg, highlightBg)
+            val annotated = remember(block.runs, fontScale) {
+                buildDocxAnnotatedString(block.runs, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale)
             }
             val (accent, icon, label) = when (block.type.lowercase()) {
                 "tip" -> Triple(Color(0xFF10B981), Icons.Default.Lightbulb, "Dica")
@@ -1928,11 +2084,11 @@ private fun DocxReadOnlyBlockItem(
                 else -> Triple(Color(0xFF3B82F6), Icons.Default.Info, "Nota")
             }
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = accent.copy(alpha = if (isDark) 0.16f else 0.1f),
+                shape = RoundedCornerShape(10.dp),
+                color = accent.copy(alpha = 0.08f),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -1958,7 +2114,7 @@ private fun DocxReadOnlyBlockItem(
         is DocxBlock.Code -> {
             val clipboard = LocalClipboardManager.current
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(10.dp),
                 color = Color(0xFF1E293B),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -2002,11 +2158,11 @@ private fun DocxReadOnlyBlockItem(
 
         is DocxBlock.Math -> {
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isDark) Color(0xFF1E3A5F).copy(alpha = 0.45f) else Color(0xFFEFF6FF),
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFFEFF6FF),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.3f), RoundedCornerShape(10.dp))
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp),
@@ -2031,50 +2187,63 @@ private fun DocxReadOnlyBlockItem(
 
         is DocxBlock.Table -> {
             if (block.headers.isNotEmpty()) {
-                val borderCol = MaterialTheme.colorScheme.outlineVariant
-                val headerBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                val borderCol = Color(0xFFCBD5E1)
+                val defaultHeaderBg = Color(0xFFF1F5F9)
                 Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                     Column(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(1.dp, borderCol, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(6.dp))
+                            .border(1.dp, borderCol, RoundedCornerShape(6.dp))
                     ) {
-                        Row(modifier = Modifier.background(headerBg)) {
-                            block.headers.forEach { cellRuns ->
-                                val cellText = remember(cellRuns, isDark) {
-                                    buildDocxAnnotatedString(cellRuns, primaryColor, codeBg, highlightBg, forceBold = true)
+                        Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                            block.headers.forEachIndexed { colIdx, cellRuns ->
+                                val cellBg = parseDocxHexColorOrNull(block.headerBackgrounds.getOrNull(colIdx))
+                                    ?: defaultHeaderBg
+                                val cellText = remember(cellRuns, fontScale) {
+                                    buildDocxAnnotatedString(cellRuns, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale, forceBold = true)
                                 }
-                                Text(
-                                    text = cellText,
-                                    fontSize = (13f * fontScale).sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textColor,
+                                Box(
                                     modifier = Modifier
+                                        .fillMaxHeight()
+                                        .background(cellBg)
+                                        .border(0.5.dp, borderCol)
                                         .widthIn(min = 96.dp, max = 240.dp)
                                         .padding(horizontal = 10.dp, vertical = 8.dp)
-                                )
-                            }
-                        }
-                        HorizontalDivider(color = borderCol)
-                        block.rows.forEachIndexed { rIdx, row ->
-                            Row {
-                                block.headers.indices.forEach { colIdx ->
-                                    val cellRuns = row.getOrNull(colIdx).orEmpty()
-                                    val cellText = remember(cellRuns, isDark) {
-                                        buildDocxAnnotatedString(cellRuns, primaryColor, codeBg, highlightBg)
-                                    }
+                                ) {
                                     Text(
                                         text = cellText,
                                         fontSize = (13f * fontScale).sp,
-                                        color = textColor,
-                                        modifier = Modifier
-                                            .widthIn(min = 96.dp, max = 240.dp)
-                                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                                        fontWeight = FontWeight.Bold,
+                                        color = textColor
                                     )
                                 }
                             }
-                            if (rIdx < block.rows.lastIndex) {
-                                HorizontalDivider(color = borderCol.copy(alpha = 0.55f))
+                        }
+                        block.rows.forEachIndexed { rIdx, row ->
+                            Row(modifier = Modifier.height(IntrinsicSize.Min)) {
+                                block.headers.indices.forEach { colIdx ->
+                                    val cellRuns = row.getOrNull(colIdx).orEmpty()
+                                    val cellBg = parseDocxHexColorOrNull(
+                                        block.rowBackgrounds.getOrNull(rIdx)?.getOrNull(colIdx)
+                                    ) ?: Color.White
+                                    val cellText = remember(cellRuns, fontScale) {
+                                        buildDocxAnnotatedString(cellRuns, linkColor, codeBg, defaultHighlightBg, fontScale = fontScale)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .background(cellBg)
+                                            .border(0.5.dp, borderCol)
+                                            .widthIn(min = 96.dp, max = 240.dp)
+                                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                                    ) {
+                                        Text(
+                                            text = cellText,
+                                            fontSize = (13f * fontScale).sp,
+                                            color = textColor
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -2085,26 +2254,15 @@ private fun DocxReadOnlyBlockItem(
         is DocxBlock.Divider -> {
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 6.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
+                color = Color(0xFFCBD5E1)
             )
         }
 
         is DocxBlock.PageBreak -> {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-                Text(
-                    text = "Quebra de página",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
-                )
-                HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-            }
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = Color(0xFFE2E8F0)
+            )
         }
 
         is DocxBlock.Image -> {
@@ -2142,7 +2300,7 @@ private fun DocxReadOnlyBlockItem(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .weight(imgFraction)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(8.dp))
                         )
                         Text(
                             text = block.sideText,
@@ -2165,7 +2323,7 @@ private fun DocxReadOnlyBlockItem(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .weight(imgFraction)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(8.dp))
                         )
                     }
                 }
@@ -2185,7 +2343,7 @@ private fun DocxReadOnlyBlockItem(
                         modifier = Modifier
                             .fillMaxWidth((block.widthPercent / 100f).coerceIn(0.35f, 1f))
                             .heightIn(max = 360.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                     )
                 }
             }
@@ -2197,7 +2355,8 @@ private fun buildDocxAnnotatedString(
     runs: List<DocxRun>,
     linkColor: Color,
     codeBg: Color,
-    highlightBg: Color,
+    defaultHighlightBg: Color,
+    fontScale: Float = 1f,
     forceBold: Boolean = false
 ): AnnotatedString {
     return buildAnnotatedString {
@@ -2207,23 +2366,20 @@ private fun buildDocxAnnotatedString(
                 if (run.isUnderline || !run.linkUrl.isNullOrBlank()) add(TextDecoration.Underline)
                 if (run.isStrikethrough) add(TextDecoration.LineThrough)
             }
-            val parsedColor = run.colorHex
-                ?.takeIf { it.length == 6 && !it.equals("000000", true) && !it.equals("FFFFFF", true) }
-                ?.let { hex ->
-                    try {
-                        Color(android.graphics.Color.parseColor("#$hex"))
-                    } catch (_: Exception) {
-                        Color.Unspecified
-                    }
-                } ?: Color.Unspecified
+            val parsedColor = parseDocxHexColorOrNull(run.colorHex) ?: Color.Unspecified
+            val resolvedHighlightBg = parseDocxHexColorOrNull(run.highlightColorHex) ?: defaultHighlightBg
+            val resolvedFontSize = run.fontSizeHalfPt
+                ?.let { ((it / 2f).coerceIn(8f, 44f) * fontScale).sp }
+                ?: androidx.compose.ui.unit.TextUnit.Unspecified
 
             val span = SpanStyle(
                 fontWeight = if (run.isBold || forceBold) FontWeight.Bold else null,
                 fontStyle = if (run.isItalic) FontStyle.Italic else null,
                 fontFamily = if (run.isCode) FontFamily.Monospace else null,
+                fontSize = resolvedFontSize,
                 textDecoration = if (decorations.isNotEmpty()) TextDecoration.combine(decorations) else null,
                 background = when {
-                    run.isHighlight -> highlightBg
+                    run.isHighlight -> resolvedHighlightBg
                     run.isCode -> codeBg
                     else -> Color.Unspecified
                 },
@@ -2244,6 +2400,470 @@ private fun buildDocxAnnotatedString(
                 withStyle(span) {
                     append(run.text)
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Paginated Ebook & Comic reader (EPUB, MOBI/AZW, CBZ, FB2) rendered as smooth vertical pages
+ * matching Citra's PDF reader behavior (zoom up to 350%, double-tap & pinch zoom, 2D pan,
+ * single-tap chrome toggle, import, convert to note, share, and print).
+ */
+@Composable
+fun ExternalEbookReaderScreen(
+    note: Note,
+    categories: List<Category>,
+    onClose: () -> Unit,
+    onChangeCategory: (String) -> Unit,
+    onCreateCategory: (String, String) -> Unit,
+    onRenameDocument: (String) -> Unit,
+    onRelinkClick: () -> Unit,
+    onRemoveLink: () -> Unit,
+    onConvertToNote: () -> Unit,
+    isConverting: Boolean = false,
+    isTransientMode: Boolean = false,
+    onSaveToVault: (() -> Unit)? = null
+) {
+    BackHandler(enabled = !isConverting) { onClose() }
+
+    val context = LocalContext.current
+    val docType = note.resolvedDocumentType
+    val coroutineScope = rememberCoroutineScope()
+    var showCategoryPicker by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showChrome by remember { mutableStateOf(true) }
+    var zoomScale by remember { mutableFloatStateOf(1f) }
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val animatedScale by animateFloatAsState(
+        targetValue = zoomScale,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "ebook_zoom_scale"
+    )
+    val animatedPan by animateOffsetAsState(
+        targetValue = panOffset,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "ebook_zoom_pan"
+    )
+
+    var parsedEbook by remember { mutableStateOf<EbookDocument?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    val bitmapCache = remember(note.externalUri) {
+        val maxKb = (Runtime.getRuntime().maxMemory() / 1024L).toInt()
+        val cacheSizeKb = (maxKb / 10).coerceIn(8 * 1024, 48 * 1024)
+        object : LruCache<String, Bitmap>(cacheSizeKb) {
+            override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
+        }
+    }
+
+    DisposableEffect(note.externalUri) {
+        onDispose {
+            bitmapCache.evictAll()
+        }
+    }
+
+    LaunchedEffect(note.externalUri, docType) {
+        isLoading = true
+        loadError = null
+        parsedEbook = null
+        bitmapCache.evictAll()
+        val result = withContext(Dispatchers.IO) {
+            val stream = ExternalDocumentUriHelper.openInputStream(context, note.externalUri)
+            if (stream == null) {
+                null to "Arquivo ${docType.label} inacessível neste caminho. Toque em Carregar outro arquivo."
+            } else {
+                try {
+                    stream.use { input ->
+                        EbookComicEngine.buildParsedFromStream(
+                            input = input,
+                            docType = docType,
+                            fallbackTitle = note.title.ifBlank { docType.label }
+                        ) to null
+                    }
+                } catch (e: Exception) {
+                    null to "Não foi possível abrir este arquivo ${docType.label}: ${e.message ?: "formato inválido"}."
+                }
+            }
+        }
+        parsedEbook = result.first
+        loadError = result.second
+        isLoading = false
+    }
+
+    val listState = rememberLazyListState()
+    val pageCount = parsedEbook?.pages?.size ?: 0
+    val currentPageIndex by remember {
+        derivedStateOf { (listState.firstVisibleItemIndex + 1).coerceAtLeast(1) }
+    }
+
+    fun applyDoubleTapZoomAt(tapOffset: Offset) {
+        val current = zoomScale
+        val nextScale = when {
+            current < 1.45f -> 1.75f
+            current < 2.35f -> 2.55f
+            current < 3.25f -> 3.5f
+            else -> 1f
+        }
+        if (nextScale <= 1.01f || viewportSize.width <= 0 || viewportSize.height <= 0) {
+            zoomScale = 1f
+            panOffset = Offset.Zero
+        } else {
+            val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
+            val factor = nextScale / current
+            val rawPan = tapOffset - center - (tapOffset - center - panOffset) * factor
+            val maxX = (viewportSize.width * (nextScale - 1f)) / 2f
+            val maxY = (viewportSize.height * (nextScale - 1f)) / 2f
+            zoomScale = nextScale
+            panOffset = Offset(
+                x = rawPan.x.coerceIn(-maxX, maxX),
+                y = rawPan.y.coerceIn(-maxY, maxY)
+            )
+        }
+    }
+
+    val topSpacer by animateDpAsState(targetValue = if (showChrome) 118.dp else 16.dp, label = "ebook_top_pad")
+    val bottomSpacer = 280.dp
+
+    val badgeAccent = when (docType) {
+        NoteDocumentType.EPUB -> Color(0xFF059669)
+        NoteDocumentType.MOBI -> Color(0xFFD97706)
+        NoteDocumentType.CBZ -> Color(0xFF7C3AED)
+        NoteDocumentType.FB2 -> Color(0xFF0891B2)
+        else -> MaterialTheme.colorScheme.primary
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .clipToBounds()
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onSizeChanged { viewportSize = it }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { showChrome = !showChrome },
+                        onDoubleTap = { tapOffset -> applyDoubleTapZoomAt(tapOffset) }
+                    )
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.changes.count { it.pressed } >= 2) {
+                                val zoomFactor = event.calculateZoom()
+                                val panDelta = event.calculatePan()
+                                val updated = (zoomScale * zoomFactor).coerceIn(0.85f, 3.5f)
+                                if (kotlin.math.abs(zoomFactor - 1f) > 0.005f || panDelta != Offset.Zero) {
+                                    zoomScale = updated
+                                    if (updated <= 1.02f) {
+                                        panOffset = Offset.Zero
+                                    } else if (viewportSize.width > 0 && viewportSize.height > 0) {
+                                        val maxX = (viewportSize.width * (updated - 1f)) / 2f
+                                        val maxY = (viewportSize.height * (updated - 1f)) / 2f
+                                        panOffset = Offset(
+                                            x = (panOffset.x + panDelta.x).coerceIn(-maxX, maxX),
+                                            y = (panOffset.y + panDelta.y).coerceIn(-maxY, maxY)
+                                        )
+                                    }
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                            if (event.changes.none { it.pressed }) break
+                        }
+                    }
+                }
+                .pointerInput(zoomScale > 1.02f, viewportSize) {
+                    if (zoomScale > 1.02f) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            val maxX = (viewportSize.width * (zoomScale - 1f)) / 2f
+                            val maxY = (viewportSize.height * (zoomScale - 1f)) / 2f
+                            val nextX = (panOffset.x + dragAmount.x).coerceIn(-maxX, maxX)
+                            val desiredY = panOffset.y + dragAmount.y
+                            val nextY = desiredY.coerceIn(-maxY, maxY)
+                            panOffset = Offset(x = nextX, y = nextY)
+                            val overflowY = desiredY - nextY
+                            if (kotlin.math.abs(overflowY) > 0.5f) {
+                                coroutineScope.launch {
+                                    listState.scrollBy(-overflowY)
+                                }
+                            }
+                        }
+                    }
+                }
+        ) {
+            when {
+                isLoading -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = "Carregando ${docType.label}...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                loadError != null -> {
+                    ExternalDocumentMissingState(
+                        message = loadError!!,
+                        relinkLabel = "Carregar outro ${docType.label}",
+                        onRelink = onRelinkClick,
+                        onRemoveLink = onRemoveLink,
+                        onClose = onClose,
+                        relinkTestTag = "ebook_reader_relink_btn"
+                    )
+                }
+                parsedEbook != null && pageCount > 0 -> {
+                    val doc = parsedEbook!!
+                    val density = LocalDensity.current
+                    val zoomPercent = (zoomScale * 100).toInt()
+                    val renderBucket = when {
+                        zoomPercent <= 115 -> 100
+                        zoomPercent <= 185 -> 150
+                        zoomPercent <= 275 -> 225
+                        else -> 300
+                    }
+
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val baseWidthPx = with(density) { (maxWidth - 24.dp).toPx().toInt().coerceAtLeast(480) }
+                        val targetWidthPx = (baseWidthPx * (renderBucket / 100f)).toInt().coerceAtMost(1800)
+                        val displayWidthDp = (maxWidth - 24.dp)
+
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer(
+                                    scaleX = animatedScale,
+                                    scaleY = animatedScale,
+                                    translationX = animatedPan.x,
+                                    translationY = animatedPan.y
+                                ),
+                            contentPadding = PaddingValues(
+                                start = 12.dp,
+                                end = 12.dp,
+                                top = topSpacer,
+                                bottom = bottomSpacer
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            items(count = pageCount, key = { it }) { pageIdx ->
+                                EbookPageCard(
+                                    document = doc,
+                                    bitmapCache = bitmapCache,
+                                    pageIndex = pageIdx,
+                                    pageCount = pageCount,
+                                    targetWidthPx = targetWidthPx,
+                                    renderBucket = renderBucket,
+                                    displayWidthDp = displayWidthDp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = showChrome || loadError != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            ExternalDocumentReaderHeader(
+                title = note.title,
+                badgeLabel = "${docType.label} · Leitor",
+                badgeColor = badgeAccent,
+                category = note.category,
+                isConverting = isConverting,
+                showEditToggle = false,
+                onClose = onClose,
+                onCategoryClick = { showCategoryPicker = true },
+                onConvertToNote = onConvertToNote,
+                onRenameClick = { showRenameDialog = true },
+                onShareClick = {
+                    val ok = ExternalDocumentUriHelper.shareExternalDocument(
+                        context = context,
+                        title = note.title,
+                        pathOrUri = note.externalUri,
+                        docType = docType
+                    )
+                    if (!ok) {
+                        Toast.makeText(context, "Não foi possível compartilhar este arquivo.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onPrintClick = {
+                    val ok = ExternalDocumentUriHelper.printExternalDocument(
+                        context = context,
+                        title = note.title,
+                        pathOrUri = note.externalUri,
+                        docType = docType,
+                        ebookParsed = parsedEbook
+                    )
+                    if (!ok) {
+                        Toast.makeText(context, "Impressão indisponível para este arquivo.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onRelinkClick = onRelinkClick,
+                closeTestTag = "ebook_reader_close_btn",
+                moreMenuTestTag = "ebook_reader_more_menu_btn",
+                categoryTestTag = "ebook_reader_category_chip",
+                badgeTestTag = "ebook_reader_badge",
+                isTransientMode = isTransientMode,
+                onSaveToVault = onSaveToVault
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                ) {
+                    Text(
+                        text = if (pageCount > 0) "Pág. $currentPageIndex de $pageCount" else docType.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            val next = (zoomScale - 0.25f).coerceAtLeast(0.75f)
+                            zoomScale = next
+                            if (next <= 1.02f) panOffset = Offset.Zero
+                        },
+                        enabled = zoomScale > 0.76f,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(Icons.Default.ZoomOut, contentDescription = "Diminuir zoom", modifier = Modifier.size(18.dp))
+                    }
+                    Text(
+                        text = "${(zoomScale * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = { zoomScale = (zoomScale + 0.25f).coerceAtMost(3.5f) },
+                        enabled = zoomScale < 3.49f,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(Icons.Default.ZoomIn, contentDescription = "Aumentar zoom", modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCategoryPicker) {
+        NoteCategoryPickerDialog(
+            currentCategory = note.category,
+            categories = categories,
+            onSelectCategory = onChangeCategory,
+            onCreateCategory = onCreateCategory,
+            onDismiss = { showCategoryPicker = false }
+        )
+    }
+
+    if (showRenameDialog) {
+        RenameExternalDocumentDialog(
+            currentTitle = note.title,
+            docTypeLabel = docType.label,
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newTitle ->
+                showRenameDialog = false
+                onRenameDocument(newTitle)
+            }
+        )
+    }
+}
+
+@Composable
+private fun EbookPageCard(
+    document: EbookDocument,
+    bitmapCache: LruCache<String, Bitmap>,
+    pageIndex: Int,
+    pageCount: Int,
+    targetWidthPx: Int,
+    renderBucket: Int,
+    displayWidthDp: androidx.compose.ui.unit.Dp
+) {
+    val cacheKey = "${pageIndex}_$renderBucket"
+    var renderedBitmap by remember(cacheKey) { mutableStateOf(bitmapCache.get(cacheKey)) }
+
+    LaunchedEffect(document, cacheKey, targetWidthPx) {
+        val cached = bitmapCache.get(cacheKey)
+        if (cached != null && !cached.isRecycled) {
+            renderedBitmap = cached
+            return@LaunchedEffect
+        }
+        val bmp = withContext(Dispatchers.IO) {
+            EbookComicEngine.renderPageBitmap(document, pageIndex, targetWidthPx)?.also {
+                bitmapCache.put(cacheKey, it)
+            }
+        }
+        if (bmp != null) {
+            renderedBitmap = bmp
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White,
+        shadowElevation = 4.dp,
+        tonalElevation = 1.dp,
+        modifier = Modifier
+            .width(displayWidthDp)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+    ) {
+        Column {
+            val bmp = renderedBitmap
+            if (bmp != null && !bmp.isRecycled) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = "Página ${pageIndex + 1} de $pageCount",
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(420.dp)
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFF1F5F9))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text(
+                    text = "Página ${pageIndex + 1} / $pageCount",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF475569)
+                )
             }
         }
     }

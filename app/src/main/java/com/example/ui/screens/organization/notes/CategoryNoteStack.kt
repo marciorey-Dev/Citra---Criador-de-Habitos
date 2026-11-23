@@ -219,14 +219,14 @@ fun CategoryNoteStack(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     if (coverNote.isExternalDocument) {
-                                        val isPdf = coverNote.isPdfDocument
-                                        val docAccent = if (isPdf) Color(0xFFDC2626) else Color(0xFF2563EB)
+                                        val coverType = coverNote.resolvedDocumentType
+                                        val docAccent = accentColorForDocType(coverType)
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
                                             color = docAccent.copy(alpha = 0.16f)
                                         ) {
                                             Text(
-                                                text = if (isPdf) "PDF" else "DOCX",
+                                                text = coverType.label,
                                                 fontSize = 9.sp,
                                                 fontWeight = FontWeight.ExtraBold,
                                                 color = docAccent,
@@ -249,16 +249,26 @@ fun CategoryNoteStack(
                                         Text(
                                             text = "Documento PDF · Somente leitura",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFDC2626).copy(alpha = 0.85f),
+                                            color = PdfSheetAccentColor.copy(alpha = 0.85f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     NoteDocumentType.DOCX -> {
                                         Text(
-                                            text = "Documento .docx · Somente leitura",
+                                            text = "Documento .docx · Toque para abrir",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFF2563EB).copy(alpha = 0.85f),
+                                            color = DocxSheetAccentColor.copy(alpha = 0.85f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 -> {
+                                        val t = coverNote.resolvedDocumentType
+                                        Text(
+                                            text = "${t.label} · Leitura no Citra",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = accentColorForDocType(t).copy(alpha = 0.85f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -491,20 +501,53 @@ fun CategoryNoteStack(
                                         Box(
                                             modifier = Modifier
                                                 .padding(end = 10.dp)
-                                                .size(width = 44.dp, height = 56.dp)
+                                                .size(width = 72.dp, height = 88.dp)
                                         ) {
-                                            if (note.isPdfDocument) {
-                                                PdfPageOnePreviewBox(
-                                                    externalUri = note.externalUri,
-                                                    compact = true,
-                                                    modifier = Modifier.fillMaxSize()
-                                                )
-                                            } else {
-                                                DocxPageOnePreviewBox(
-                                                    externalUri = note.externalUri,
-                                                    compact = true,
-                                                    modifier = Modifier.fillMaxSize()
-                                                )
+                                            ExternalDocumentPageOnePreviewBox(
+                                                externalUri = note.externalUri,
+                                                docType = note.resolvedDocumentType,
+                                                compact = true,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(bottomStart = 8.dp),
+                                                color = Color.Black.copy(alpha = 0.62f),
+                                                modifier = Modifier.align(Alignment.TopEnd)
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(22.dp)
+                                                            .clip(CircleShape)
+                                                            .clickable { onTogglePin(note) },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
+                                                            contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                                            tint = if (note.isPinned) paperColors.accentColor else Color.White,
+                                                            modifier = Modifier.size(13.dp)
+                                                        )
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(22.dp)
+                                                            .clip(CircleShape)
+                                                            .clickable { onNoteMoreClick?.invoke(note) ?: onDeleteNote(note) },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (onNoteMoreClick != null) Icons.Default.MoreVert else Icons.Default.DeleteOutline,
+                                                            contentDescription = if (onNoteMoreClick != null) "Opções" else "Excluir",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(13.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -517,7 +560,7 @@ fun CategoryNoteStack(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            if (note.isPinned) {
+                                            if (note.isPinned && !note.isExternalDocument) {
                                                 Icon(
                                                     imageVector = Icons.Default.PushPin,
                                                     contentDescription = "Fixada",
@@ -526,8 +569,13 @@ fun CategoryNoteStack(
                                                 )
                                             }
                                             if (note.isExternalDocument) {
-                                                val isPdf = note.isPdfDocument
-                                                val docAccent = if (isPdf) PdfSheetAccentColor else DocxSheetAccentColor
+                                                val docType = note.resolvedDocumentType
+                                                val docAccent = accentColorForDocType(docType)
+                                                val docIcon = when {
+                                                    docType == NoteDocumentType.PDF -> Icons.Default.PictureAsPdf
+                                                    docType == NoteDocumentType.DOCX -> Icons.Default.Article
+                                                    else -> Icons.Default.MenuBook
+                                                }
                                                 Surface(
                                                     shape = RoundedCornerShape(6.dp),
                                                     color = docAccent.copy(alpha = 0.16f)
@@ -538,13 +586,13 @@ fun CategoryNoteStack(
                                                         horizontalArrangement = Arrangement.spacedBy(3.dp)
                                                     ) {
                                                         Icon(
-                                                            imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
+                                                            imageVector = docIcon,
                                                             contentDescription = null,
                                                             tint = docAccent,
                                                             modifier = Modifier.size(11.dp)
                                                         )
                                                         Text(
-                                                            text = if (isPdf) "PDF" else "DOCX",
+                                                            text = docType.label,
                                                             fontSize = 9.sp,
                                                             fontWeight = FontWeight.ExtraBold,
                                                             color = docAccent
@@ -582,6 +630,16 @@ fun CategoryNoteStack(
                                                     overflow = TextOverflow.Ellipsis
                                                 )
                                             }
+                                            NoteDocumentType.EPUB, NoteDocumentType.MOBI, NoteDocumentType.CBZ, NoteDocumentType.FB2 -> {
+                                                val docType = note.resolvedDocumentType
+                                                Text(
+                                                    text = "${docType.label} · Toque para ler",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = accentColorForDocType(docType).copy(alpha = 0.85f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                             NoteDocumentType.MARKDOWN -> {
                                                 if (note.content.isNotBlank()) {
                                                     NoteReadingPreview(
@@ -598,40 +656,44 @@ fun CategoryNoteStack(
                                             }
                                         }
 
-                                        Text(
-                                            text = dateText,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = paperColors.metaTextColor
-                                        )
-                                    }
-
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        IconButton(
-                                            onClick = { onTogglePin(note) },
-                                            modifier = Modifier.minimumInteractiveComponentSize()
-                                        ) {
-                                            Icon(
-                                                imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
-                                                contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
-                                                tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
-                                                modifier = Modifier.size(18.dp)
+                                        if (!note.isExternalDocument) {
+                                            Text(
+                                                text = dateText,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = paperColors.metaTextColor
                                             )
                                         }
+                                    }
 
-                                        IconButton(
-                                            onClick = { onNoteMoreClick?.invoke(note) ?: onDeleteNote(note) },
-                                            modifier = Modifier.minimumInteractiveComponentSize()
+                                    if (!note.isExternalDocument) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = if (onNoteMoreClick != null) Icons.Default.MoreVert else Icons.Default.DeleteOutline,
-                                                contentDescription = if (onNoteMoreClick != null) "Opções" else "Excluir",
-                                                tint = paperColors.mutedIconColor,
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                            IconButton(
+                                                onClick = { onTogglePin(note) },
+                                                modifier = Modifier.minimumInteractiveComponentSize()
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
+                                                    contentDescription = if (note.isPinned) "Desafixar" else "Fixar",
+                                                    tint = if (note.isPinned) paperColors.accentColor else paperColors.mutedIconColor,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+
+                                            IconButton(
+                                                onClick = { onNoteMoreClick?.invoke(note) ?: onDeleteNote(note) },
+                                                modifier = Modifier.minimumInteractiveComponentSize()
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (onNoteMoreClick != null) Icons.Default.MoreVert else Icons.Default.DeleteOutline,
+                                                    contentDescription = if (onNoteMoreClick != null) "Opções" else "Excluir",
+                                                    tint = paperColors.mutedIconColor,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }

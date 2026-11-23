@@ -19,12 +19,19 @@ data class DocxRun(
     val isHighlight: Boolean = false,
     val isCode: Boolean = false,
     val linkUrl: String? = null,
-    val colorHex: String? = null
+    val colorHex: String? = null,
+    val fontSizeHalfPt: Int? = null,
+    val highlightColorHex: String? = null
 )
 
 sealed interface DocxBlock {
     data class Heading(val level: Int, val runs: List<DocxRun>, val sourceParagraphIndex: Int = -1) : DocxBlock
-    data class Paragraph(val runs: List<DocxRun>, val alignment: String = "left", val sourceParagraphIndex: Int = -1) : DocxBlock
+    data class Paragraph(
+        val runs: List<DocxRun>,
+        val alignment: String = "left",
+        val sourceParagraphIndex: Int = -1,
+        val backgroundHex: String? = null
+    ) : DocxBlock
     data class ListItem(
         val ordered: Boolean,
         val indexNumber: Int,
@@ -39,7 +46,9 @@ sealed interface DocxBlock {
     data class Math(val formula: String) : DocxBlock
     data class Table(
         val headers: List<List<DocxRun>>,
-        val rows: List<List<List<DocxRun>>>
+        val rows: List<List<List<DocxRun>>>,
+        val headerBackgrounds: List<String?> = emptyList(),
+        val rowBackgrounds: List<List<String?>> = emptyList()
     ) : DocxBlock
     data object Divider : DocxBlock
     data object PageBreak : DocxBlock
@@ -90,7 +99,8 @@ object DocxDocumentEngine {
         val isItalic: Boolean? = null,
         val isUnderline: Boolean? = null,
         val isStrike: Boolean? = null,
-        val isMonospace: Boolean = false
+        val isMonospace: Boolean = false,
+        val colorHex: String? = null
     )
 
     private data class NumberingLevelRule(
@@ -115,7 +125,8 @@ object DocxDocumentEngine {
     }
 
     private data class CellContent(
-        val blocks: List<DocxBlock>
+        val blocks: List<DocxBlock>,
+        val backgroundHex: String? = null
     )
 
     fun parseDocx(inputStream: InputStream): DocxParsedDocument {
@@ -495,6 +506,7 @@ object DocxDocumentEngine {
         var currentUnderline: Boolean? = null
         var currentStrike: Boolean? = null
         var currentMono = false
+        var currentColorHex: String? = null
         var inRPr = false
         var inPPr = false
 
@@ -515,6 +527,7 @@ object DocxDocumentEngine {
                             currentUnderline = null
                             currentStrike = null
                             currentMono = false
+                            currentColorHex = null
                         }
                         "name" -> if (currentId != null && !inRPr && !inPPr) {
                             currentName = attr(parser, "val").orEmpty()
@@ -529,6 +542,9 @@ object DocxDocumentEngine {
                         }
                         "sz", "szCs" -> if (inRPr && currentSize == null) {
                             currentSize = attr(parser, "val")?.toIntOrNull()
+                        }
+                        "color" -> if (inRPr && currentColorHex == null) {
+                            currentColorHex = attr(parser, "val")?.takeIf { !it.equals("auto", true) }
                         }
                         "b", "bCs" -> if (inRPr) {
                             val v = attr(parser, "val")
@@ -574,7 +590,8 @@ object DocxDocumentEngine {
                                     isItalic = currentItalic,
                                     isUnderline = currentUnderline,
                                     isStrike = currentStrike,
-                                    isMonospace = currentMono
+                                    isMonospace = currentMono,
+                                    colorHex = currentColorHex
                                 )
                             }
                             currentId = null
@@ -594,6 +611,7 @@ object DocxDocumentEngine {
             var underline = def.isUnderline
             var strike = def.isStrike
             var mono = def.isMonospace
+            var color = def.colorHex
             var parentId = def.basedOn
             var hops = 0
             while (parentId != null && hops < 8) {
@@ -605,6 +623,7 @@ object DocxDocumentEngine {
                 if (underline == null) underline = parent.isUnderline
                 if (strike == null) strike = parent.isStrike
                 if (!mono) mono = parent.isMonospace
+                if (color == null) color = parent.colorHex
                 parentId = parent.basedOn
                 hops++
             }
@@ -615,7 +634,8 @@ object DocxDocumentEngine {
                 isItalic = italic,
                 isUnderline = underline,
                 isStrike = strike,
-                isMonospace = mono
+                isMonospace = mono,
+                colorHex = color
             )
         }
     }
@@ -776,6 +796,8 @@ object DocxDocumentEngine {
         val parsedRows = mutableListOf<List<CellContent>>()
         var currentRow: MutableList<CellContent>? = null
         var currentCellBlocks: MutableList<DocxBlock>? = null
+        var currentCellBgHex: String? = null
+        var inTcPr = false
         var depth = 1
 
         while (depth > 0) {
@@ -791,8 +813,23 @@ object DocxDocumentEngine {
                         } else depth++
                         "tc" -> if (depth == 2) {
                             currentCellBlocks = mutableListOf()
+                            currentCellBgHex = null
+                            inTcPr = false
                             depth++
                         } else depth++
+                        "tcPr" -> {
+                            if (depth == 3) inTcPr = true
+                            depth++
+                        }
+                        "shd" -> {
+                            if (inTcPr && currentCellBgHex == null) {
+                                val fill = attr(parser, "fill")?.uppercase()
+                                if (!fill.isNullOrBlank() && fill != "AUTO" && fill != "NONE" && fill != "NIL") {
+                                    currentCellBgHex = fill
+                                }
+                            }
+                            depth++
+                        }
                         "p" -> if (depth == 3) {
                             currentCellBlocks?.addAll(
                                 parseParagraphElement(parser, rels, styles, numbering, numberingCounters, mediaMap)
@@ -811,10 +848,16 @@ object DocxDocumentEngine {
                 }
                 XmlPullParser.END_TAG -> {
                     when (tag) {
+                        "tcPr" -> {
+                            if (depth == 4) inTcPr = false
+                            depth--
+                        }
                         "tc" -> {
                             if (depth == 3) {
-                                currentRow?.add(CellContent(currentCellBlocks?.toList().orEmpty()))
+                                currentRow?.add(CellContent(currentCellBlocks?.toList().orEmpty(), currentCellBgHex))
                                 currentCellBlocks = null
+                                currentCellBgHex = null
+                                inTcPr = false
                             }
                             depth--
                         }
@@ -864,12 +907,25 @@ object DocxDocumentEngine {
         val headerRuns = (0 until colCount).map { c ->
             parsedRows.first().getOrNull(c)?.let(::cellToRuns) ?: emptyList()
         }
+        val headerBgHexes = (0 until colCount).map { c ->
+            parsedRows.first().getOrNull(c)?.backgroundHex
+        }
         val bodyRows = parsedRows.drop(1).map { row ->
             (0 until colCount).map { c ->
                 row.getOrNull(c)?.let(::cellToRuns) ?: emptyList()
             }
         }
-        return DocxBlock.Table(headers = headerRuns, rows = bodyRows)
+        val bodyBgHexes = parsedRows.drop(1).map { row ->
+            (0 until colCount).map { c ->
+                row.getOrNull(c)?.backgroundHex
+            }
+        }
+        return DocxBlock.Table(
+            headers = headerRuns,
+            rows = bodyRows,
+            headerBackgrounds = headerBgHexes,
+            rowBackgrounds = bodyBgHexes
+        )
     }
 
     private fun blockToRuns(block: DocxBlock): List<DocxRun> = when (block) {
@@ -950,6 +1006,7 @@ object DocxDocumentEngine {
         var rStrike: Boolean? = null
         var rUnderline: Boolean? = null
         var rHighlight = false
+        var rHighlightHex: String? = null
         var rCode = false
         var rColor: String? = null
         var rFontSize: Int? = null
@@ -969,6 +1026,8 @@ object DocxDocumentEngine {
             val resolvedUnderline = rUnderline ?: rStyleDef?.isUnderline ?: pStyleDef?.isUnderline ?: false
             val resolvedStrike = rStrike ?: rStyleDef?.isStrike ?: pStyleDef?.isStrike ?: false
             val resolvedCode = rCode || (rStyleDef?.isMonospace == true) || (pStyleDef?.isMonospace == true)
+            val resolvedFontSize = rFontSize ?: rStyleDef?.fontSizeHalfPt ?: pStyleDef?.fontSizeHalfPt
+            val resolvedColor = rColor ?: rStyleDef?.colorHex ?: pStyleDef?.colorHex
             runs.add(
                 DocxRun(
                     text = txt,
@@ -979,7 +1038,9 @@ object DocxDocumentEngine {
                     isHighlight = rHighlight,
                     isCode = resolvedCode,
                     linkUrl = currentLinkUrl ?: activeFieldLinkUrl,
-                    colorHex = rColor
+                    colorHex = resolvedColor,
+                    fontSizeHalfPt = resolvedFontSize,
+                    highlightColorHex = rHighlightHex
                 )
             )
             rFontSize?.let { maxFontSizes.add(it) }
@@ -1032,9 +1093,10 @@ object DocxDocumentEngine {
                         "ilvl" -> if (inPPr) ilvl = attr(parser, "val")?.toIntOrNull() ?: 0
                         "shd" -> {
                             val fill = attr(parser, "fill")?.uppercase()
-                            if (!fill.isNullOrBlank() && fill != "AUTO" && fill != "FFFFFF") {
+                            if (!fill.isNullOrBlank() && fill != "AUTO" && fill != "FFFFFF" && fill != "NONE" && fill != "NIL") {
                                 if (inRPr) {
-                                    if (fill != "NONE") rHighlight = true
+                                    rHighlight = true
+                                    rHighlightHex = fill
                                 } else if (inPPr) {
                                     shadingFill = fill
                                 }
@@ -1083,6 +1145,7 @@ object DocxDocumentEngine {
                                 rStrike = null
                                 rUnderline = null
                                 rHighlight = false
+                                rHighlightHex = null
                                 rCode = false
                                 rColor = null
                                 rFontSize = null
@@ -1109,7 +1172,11 @@ object DocxDocumentEngine {
                         }
                         "highlight" -> if (inRPr) {
                             val v = attr(parser, "val")
-                            rHighlight = v == null || !v.equals("none", true)
+                            val active = v == null || !v.equals("none", true)
+                            rHighlight = active
+                            if (active) {
+                                rHighlightHex = resolveNamedHighlightHex(v)
+                            }
                         }
                         "color" -> if (inRPr) {
                             rColor = attr(parser, "val")?.takeIf { !it.equals("auto", true) }
@@ -1373,9 +1440,23 @@ object DocxDocumentEngine {
 
             else -> {
                 if (runs.isNotEmpty()) {
-                    blocks.add(DocxBlock.Paragraph(runs = runs, alignment = alignment, sourceParagraphIndex = sourceParagraphIndex))
+                    blocks.add(
+                        DocxBlock.Paragraph(
+                            runs = runs,
+                            alignment = alignment,
+                            sourceParagraphIndex = sourceParagraphIndex,
+                            backgroundHex = shadingFill
+                        )
+                    )
                 } else {
-                    blocks.add(DocxBlock.Paragraph(runs = emptyList(), alignment = alignment, sourceParagraphIndex = sourceParagraphIndex))
+                    blocks.add(
+                        DocxBlock.Paragraph(
+                            runs = emptyList(),
+                            alignment = alignment,
+                            sourceParagraphIndex = sourceParagraphIndex,
+                            backgroundHex = shadingFill
+                        )
+                    )
                 }
             }
         }
@@ -1387,6 +1468,27 @@ object DocxDocumentEngine {
             blocks.add(DocxBlock.PageBreak)
         }
         return blocks
+    }
+
+    private fun resolveNamedHighlightHex(name: String?): String {
+        return when (name?.lowercase()?.trim()) {
+            "yellow" -> "FEF08A"
+            "green" -> "86EFAC"
+            "cyan" -> "67E8F9"
+            "magenta" -> "F0ABFC"
+            "blue" -> "93C5FD"
+            "red" -> "FCA5A5"
+            "darkblue" -> "1E3A8A"
+            "darkcyan" -> "155E75"
+            "darkgreen" -> "14532D"
+            "darkmagenta" -> "701A75"
+            "darkred" -> "7F1D1D"
+            "darkyellow" -> "A16207"
+            "darkgray" -> "64748B"
+            "lightgray" -> "E2E8F0"
+            "black" -> "0F172A"
+            else -> "FEF08A"
+        }
     }
 
     private fun isTocHeadingStyle(styleId: String?, styleName: String?): Boolean {

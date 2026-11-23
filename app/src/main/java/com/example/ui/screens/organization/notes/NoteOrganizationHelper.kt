@@ -2,13 +2,15 @@ package com.example.ui.screens.organization.notes
 
 import com.example.data.model.Note
 import com.example.data.model.NoteDocumentType
+import com.example.data.model.isEbookOrComicDocument
 import com.example.data.model.resolvedDocumentType
 
 enum class NoteDocumentFilter(val label: String) {
     ALL("Todos"),
     NOTES("Notas"),
     PDF("PDFs"),
-    DOCX(".docx");
+    DOCX(".docx"),
+    EBOOK("Ebooks");
 
     companion object {
         fun fromName(name: String?): NoteDocumentFilter {
@@ -26,6 +28,7 @@ fun filterNotesByDocumentType(
         NoteDocumentFilter.NOTES -> notes.filter { it.resolvedDocumentType == NoteDocumentType.MARKDOWN }
         NoteDocumentFilter.PDF -> notes.filter { it.resolvedDocumentType == NoteDocumentType.PDF }
         NoteDocumentFilter.DOCX -> notes.filter { it.resolvedDocumentType == NoteDocumentType.DOCX }
+        NoteDocumentFilter.EBOOK -> notes.filter { it.isEbookOrComicDocument }
     }
 }
 

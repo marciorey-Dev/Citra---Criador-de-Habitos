@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -73,11 +74,11 @@ import com.example.util.DeviceDocumentScanner
 import com.example.util.DiscoveredExternalDocument
 
 /**
- * 2-column visual Device Document Explorer for PDF and DOCX files.
+ * 2-column visual Device Document Explorer for PDF, DOCX, and Ebooks/Comics (EPUB, MOBI, CBZ, FB2).
  *
- * Single tap opens the file immediately in transient read-only mode without creating a vault link.
- * Users can search, browse page-1 previews (red PDF / blue DOCX sheets), link custom SAF folders,
- * open the system multi-picker, or multi-select documents to save into the Citra vault.
+ * Single tap opens the file immediately in transient read-only mode without importing permanently.
+ * Users can search, browse page-1 previews, link custom SAF folders, open the system multi-picker,
+ * or multi-select documents to import persistently into Citra.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -99,8 +100,18 @@ fun DocumentExplorerDialog(
     var isScanning by remember { mutableStateOf(true) }
 
     val isPdf = docType == NoteDocumentType.PDF
-    val accentColor = if (isPdf) PdfSheetAccentColor else DocxSheetAccentColor
-    val titleText = if (isPdf) "Explorar PDFs" else "Explorar Word (.docx)"
+    val isEbook = docType.isEbookOrComic
+    val accentColor = accentColorForDocType(docType)
+    val headerIcon = when {
+        isPdf -> Icons.Default.PictureAsPdf
+        isEbook -> Icons.Default.MenuBook
+        else -> Icons.Default.Article
+    }
+    val titleText = when {
+        isPdf -> "Explorar PDFs"
+        isEbook -> "Explorar Ebooks & Comics"
+        else -> "Explorar Word (.docx)"
+    }
 
     LaunchedEffect(docType, recentDocs, authorizedTreeUris, existingNotes) {
         isScanning = true
@@ -162,7 +173,7 @@ fun DocumentExplorerDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
+                                imageVector = headerIcon,
                                 contentDescription = null,
                                 tint = accentColor,
                                 modifier = Modifier.size(20.dp)
@@ -177,7 +188,7 @@ fun DocumentExplorerDialog(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Toque para ler • Segure para guardar no cofre",
+                                text = "Toque para ler • Segure para importar",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -217,7 +228,11 @@ fun DocumentExplorerDialog(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isPdf) "Escolher PDFs" else "Escolher .docx",
+                            text = when {
+                                isPdf -> "Escolher PDFs"
+                                isEbook -> "Escolher Ebooks"
+                                else -> "Escolher .docx"
+                            },
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -251,7 +266,11 @@ fun DocumentExplorerDialog(
                     onValueChange = { search = it },
                     placeholder = {
                         Text(
-                            text = if (isPdf) "Pesquisar PDFs no aparelho..." else "Pesquisar documentos .docx..."
+                            text = when {
+                                isPdf -> "Pesquisar PDFs no aparelho..."
+                                isEbook -> "Pesquisar EPUB, MOBI, CBZ, FB2..."
+                                else -> "Pesquisar documentos .docx..."
+                            }
                         )
                     },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
@@ -310,7 +329,7 @@ fun DocumentExplorerDialog(
                             modifier = Modifier.padding(16.dp)
                         ) {
                             Icon(
-                                imageVector = if (isPdf) Icons.Default.PictureAsPdf else Icons.Default.Article,
+                                imageVector = headerIcon,
                                 contentDescription = null,
                                 tint = accentColor.copy(alpha = 0.4f),
                                 modifier = Modifier.size(44.dp)
@@ -385,19 +404,12 @@ fun DocumentExplorerDialog(
                                             .fillMaxWidth()
                                             .aspectRatio(0.82f)
                                     ) {
-                                        if (isPdf) {
-                                            PdfPageOnePreviewBox(
-                                                externalUri = entry.uri,
-                                                compact = false,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            DocxPageOnePreviewBox(
-                                                externalUri = entry.uri,
-                                                compact = false,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        }
+                                        ExternalDocumentPageOnePreviewBox(
+                                            externalUri = entry.uri,
+                                            docType = entry.docType,
+                                            compact = false,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
 
                                         if (entry.isInVault) {
                                             Surface(
@@ -412,12 +424,12 @@ fun DocumentExplorerDialog(
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.CheckCircle,
-                                                        contentDescription = "No cofre",
+                                                        contentDescription = "Importado",
                                                         tint = Color.White,
                                                         modifier = Modifier.size(10.dp)
                                                     )
                                                     Text(
-                                                        text = "Cofre",
+                                                        text = "Importado",
                                                         fontSize = 8.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = Color.White
@@ -500,7 +512,7 @@ fun DocumentExplorerDialog(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Guardar no Cofre (${toSave.size})",
+                                text = "Importar (${toSave.size})",
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
