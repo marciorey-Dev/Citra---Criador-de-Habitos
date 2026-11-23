@@ -35,6 +35,13 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.data.model.*
 import com.example.ui.theme.RedAction
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.material3.minimumInteractiveComponentSize
+import com.example.ui.theme.GreenAccent
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,6 +56,7 @@ fun FinanceEntryEditorDialog(
     categories: List<FinanceCategory>,
     allCategories: List<FinanceCategory>,
     wallets: List<FinanceWallet> = emptyList(),
+    initialIsPlanned: Boolean = false,
     onDismiss: () -> Unit,
     onSaveEntry: (entry: FinanceEntry, isNew: Boolean) -> Unit,
     onSaveCategory: (FinanceCategory) -> Unit,
@@ -109,8 +117,9 @@ fun FinanceEntryEditorDialog(
     }
     var currencyExpanded by remember { mutableStateOf(false) }
 
-    var walletName by remember { mutableStateOf(existingEntry?.walletName ?: wallets.firstOrNull()?.name ?: "Carteira Principal") }
-    var isPlanned by remember { mutableStateOf(existingEntry?.isPlanned ?: false) }
+    val defaultWalletName = remember(wallets) { wallets.firstOrNull()?.name ?: "Carteira Principal" }
+    var walletName by remember { mutableStateOf(existingEntry?.walletName ?: defaultWalletName) }
+    var isPlanned by remember { mutableStateOf(existingEntry?.isPlanned ?: initialIsPlanned) }
     var priority by remember {
         mutableStateOf(
             existingEntry?.let { FinancePriority.fromId(it.priority) } ?: FinancePriority.MANDATORY
@@ -131,6 +140,21 @@ fun FinanceEntryEditorDialog(
     var attachmentUri by remember { mutableStateOf(existingEntry?.attachmentUri) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var showManageCategories by remember { mutableStateOf(false) }
+
+    // Progressive disclosure: collapsed for quick registration unless editing an item with secondary data
+    val hasAdvancedData = remember(existingEntry, defaultCurrencyCode, defaultWalletName, initialIsPlanned) {
+        initialIsPlanned || (existingEntry != null && (
+            existingEntry.comment.isNotBlank() ||
+                existingEntry.unitPriceMinor != null ||
+                existingEntry.tagsCsv.isNotBlank() ||
+                !existingEntry.attachmentUri.isNullOrBlank() ||
+                existingEntry.isPlanned ||
+                !existingEntry.currencyCode.equals(defaultCurrencyCode, ignoreCase = true) ||
+                FinancePriority.fromId(existingEntry.priority) != FinancePriority.MANDATORY ||
+                !existingEntry.walletName.equals(defaultWalletName, ignoreCase = true)
+            ))
+    }
+    var showMoreOptions by remember { mutableStateOf(hasAdvancedData) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -155,8 +179,12 @@ fun FinanceEntryEditorDialog(
         }
     }
 
-    val dateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", Locale("pt", "AO")) }
+    val ptLocale = remember { Locale.Builder().setLanguage("pt").setRegion("AO").build() }
+    val dateFormatter = remember(ptLocale) { SimpleDateFormat("dd/MM/yyyy", ptLocale) }
     val presetUnits = remember { listOf("un", "kg", "L", "monte", "garrafa", "pacote", "corte") }
+
+    val isExpense = entryType == FinanceEntryType.EXPENSE
+    val typeAccentColor = if (isExpense) MaterialTheme.colorScheme.primary else GreenAccent
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -165,7 +193,7 @@ fun FinanceEntryEditorDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.90f),
+                .fillMaxHeight(0.88f),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
@@ -175,16 +203,19 @@ fun FinanceEntryEditorDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (existingEntry == null) "Novo Lançamento" else "Editar Lançamento",
+                        text = if (existingEntry == null) "Novo lançamento" else "Editar lançamento",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.ExtraBold
                     )
-                    IconButton(onClick = onDismiss) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.minimumInteractiveComponentSize()
+                    ) {
                         Icon(Icons.Default.Close, contentDescription = "Fechar")
                     }
                 }
@@ -196,39 +227,160 @@ fun FinanceEntryEditorDialog(
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Type selector (Despesa / Renda)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                RoundedCornerShape(14.dp)
-                            )
-                            .padding(4.dp)
+                    // ==================== ESSENTIAL LAYER ====================
+                    // 1. Type selector (Despesa / Renda)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        FinanceEntryType.entries.forEach { t ->
-                            val selected = entryType == t
-                            Button(
-                                onClick = {
-                                    entryType = t
-                                    errorMsg = null
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(t.label, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            FinanceEntryType.entries.forEach { t ->
+                                val selected = entryType == t
+                                val btnBg = when {
+                                    selected && t == FinanceEntryType.EXPENSE -> MaterialTheme.colorScheme.primary
+                                    selected && t == FinanceEntryType.INCOME -> GreenAccent
+                                    else -> Color.Transparent
+                                }
+                                Button(
+                                    onClick = {
+                                        entryType = t
+                                        errorMsg = null
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = btnBg,
+                                        contentColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    shape = RoundedCornerShape(12.dp),
+                                    elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 44.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (t == FinanceEntryType.EXPENSE) Icons.Default.SouthEast else Icons.Default.NorthEast,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(t.label, fontWeight = FontWeight.ExtraBold)
+                                }
                             }
                         }
                     }
 
-                    // Name (required)
+                    // 2. Prominent Value Field
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = typeAccentColor.copy(alpha = 0.06f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, typeAccentColor.copy(alpha = 0.28f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Valor *",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = typeAccentColor
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { currencyExpanded = true }
+                                ) {
+                                    Text(
+                                        text = "${selectedCurrency.symbol} · ${selectedCurrency.code} ▾",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            if (!useQuantityMode) {
+                                OutlinedTextField(
+                                    value = totalAmountText,
+                                    onValueChange = {
+                                        totalAmountText = it
+                                        errorMsg = null
+                                    },
+                                    placeholder = {
+                                        Text(
+                                            text = "0,00",
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Text(
+                                            text = selectedCurrency.symbol,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = typeAccentColor
+                                        )
+                                    },
+                                    textStyle = LocalTextStyle.current.copy(
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    ),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("finance_entry_total_input")
+                                )
+                            } else {
+                                OutlinedTextField(
+                                    value = computedTotalMinor?.let { formatMinorUnitsForInput(it) } ?: "0",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    supportingText = {
+                                        Text("Calculado por Quantidade × Unitário em Mais opções")
+                                    },
+                                    leadingIcon = {
+                                        Text(
+                                            text = selectedCurrency.symbol,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = typeAccentColor
+                                        )
+                                    },
+                                    textStyle = LocalTextStyle.current.copy(
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    ),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("finance_entry_total_input")
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. Name (required)
                     OutlinedTextField(
                         value = name,
                         onValueChange = {
@@ -237,7 +389,7 @@ fun FinanceEntryEditorDialog(
                         },
                         label = { Text("Nome *") },
                         placeholder = {
-                            Text(if (entryType == FinanceEntryType.EXPENSE) "Ex.: Arroz, Transporte..." else "Ex.: Salário, Freelance...")
+                            Text(if (isExpense) "Ex.: Almoço, Transporte..." else "Ex.: Salário, Freelance...")
                         },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
@@ -246,424 +398,437 @@ fun FinanceEntryEditorDialog(
                             .testTag("finance_entry_name_input")
                     )
 
-                    // Value Mode Toggle: Total vs Quantity x Unit Price
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Valor",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        FilterChip(
-                            selected = useQuantityMode,
-                            onClick = { useQuantityMode = !useQuantityMode },
-                            label = { Text("Quantidade × Unitário", fontSize = 12.sp) },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Calculate,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        )
-                    }
-
-                    if (!useQuantityMode) {
-                        OutlinedTextField(
-                            value = totalAmountText,
-                            onValueChange = {
-                                totalAmountText = it
-                                errorMsg = null
-                            },
-                            label = { Text("Valor total *") },
-                            placeholder = { Text("0") },
-                            suffix = { Text(selectedCurrency.symbol, fontWeight = FontWeight.Bold) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("finance_entry_total_input")
-                        )
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = quantityText,
-                                onValueChange = {
-                                    quantityText = it
-                                    errorMsg = null
-                                },
-                                label = { Text("Qtd. *") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = unitText,
-                                onValueChange = { unitText = it },
-                                label = { Text("Unidade") },
-                                placeholder = { Text("kg, L...") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            OutlinedTextField(
-                                value = unitPriceText,
-                                onValueChange = {
-                                    unitPriceText = it
-                                    errorMsg = null
-                                },
-                                label = { Text("Unit. *") },
-                                suffix = { Text(selectedCurrency.symbol, fontSize = 12.sp) },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.weight(1.3f)
-                            )
-                        }
-
-                        // Quick unit chips
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            items(presetUnits) { u ->
-                                SuggestionChip(
-                                    onClick = { unitText = u },
-                                    label = { Text(u, fontSize = 11.5.sp) }
-                                )
-                            }
-                        }
-
-                        if (computedTotalMinor != null) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("Valor total calculado:", fontSize = 12.5.sp)
-                                    Text(
-                                        text = formatFinanceAmount(computedTotalMinor, selectedCurrency),
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Category Selection + Manage Categories
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Categoria *",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        TextButton(
-                            onClick = { showManageCategories = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Gerir categorias", fontSize = 12.sp)
-                        }
-                    }
-
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        filteredCategories.forEach { cat ->
-                            val isSelected = cat.id == selectedCategoryId
-                            val catColor = Color(cat.colorHex)
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { selectedCategoryId = cat.id },
-                                label = { Text(cat.name, fontSize = 12.5.sp) },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = FinanceCategoryIcons.iconForName(cat.iconName),
-                                        contentDescription = null,
-                                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else catColor,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            )
-                        }
-                    }
-
-                    // Comment (optional)
-                    OutlinedTextField(
-                        value = comment,
-                        onValueChange = { comment = it },
-                        label = { Text("Comentário (opcional)") },
-                        placeholder = { Text("Aparece abaixo do nome em letra menor") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // Date & Currency Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = dateFormatter.format(Date(dateMillis)),
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Data") },
-                            trailingIcon = {
-                                IconButton(onClick = { showDatePicker = true }) {
-                                    Icon(Icons.Default.CalendarToday, contentDescription = "Escolher data", modifier = Modifier.size(18.dp))
-                                }
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { showDatePicker = true }
-                        )
-
-                        Box(modifier = Modifier.weight(1f)) {
-                            OutlinedTextField(
-                                value = "${selectedCurrency.symbol} (${selectedCurrency.code})",
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("Moeda") },
-                                trailingIcon = {
-                                    IconButton(onClick = { currencyExpanded = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Selecionar moeda")
-                                    }
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .clickable { currencyExpanded = true }
-                            )
-                        }
-                    }
-
-                    // Priority (Obrigatória vs Opcional)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "Prioridade",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FinancePriority.entries.forEach { p ->
-                                FilterChip(
-                                    selected = priority == p,
-                                    onClick = { priority = p },
-                                    label = { Text(p.label, fontSize = 12.5.sp) },
-                                    leadingIcon = if (priority == p) {
-                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                    } else null
-                                )
-                            }
-                        }
-                    }
-
-                    // Wallet
-                    OutlinedTextField(
-                        value = walletName,
-                        onValueChange = { walletName = it },
-                        label = { Text("Carteira") },
-                        leadingIcon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // Tags
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = tagInput,
-                                onValueChange = { tagInput = it },
-                                label = { Text("Etiquetas (opcional)") },
-                                placeholder = { Text("Ex.: mercado, urgente") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            FilledTonalIconButton(
-                                onClick = {
-                                    val cleaned = tagInput.trim().removePrefix("#")
-                                    if (cleaned.isNotEmpty() && !tags.contains(cleaned)) {
-                                        tags = tags + cleaned
-                                    }
-                                    tagInput = ""
-                                }
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = "Adicionar etiqueta")
-                            }
-                        }
-                        if (tags.isNotEmpty()) {
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                tags.forEach { tag ->
-                                    InputChip(
-                                        selected = false,
-                                        onClick = { tags = tags - tag },
-                                        label = { Text("#$tag", fontSize = 12.sp) },
-                                        trailingIcon = {
-                                            Icon(Icons.Default.Close, contentDescription = "Remover", modifier = Modifier.size(14.dp))
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Attachment (Receipt / Photo)
+                    // 4. Category Chips + Discrete Manage Button
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Anexo (talão ou recibo)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                            OutlinedButton(
-                                onClick = {
-                                    photoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                },
-                                shape = RoundedCornerShape(12.dp)
+                            Text(
+                                text = "Categoria *",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            TextButton(
+                                onClick = { showManageCategories = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.minimumInteractiveComponentSize()
                             ) {
-                                Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (attachmentUri == null) "Anexar foto" else "Trocar foto", fontSize = 12.5.sp)
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Gerir", fontSize = 12.5.sp)
                             }
                         }
-                        if (attachmentUri != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(120.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
-                            ) {
-                                AsyncImage(
-                                    model = attachmentUri,
-                                    contentDescription = "Anexo do lançamento",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                IconButton(
-                                    onClick = { attachmentUri = null },
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(6.dp)
-                                        .size(28.dp)
-                                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.Close, contentDescription = "Remover anexo", tint = Color.White, modifier = Modifier.size(16.dp))
-                                }
-                            }
-                        }
-                    }
 
-                    // Wallet & Currency selectors
-                    if (wallets.isNotEmpty()) {
-                        Text("Carteira", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(wallets, key = { it.id }) { w ->
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            filteredCategories.forEach { cat ->
+                                val isSelected = cat.id == selectedCategoryId
+                                val catColor = Color(cat.colorHex)
                                 FilterChip(
-                                    selected = walletName.equals(w.name, ignoreCase = true),
-                                    onClick = { walletName = w.name },
-                                    label = { Text(w.name, fontSize = 12.sp) }
+                                    selected = isSelected,
+                                    onClick = { selectedCategoryId = cat.id },
+                                    label = { Text(cat.name, fontSize = 12.5.sp) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = FinanceCategoryIcons.iconForName(cat.iconName),
+                                            contentDescription = null,
+                                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else catColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 )
                             }
                         }
                     }
 
-                    Text("Moeda", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val quickEntryCurrencies = remember(selectedCurrency, defaultCurrencyCode) {
-                        listOf(
-                            selectedCurrency,
-                            FinanceCurrency.fromCode(defaultCurrencyCode),
-                            FinanceCurrency.AOA,
-                            FinanceCurrency.MZN,
-                            FinanceCurrency.BRL,
-                            FinanceCurrency.EUR,
-                            FinanceCurrency.USD,
-                            FinanceCurrency.GBP
-                        ).distinct()
+                    // ==================== EXPANDABLE "MAIS OPÇÕES" ====================
+                    val formattedDateSummary = remember(dateMillis, dateFormatter) {
+                        dateFormatter.format(Date(dateMillis))
                     }
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        item {
-                            AssistChip(
-                                onClick = { currencyExpanded = true },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                                },
-                                label = { Text("Pesquisar", fontSize = 12.sp) }
-                            )
-                        }
-                        items(quickEntryCurrencies, key = { it.code }) { curr ->
-                            FilterChip(
-                                selected = selectedCurrency == curr,
-                                onClick = { selectedCurrency = curr },
-                                label = { Text("${curr.code} (${curr.symbol})", fontSize = 12.sp) }
-                            )
-                        }
-                    }
-
-                    // Planned vs Real toggle
-                    Row(
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { isPlanned = !isPlanned }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { showMoreOptions = !showMoreOptions }
+                            .testTag("finance_entry_more_options_toggle")
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Item planeado (Lista de compras)", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                            Text(
-                                "Não entra no saldo até marcar ✔ como pago",
-                                fontSize = 11.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (showMoreOptions) "Menos opções" else "Mais opções",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "$formattedDateSummary · $walletName" + if (isPlanned) " · Planeado" else "",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                            Icon(
+                                imageVector = if (showMoreOptions) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (showMoreOptions) "Recolher opções" else "Expandir opções",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
-                        Switch(checked = isPlanned, onCheckedChange = { isPlanned = it })
                     }
 
-                    if (errorMsg != null) {
-                        Text(
-                            text = errorMsg!!,
-                            color = RedAction,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                    AnimatedVisibility(
+                        visible = showMoreOptions,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            // 1. Date
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                OutlinedTextField(
+                                    value = formattedDateSummary,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("Data do lançamento") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.CalendarToday, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .clickable { showDatePicker = true }
+                                )
+                            }
+
+                            // 2. Quantity × Unit Price toggle & breakdown
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Cálculo por unidade",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.5.sp
+                                    )
+                                    FilterChip(
+                                        selected = useQuantityMode,
+                                        onClick = { useQuantityMode = !useQuantityMode },
+                                        label = { Text("Quantidade × Unitário", fontSize = 12.sp) },
+                                        leadingIcon = {
+                                            Icon(
+                                                imageVector = Icons.Default.Calculate,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    )
+                                }
+
+                                if (useQuantityMode) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = quantityText,
+                                            onValueChange = {
+                                                quantityText = it
+                                                errorMsg = null
+                                            },
+                                            label = { Text("Qtd. *") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        OutlinedTextField(
+                                            value = unitText,
+                                            onValueChange = { unitText = it },
+                                            label = { Text("Unidade") },
+                                            placeholder = { Text("kg, L...") },
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        OutlinedTextField(
+                                            value = unitPriceText,
+                                            onValueChange = {
+                                                unitPriceText = it
+                                                errorMsg = null
+                                            },
+                                            label = { Text("Unit. *") },
+                                            suffix = { Text(selectedCurrency.symbol, fontSize = 12.sp) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier.weight(1.3f)
+                                        )
+                                    }
+
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(presetUnits) { u ->
+                                            SuggestionChip(
+                                                onClick = { unitText = u },
+                                                label = { Text(u, fontSize = 11.5.sp) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Unified Wallet selector (no duplicate Wallet fields)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Carteira",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.5.sp
+                                )
+                                if (wallets.isNotEmpty()) {
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(wallets, key = { it.id }) { w ->
+                                            FilterChip(
+                                                selected = walletName.equals(w.name, ignoreCase = true),
+                                                onClick = { walletName = w.name },
+                                                label = { Text(w.name, fontSize = 12.sp) }
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    OutlinedTextField(
+                                        value = walletName,
+                                        onValueChange = { walletName = it },
+                                        label = { Text("Nome da carteira") },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+
+                            // 4. Unified Currency selector (no duplicate Currency fields)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Moeda",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.5.sp
+                                )
+                                val quickEntryCurrencies = remember(selectedCurrency, defaultCurrencyCode) {
+                                    listOf(
+                                        selectedCurrency,
+                                        FinanceCurrency.fromCode(defaultCurrencyCode),
+                                        FinanceCurrency.AOA,
+                                        FinanceCurrency.MZN,
+                                        FinanceCurrency.BRL,
+                                        FinanceCurrency.EUR,
+                                        FinanceCurrency.USD,
+                                        FinanceCurrency.GBP
+                                    ).distinct()
+                                }
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    item {
+                                        AssistChip(
+                                            onClick = { currencyExpanded = true },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            },
+                                            label = { Text("Outras", fontSize = 12.sp) }
+                                        )
+                                    }
+                                    items(quickEntryCurrencies, key = { it.code }) { curr ->
+                                        FilterChip(
+                                            selected = selectedCurrency == curr,
+                                            onClick = { selectedCurrency = curr },
+                                            label = { Text("${curr.code} (${curr.symbol})", fontSize = 12.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 5. Priority (Obrigatória vs Opcional)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Prioridade",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.5.sp
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FinancePriority.entries.forEach { p ->
+                                        FilterChip(
+                                            selected = priority == p,
+                                            onClick = { priority = p },
+                                            label = { Text(p.label, fontSize = 12.5.sp) },
+                                            leadingIcon = if (priority == p) {
+                                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                            } else null
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 6. Comment
+                            OutlinedTextField(
+                                value = comment,
+                                onValueChange = { comment = it },
+                                label = { Text("Comentário (opcional)") },
+                                placeholder = { Text("Nota curta visível abaixo do nome") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // 7. Tags
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = tagInput,
+                                        onValueChange = { tagInput = it },
+                                        label = { Text("Etiquetas (opcional)") },
+                                        placeholder = { Text("Ex.: mercado, urgente") },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(14.dp),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            val cleaned = tagInput.trim().removePrefix("#")
+                                            if (cleaned.isNotEmpty() && !tags.contains(cleaned)) {
+                                                tags = tags + cleaned
+                                            }
+                                            tagInput = ""
+                                        },
+                                        modifier = Modifier.minimumInteractiveComponentSize()
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = "Adicionar etiqueta")
+                                    }
+                                }
+                                if (tags.isNotEmpty()) {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        tags.forEach { tag ->
+                                            InputChip(
+                                                selected = false,
+                                                onClick = { tags = tags - tag },
+                                                label = { Text("#$tag", fontSize = 12.sp) },
+                                                trailingIcon = {
+                                                    Icon(Icons.Default.Close, contentDescription = "Remover", modifier = Modifier.size(14.dp))
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 8. Attachment (Receipt / Photo)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Comprovante / foto", fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                                    OutlinedButton(
+                                        onClick = {
+                                            photoPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.heightIn(min = 44.dp)
+                                    ) {
+                                        Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(if (attachmentUri == null) "Anexar foto" else "Trocar foto", fontSize = 12.5.sp)
+                                    }
+                                }
+                                if (attachmentUri != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(120.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                                    ) {
+                                        AsyncImage(
+                                            model = attachmentUri,
+                                            contentDescription = "Anexo do lançamento",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        IconButton(
+                                            onClick = { attachmentUri = null },
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(6.dp)
+                                                .size(32.dp)
+                                                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                        ) {
+                                            Icon(Icons.Default.Close, contentDescription = "Remover anexo", tint = Color.White, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 9. Planned vs Real toggle
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { isPlanned = !isPlanned }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Item planeado (Lista de compras)", fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "Fica em Ferramentas até marcar ✔ como pago",
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(checked = isPlanned, onCheckedChange = { isPlanned = it })
+                            }
+                        }
                     }
+                }
+
+                // Inline Validation Message (always visible near Guardar)
+                if (errorMsg != null) {
+                    Text(
+                        text = errorMsg!!,
+                        color = RedAction,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                    )
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -675,20 +840,23 @@ fun FinanceEntryEditorDialog(
                         .padding(horizontal = 20.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
                         Text("Cancelar")
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            val trimmedName = name.trim()
-                            if (trimmedName.isEmpty()) {
-                                errorMsg = "Informe o nome do lançamento"
-                                return@Button
-                            }
                             val totalMinor = computedTotalMinor
                             if (totalMinor == null || totalMinor <= 0L) {
                                 errorMsg = "Informe um valor válido maior que zero"
+                                return@Button
+                            }
+                            val trimmedName = name.trim()
+                            if (trimmedName.isEmpty()) {
+                                errorMsg = "Informe o nome do lançamento"
                                 return@Button
                             }
                             val catId = selectedCategoryId.ifBlank {
@@ -729,7 +897,9 @@ fun FinanceEntryEditorDialog(
                             onDismiss()
                         },
                         shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.testTag("save_finance_entry_btn")
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("save_finance_entry_btn")
                     ) {
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
