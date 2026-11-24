@@ -57,6 +57,7 @@ fun FinanceEntryEditorDialog(
     allCategories: List<FinanceCategory>,
     wallets: List<FinanceWallet> = emptyList(),
     initialIsPlanned: Boolean = false,
+    initialDateMillis: Long = System.currentTimeMillis(),
     onDismiss: () -> Unit,
     onSaveEntry: (entry: FinanceEntry, isNew: Boolean) -> Unit,
     onSaveCategory: (FinanceCategory) -> Unit,
@@ -107,7 +108,7 @@ fun FinanceEntryEditorDialog(
         )
     }
 
-    var dateMillis by remember { mutableLongStateOf(existingEntry?.dateMillis ?: System.currentTimeMillis()) }
+    var dateMillis by remember { mutableLongStateOf(existingEntry?.dateMillis ?: initialDateMillis) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     var selectedCurrency by remember {

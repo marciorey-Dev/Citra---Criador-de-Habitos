@@ -2286,16 +2286,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val (isDone, consecutiveDays) = repository.toggleHabitTodayWithConsecutiveDays(habit)
             com.example.widget.CitraWidgetHelper.updateAllWidgets(getApplication())
             if (isDone) {
-                val points = if (consecutiveDays >= 2) {
-                    (10 + (consecutiveDays - 1) * 5).coerceAtMost(100)
-                } else {
-                    10
-                }
-                preferencesManager.addHabitRewardPoints(points)
+                val consecutiveDays = consecutiveDays
                 val msg = if (consecutiveDays >= 2) {
-                    "🌟 $consecutiveDays dias seguidos em '${habit.title}'! +$points pts de recompensa pela constância!"
+                    "$consecutiveDays dias seguidos em '${habit.title}'! Consequência mantida!"
                 } else {
-                    "✨ '${habit.title}' cumprido hoje! +$points pts pela dedicação!"
+                    "'${habit.title}' cumprido hoje!"
                 }
                 _userMessage.emit(msg)
             } else {
@@ -3453,7 +3448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         title = "Orçamento atingido (100%)",
                         message = "A categoria $catName atingiu $pct% do orçamento mensal."
                     )
-                    _userMessage.emit("⚠️ Orçamento de $catName atingiu $pct%!")
+                    _userMessage.emit("Orçamento de $catName atingiu $pct%!")
                 } else if (pct >= 80 && b.alert80SentMonth != monthKey) {
                     database.financeDao().insertBudget(b.copy(alert80SentMonth = monthKey))
                     com.example.notifications.NotificationHelper.showInstantNotification(

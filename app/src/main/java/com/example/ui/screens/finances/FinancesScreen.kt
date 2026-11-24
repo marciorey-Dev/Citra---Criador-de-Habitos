@@ -173,7 +173,7 @@ fun FinancesScreen(
     var showWalletsDialog by remember { mutableStateOf(false) }
     var showBudgetsDialog by remember { mutableStateOf(false) }
     var showRecurringDialog by remember { mutableStateOf(false) }
-    var showExchangeRatesDialog by remember { mutableStateOf(false) }
+    var showCalculatorDialog by remember { mutableStateOf(false) }
     var completingPlannedEntry by remember { mutableStateOf<FinanceEntry?>(null) }
 
     val (periodStartMillis, periodEndMillis, periodTitle) = remember(
@@ -384,8 +384,6 @@ fun FinancesScreen(
                             budgetsCount = budgets.size,
                             activeRecurringCount = activeRecurringCount,
                             noteLinksCount = financeNoteLinks.size,
-                            exchangeRatesCount = exchangeRates.size,
-                            activeCurrency = activeCurrency,
                             onOpenWallets = { showWalletsDialog = true },
                             onOpenPlannedList = { showPlannedListDialog = true },
                             onOpenBudgets = { showBudgetsDialog = true },
@@ -397,7 +395,7 @@ fun FinancesScreen(
                                     showLinksManagerDialog = true
                                 }
                             },
-                            onOpenExchangeRates = { showExchangeRatesDialog = true },
+                            onOpenCalculator = { showCalculatorDialog = true },
                             onOpenFinanceSettings = onOpenFinanceSettings
                         )
                     }
@@ -485,6 +483,7 @@ fun FinancesScreen(
             allCategories = allCategories,
             wallets = wallets,
             initialIsPlanned = defaultEditorIsPlanned,
+            initialDateMillis = anchorMillis,
             onDismiss = {
                 showEntryEditor = false
                 editingEntry = null
@@ -645,13 +644,9 @@ fun FinancesScreen(
         )
     }
 
-    if (showExchangeRatesDialog) {
-        FinanceExchangeRatesDialog(
-            rates = exchangeRates,
-            defaultCurrency = activeCurrency,
-            onDismiss = { showExchangeRatesDialog = false },
-            onSaveRate = { from, to, rate -> viewModel.saveFinanceExchangeRate(from, to, rate) },
-            onDeleteRate = { viewModel.deleteFinanceExchangeRate(it) }
+    if (showCalculatorDialog) {
+        FinanceCalculatorDialog(
+            onDismiss = { showCalculatorDialog = false }
         )
     }
 

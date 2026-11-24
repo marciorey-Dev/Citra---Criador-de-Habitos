@@ -25,10 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Repeat
@@ -67,14 +67,12 @@ fun FinanceToolsTab(
     budgetsCount: Int,
     activeRecurringCount: Int,
     noteLinksCount: Int,
-    exchangeRatesCount: Int,
-    activeCurrency: FinanceCurrency,
     onOpenWallets: () -> Unit,
     onOpenPlannedList: () -> Unit,
     onOpenBudgets: () -> Unit,
     onOpenRecurring: () -> Unit,
     onOpenNoteLinksManager: () -> Unit,
-    onOpenExchangeRates: () -> Unit,
+    onOpenCalculator: () -> Unit,
     onOpenFinanceSettings: () -> Unit
 ) {
     LazyColumn(
@@ -162,13 +160,13 @@ fun FinanceToolsTab(
 
         item {
             FinanceToolCard(
-                icon = Icons.Default.CurrencyExchange,
-                accentColor = Color(0xFFFFB300),
-                title = "Câmbio & Moedas",
-                subtitle = "Taxas de conversão manuais e moeda padrão (${activeCurrency.code})",
-                counterBadge = if (exchangeRatesCount == 0) "Só padrão" else "$exchangeRatesCount taxa(s)",
-                testTag = "tool_card_exchange",
-                onClick = onOpenExchangeRates
+                icon = Icons.Default.Calculate,
+                accentColor = Color(0xFFE91E63),
+                title = "Calculadora Básica",
+                subtitle = "Contas de aritmética simples e cálculos rápidos",
+                counterBadge = "Calcular",
+                testTag = "tool_card_calculator",
+                onClick = onOpenCalculator
             )
         }
 

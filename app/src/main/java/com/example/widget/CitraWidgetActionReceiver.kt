@@ -33,7 +33,7 @@ class CitraWidgetActionReceiver : BroadcastReceiver() {
 
                                 Handler(Looper.getMainLooper()).post {
                                     val msg = if (isDone) {
-                                        "🍊 ${habit.title} concluído hoje!"
+                                        "${habit.title} concluído hoje!"
                                     } else {
                                         "${habit.title} desmarcado."
                                     }
